@@ -25,6 +25,12 @@ repos:
         language: system
         files: ^(.*\.go|go\.mod|go\.sum)$
         pass_filenames: false
+      - id: repository-policy-check
+        name: repository policy checks
+        entry: go test ./internal/test
+        language: system
+        files: \.go$
+        pass_filenames: false
 
   - repo: https://github.com/golangci/golangci-lint
     rev: v2.11.4
