@@ -1,0 +1,21 @@
+# Binaries and build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.out
+
+# Local Go workspace files
+go.work
+go.work.sum
+vendor/
+
+# Local tool caches
+.golangci-lint-cache/
+.pre-commit-cache/
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/

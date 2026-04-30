@@ -1,0 +1,26 @@
+version: "2"
+
+run:
+  timeout: 5m
+  relative-path-mode: gomod
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errcheck
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - revive
+  exclusions:
+    generated: strict
+    presets:
+      - comments
+      - common-false-positives
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
