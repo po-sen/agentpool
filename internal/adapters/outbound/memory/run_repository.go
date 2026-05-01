@@ -41,6 +41,28 @@ func (r *RunRepository) Save(_ context.Context, item *run.Run) error {
 	return nil
 }
 
+// SaveIfStatus stores a detached copy only when the stored status matches.
+func (r *RunRepository) SaveIfStatus(_ context.Context, item *run.Run, expected run.Status) (bool, error) {
+	if item == nil {
+		return false, errNilRun
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	stored, ok := r.runs[item.ID]
+	if !ok {
+		return false, outbound.ErrRunNotFound
+	}
+	if stored.Status != expected {
+		return false, nil
+	}
+
+	r.runs[item.ID] = item.Clone()
+
+	return true, nil
+}
+
 // FindByID returns a detached copy of a run by ID.
 func (r *RunRepository) FindByID(_ context.Context, id run.RunID) (*run.Run, error) {
 	r.mu.RLock()

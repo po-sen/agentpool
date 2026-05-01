@@ -10,6 +10,9 @@ import (
 )
 
 const defaultPollInterval = 200 * time.Millisecond
+const sandboxCleanupTimeout = 30 * time.Second
+
+var errRunStateChanged = errors.New("run state changed")
 
 // Worker processes queued runs through abstract outbound ports.
 type Worker struct {
@@ -123,12 +126,24 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 	}
 
 	if err := w.prepareRun(ctx, item); err != nil {
+		if errors.Is(err, errRunStateChanged) {
+			return nil
+		}
+
 		return w.failRun(ctx, item, err)
 	}
 	if err := w.startRun(ctx, item); err != nil {
+		if errors.Is(err, errRunStateChanged) {
+			return nil
+		}
+
 		return w.failRun(ctx, item, err)
 	}
 	if err := w.completeRun(ctx, item); err != nil {
+		if errors.Is(err, errRunStateChanged) {
+			return nil
+		}
+
 		return err
 	}
 
@@ -137,11 +152,16 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 
 func (w *Worker) prepareRun(ctx context.Context, item *run.Run) error {
 	now := w.clock()
+	expectedStatus := item.Status
 	if err := item.StartPreparing(now); err != nil {
 		return err
 	}
-	if err := w.repo.Save(ctx, item); err != nil {
+	saved, err := w.repo.SaveIfStatus(ctx, item, expectedStatus)
+	if err != nil {
 		return err
+	}
+	if !saved {
+		return errRunStateChanged
 	}
 	if err := w.publish(ctx, outbound.EventRunPreparing, item.ID, now); err != nil {
 		return err
@@ -187,15 +207,23 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run) error {
 		return err
 	}
 	defer func() {
-		_ = w.sandbox.Cleanup(ctx, sandbox)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sandboxCleanupTimeout)
+		defer cancel()
+
+		_ = w.sandbox.Cleanup(cleanupCtx, sandbox)
 	}()
 
 	now := w.clock()
+	expectedStatus := item.Status
 	if err := item.StartRunning(now); err != nil {
 		return err
 	}
-	if err := w.repo.Save(ctx, item); err != nil {
+	saved, err := w.repo.SaveIfStatus(ctx, item, expectedStatus)
+	if err != nil {
 		return err
+	}
+	if !saved {
+		return errRunStateChanged
 	}
 	if err := w.publish(ctx, outbound.EventRunStarted, item.ID, now); err != nil {
 		return err
@@ -212,11 +240,16 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run) error {
 
 func (w *Worker) completeRun(ctx context.Context, item *run.Run) error {
 	now := w.clock()
+	expectedStatus := item.Status
 	if err := item.Complete(now); err != nil {
 		return err
 	}
-	if err := w.repo.Save(ctx, item); err != nil {
+	saved, err := w.repo.SaveIfStatus(ctx, item, expectedStatus)
+	if err != nil {
 		return err
+	}
+	if !saved {
+		return errRunStateChanged
 	}
 
 	return w.publish(ctx, outbound.EventRunCompleted, item.ID, now)
@@ -224,11 +257,16 @@ func (w *Worker) completeRun(ctx context.Context, item *run.Run) error {
 
 func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error {
 	now := w.clock()
+	expectedStatus := item.Status
 	if err := item.Fail(now); err != nil {
 		return errors.Join(cause, err)
 	}
-	if err := w.repo.Save(ctx, item); err != nil {
+	saved, err := w.repo.SaveIfStatus(ctx, item, expectedStatus)
+	if err != nil {
 		return errors.Join(cause, err)
+	}
+	if !saved {
+		return nil
 	}
 	if err := w.publish(ctx, outbound.EventRunFailed, item.ID, now); err != nil {
 		return errors.Join(cause, err)

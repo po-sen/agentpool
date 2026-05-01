@@ -52,6 +52,46 @@ func TestRunRepositoryFindByIDReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestRunRepositorySaveIfStatusUpdatesOnlyExpectedStatus(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.NewRunRepository()
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+
+	item.Status = run.StatusRunning
+	saved, err := repo.SaveIfStatus(ctx, item, run.StatusQueued)
+	if err != nil {
+		t.Fatalf("save if queued: %v", err)
+	}
+	if !saved {
+		t.Fatal("save if queued = false, want true")
+	}
+
+	item.Status = run.StatusCompleted
+	saved, err = repo.SaveIfStatus(ctx, item, run.StatusQueued)
+	if err != nil {
+		t.Fatalf("save if queued again: %v", err)
+	}
+	if saved {
+		t.Fatal("save if queued after status changed = true, want false")
+	}
+
+	stored, err := repo.FindByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("find stored run: %v", err)
+	}
+	if stored.Status != run.StatusRunning {
+		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusRunning)
+	}
+}
+
 func TestRunRepositoryListOrdersByCreatedAtThenID(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.NewRunRepository()

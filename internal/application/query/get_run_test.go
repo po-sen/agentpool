@@ -64,6 +64,20 @@ func (r *fakeRunRepository) Save(_ context.Context, item *run.Run) error {
 	return nil
 }
 
+func (r *fakeRunRepository) SaveIfStatus(_ context.Context, item *run.Run, expected run.Status) (bool, error) {
+	stored, ok := r.runs[item.ID]
+	if !ok {
+		return false, outbound.ErrRunNotFound
+	}
+	if stored.Status != expected {
+		return false, nil
+	}
+
+	r.runs[item.ID] = item.Clone()
+
+	return true, nil
+}
+
 func (r *fakeRunRepository) FindByID(_ context.Context, id run.RunID) (*run.Run, error) {
 	item, ok := r.runs[id]
 	if !ok {

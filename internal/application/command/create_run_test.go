@@ -69,7 +69,8 @@ func (g fixedIDGenerator) NewRunID() (run.RunID, error) {
 }
 
 type fakeRunRepository struct {
-	items map[run.RunID]*run.Run
+	items              map[run.RunID]*run.Run
+	beforeSaveIfStatus func()
 }
 
 func newFakeRunRepository() *fakeRunRepository {
@@ -82,6 +83,24 @@ func (r *fakeRunRepository) Save(_ context.Context, item *run.Run) error {
 	r.items[item.ID] = item.Clone()
 
 	return nil
+}
+
+func (r *fakeRunRepository) SaveIfStatus(_ context.Context, item *run.Run, expected run.Status) (bool, error) {
+	if r.beforeSaveIfStatus != nil {
+		r.beforeSaveIfStatus()
+	}
+
+	stored, ok := r.items[item.ID]
+	if !ok {
+		return false, outbound.ErrRunNotFound
+	}
+	if stored.Status != expected {
+		return false, nil
+	}
+
+	r.items[item.ID] = item.Clone()
+
+	return true, nil
 }
 
 func (r *fakeRunRepository) FindByID(_ context.Context, id run.RunID) (*run.Run, error) {

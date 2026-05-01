@@ -66,12 +66,17 @@ func (h *CancelRunHandler) CancelRun(ctx context.Context, command inbound.Cancel
 		return inbound.RunView{}, err
 	}
 
+	expectedStatus := found.Status
 	now := h.clock()
 	if err := found.Cancel(now); err != nil {
 		return inbound.RunView{}, inbound.NewConflictError(err)
 	}
-	if err := h.repo.Save(ctx, found); err != nil {
+	saved, err := h.repo.SaveIfStatus(ctx, found, expectedStatus)
+	if err != nil {
 		return inbound.RunView{}, err
+	}
+	if !saved {
+		return inbound.RunView{}, inbound.NewConflictError(run.ErrInvalidTransition)
 	}
 	if err := h.events.Publish(ctx, outbound.Event{
 		Type:       outbound.EventRunCancelled,

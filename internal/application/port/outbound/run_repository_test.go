@@ -20,6 +20,9 @@ func TestRunRepositoryContract(t *testing.T) {
 	if err := repo.Save(ctx, item); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
+	if ok, err := repo.SaveIfStatus(ctx, item, run.StatusQueued); err != nil || !ok {
+		t.Fatalf("SaveIfStatus() = (%v, %v), want (true, nil)", ok, err)
+	}
 
 	found, err := repo.FindByID(ctx, item.ID)
 	if err != nil {
@@ -50,6 +53,16 @@ func (r *fakeRunRepository) Save(_ context.Context, item *run.Run) error {
 	r.item = item
 
 	return nil
+}
+
+func (r *fakeRunRepository) SaveIfStatus(_ context.Context, item *run.Run, expected run.Status) (bool, error) {
+	if r.item == nil || r.item.Status != expected {
+		return false, nil
+	}
+
+	r.item = item
+
+	return true, nil
 }
 
 func (r *fakeRunRepository) FindByID(context.Context, run.RunID) (*run.Run, error) {
