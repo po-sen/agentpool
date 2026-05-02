@@ -9,7 +9,7 @@ It provides a runtime server where users can submit agent tasks, queue runs, let
 AgentPool is currently an early MVP scaffold.
 
 - Storage and queue are in-memory only.
-- Runs complete through noop adapters.
+- Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - There is no real AI model execution yet.
 - There is no real GitHub PR creation yet.
@@ -102,7 +102,7 @@ go run ./cmd/agentpool version
 - `agentpool worker`: starts only the worker process.
 - `agentpool version`: prints version info.
 
-`server` and `worker` are separate process modes intended for future persistent adapters. With the current in-memory repository and queue, separate processes do not share state.
+`server` and `worker` are separate process modes intended for future persistent infrastructure implementations. With the current in-memory repository and queue, separate processes do not share state.
 
 ## HTTP API
 
@@ -152,6 +152,16 @@ waiting_approval
 failed
 cancelled
 ```
+
+## Architecture
+
+- `internal/domain`: core business rules for runs and approvals.
+- `internal/application`: use cases, worker workflows, and ports.
+- `internal/delivery`: HTTP and CLI entrypoints.
+- `internal/infrastructure`: concrete technology implementations such as memory persistence and noop integrations.
+- `internal/bootstrap`: dependency wiring.
+- `internal/runtime`: product-agnostic process helpers.
+- `internal/test`: repository policy tests.
 
 ## Development
 

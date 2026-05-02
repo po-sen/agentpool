@@ -5,19 +5,19 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/po-sen/agentpool/internal/adapters/inbound/httpapi"
-	"github.com/po-sen/agentpool/internal/adapters/outbound/agent"
-	"github.com/po-sen/agentpool/internal/adapters/outbound/events"
-	"github.com/po-sen/agentpool/internal/adapters/outbound/git"
-	"github.com/po-sen/agentpool/internal/adapters/outbound/ids"
-	"github.com/po-sen/agentpool/internal/adapters/outbound/memory"
-	"github.com/po-sen/agentpool/internal/adapters/outbound/policy"
-	"github.com/po-sen/agentpool/internal/adapters/outbound/sandbox"
-	"github.com/po-sen/agentpool/internal/adapters/outbound/secrets"
 	"github.com/po-sen/agentpool/internal/application/command"
 	"github.com/po-sen/agentpool/internal/application/query"
 	"github.com/po-sen/agentpool/internal/application/workflow"
 	"github.com/po-sen/agentpool/internal/config"
+	"github.com/po-sen/agentpool/internal/delivery/httpapi"
+	agentnoop "github.com/po-sen/agentpool/internal/infrastructure/agent/noop"
+	eventnoop "github.com/po-sen/agentpool/internal/infrastructure/event/noop"
+	gitnoop "github.com/po-sen/agentpool/internal/infrastructure/git/noop"
+	"github.com/po-sen/agentpool/internal/infrastructure/id/crypto"
+	"github.com/po-sen/agentpool/internal/infrastructure/persistence/memory"
+	"github.com/po-sen/agentpool/internal/infrastructure/policy/allowall"
+	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
+	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
 )
@@ -37,8 +37,8 @@ func New(version string, logOutput io.Writer) *App {
 
 	runRepo := memory.NewRunRepository()
 	runQueue := memory.NewRunQueue()
-	eventPublisher := events.NewNoopPublisher()
-	idGenerator := ids.NewCryptoGenerator()
+	eventPublisher := eventnoop.NewPublisher()
+	idGenerator := crypto.NewGenerator()
 
 	createRunHandler := command.NewCreateRunHandler(
 		runRepo,
@@ -54,11 +54,11 @@ func New(version string, logOutput io.Writer) *App {
 	getRunHandler := query.NewGetRunHandler(runRepo)
 	listRunsHandler := query.NewListRunsHandler(runRepo)
 
-	sandboxProvider := sandbox.NewNoopProvider()
-	agentExecutor := agent.NewNoopExecutor()
-	gitProvider := git.NewNoopProvider()
-	policyDecision := policy.NewAllowAllDecision()
-	secretBroker := secrets.NewNoopBroker()
+	sandboxProvider := sandboxnoop.NewProvider()
+	agentExecutor := agentnoop.NewExecutor()
+	gitProvider := gitnoop.NewProvider()
+	policyDecision := allowall.NewDecision()
+	secretBroker := secretnoop.NewBroker()
 
 	worker := workflow.NewWorker(workflow.WorkerDependencies{
 		Queue:      runQueue,

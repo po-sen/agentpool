@@ -14,10 +14,10 @@ func TestRequiredPackagesHaveUnitTests(t *testing.T) {
 		modulePath + "/internal/application/command",
 		modulePath + "/internal/application/query",
 		modulePath + "/internal/application/workflow",
-		modulePath + "/internal/adapters/inbound/",
-		modulePath + "/internal/adapters/outbound/",
 		modulePath + "/internal/bootstrap",
 		modulePath + "/internal/config",
+		modulePath + "/internal/delivery/",
+		modulePath + "/internal/infrastructure/",
 		modulePath + "/internal/runtime/",
 	}
 

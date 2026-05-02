@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/po-sen/agentpool/internal/adapters/inbound/cli"
 	"github.com/po-sen/agentpool/internal/bootstrap"
+	"github.com/po-sen/agentpool/internal/delivery/cli"
 )
 
 var version = "dev"

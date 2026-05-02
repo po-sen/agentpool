@@ -89,6 +89,13 @@ func moduleRoot(t *testing.T) string {
 
 func isForbiddenImport(imported string, forbidden []string) bool {
 	for _, prefix := range forbidden {
+		if strings.HasSuffix(prefix, "/") {
+			if strings.HasPrefix(imported, prefix) {
+				return true
+			}
+
+			continue
+		}
 		if imported == prefix || strings.HasPrefix(imported, fmt.Sprintf("%s/", prefix)) {
 			return true
 		}
