@@ -163,6 +163,8 @@ cancelled
 - `internal/runtime`: product-agnostic process helpers.
 - `internal/test`: repository policy tests.
 
+Delivery depends only on application inbound ports. Infrastructure implements domain and application outbound contracts. Bootstrap is the only place that wires concrete implementations.
+
 ## Development
 
 Run the standard checks:

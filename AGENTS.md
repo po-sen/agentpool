@@ -74,7 +74,8 @@ Unit tests are mandatory for domain packages, application port packages, applica
 
 Keep DTO ownership explicit:
 
-- Adapter DTOs describe external formats such as HTTP JSON, DB rows, or third-party API payloads.
+- Delivery DTOs describe external request/response formats such as HTTP JSON.
+- Infrastructure DTOs describe storage records or third-party API payloads.
 - Application DTOs describe use case input/output such as commands, queries, and views.
 - Domain models protect business state and invariants; do not expose them directly as HTTP responses or request bodies.
 
