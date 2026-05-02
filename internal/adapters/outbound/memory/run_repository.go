@@ -18,7 +18,9 @@ type RunRepository struct {
 	runs map[run.RunID]*run.Run
 }
 
-var _ outbound.RunRepository = (*RunRepository)(nil)
+var _ run.Repository = (*RunRepository)(nil)
+var _ outbound.RunStateStore = (*RunRepository)(nil)
+var _ outbound.RunReader = (*RunRepository)(nil)
 
 // NewRunRepository creates an empty in-memory run repository.
 func NewRunRepository() *RunRepository {
@@ -52,7 +54,7 @@ func (r *RunRepository) SaveIfStatus(_ context.Context, item *run.Run, expected 
 
 	stored, ok := r.runs[item.ID]
 	if !ok {
-		return false, outbound.ErrRunNotFound
+		return false, run.ErrRunNotFound
 	}
 	if stored.Status != expected {
 		return false, nil
@@ -70,7 +72,7 @@ func (r *RunRepository) FindByID(_ context.Context, id run.RunID) (*run.Run, err
 
 	item, ok := r.runs[id]
 	if !ok {
-		return nil, outbound.ErrRunNotFound
+		return nil, run.ErrRunNotFound
 	}
 
 	return item.Clone(), nil

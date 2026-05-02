@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/po-sen/agentpool/internal/application/port/inbound"
-	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
@@ -13,11 +12,11 @@ var _ inbound.GetRunUseCase = (*GetRunHandler)(nil)
 
 // GetRunHandler handles run lookup queries.
 type GetRunHandler struct {
-	repo outbound.RunRepository
+	repo run.Repository
 }
 
 // NewGetRunHandler wires the get-run query handler.
-func NewGetRunHandler(repo outbound.RunRepository) *GetRunHandler {
+func NewGetRunHandler(repo run.Repository) *GetRunHandler {
 	return &GetRunHandler{
 		repo: repo,
 	}
@@ -32,7 +31,7 @@ func (h *GetRunHandler) GetRun(ctx context.Context, query inbound.GetRunQuery) (
 
 	found, err := h.repo.FindByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, outbound.ErrRunNotFound) {
+		if errors.Is(err, run.ErrRunNotFound) {
 			return inbound.RunView{}, inbound.ErrRunNotFound
 		}
 

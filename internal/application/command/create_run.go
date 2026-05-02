@@ -13,7 +13,7 @@ var _ inbound.CreateRunUseCase = (*CreateRunHandler)(nil)
 
 // CreateRunHandler handles run creation commands.
 type CreateRunHandler struct {
-	repo   outbound.RunRepository
+	repo   run.Repository
 	queue  outbound.RunQueue
 	events outbound.EventPublisher
 	ids    outbound.IDGenerator
@@ -32,7 +32,7 @@ func WithCreateRunClock(clock func() time.Time) CreateRunOption {
 
 // NewCreateRunHandler wires the create-run command handler.
 func NewCreateRunHandler(
-	repo outbound.RunRepository,
+	repo run.Repository,
 	queue outbound.RunQueue,
 	events outbound.EventPublisher,
 	ids outbound.IDGenerator,

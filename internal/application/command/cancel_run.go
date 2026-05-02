@@ -14,9 +14,10 @@ var _ inbound.CancelRunUseCase = (*CancelRunHandler)(nil)
 
 // CancelRunHandler handles run cancellation commands.
 type CancelRunHandler struct {
-	repo   outbound.RunRepository
-	events outbound.EventPublisher
-	clock  func() time.Time
+	repo       run.Repository
+	stateStore outbound.RunStateStore
+	events     outbound.EventPublisher
+	clock      func() time.Time
 }
 
 // CancelRunOption configures a CancelRunHandler.
@@ -31,13 +32,15 @@ func WithCancelRunClock(clock func() time.Time) CancelRunOption {
 
 // NewCancelRunHandler wires the cancel-run command handler.
 func NewCancelRunHandler(
-	repo outbound.RunRepository,
+	repo run.Repository,
+	stateStore outbound.RunStateStore,
 	events outbound.EventPublisher,
 	options ...CancelRunOption,
 ) *CancelRunHandler {
 	handler := &CancelRunHandler{
-		repo:   repo,
-		events: events,
+		repo:       repo,
+		stateStore: stateStore,
+		events:     events,
 		clock: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -59,7 +62,7 @@ func (h *CancelRunHandler) CancelRun(ctx context.Context, command inbound.Cancel
 
 	found, err := h.repo.FindByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, outbound.ErrRunNotFound) {
+		if errors.Is(err, run.ErrRunNotFound) {
 			return inbound.RunView{}, inbound.ErrRunNotFound
 		}
 
@@ -71,7 +74,7 @@ func (h *CancelRunHandler) CancelRun(ctx context.Context, command inbound.Cancel
 	if err := found.Cancel(now); err != nil {
 		return inbound.RunView{}, inbound.NewConflictError(err)
 	}
-	saved, err := h.repo.SaveIfStatus(ctx, found, expectedStatus)
+	saved, err := h.stateStore.SaveIfStatus(ctx, found, expectedStatus)
 	if err != nil {
 		return inbound.RunView{}, err
 	}

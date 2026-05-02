@@ -8,9 +8,6 @@ import (
 )
 
 func TestOutboundSentinelErrors(t *testing.T) {
-	if !errors.Is(outbound.ErrRunNotFound, outbound.ErrRunNotFound) {
-		t.Fatal("ErrRunNotFound should match itself")
-	}
 	if !errors.Is(outbound.ErrRunQueueEmpty, outbound.ErrRunQueueEmpty) {
 		t.Fatal("ErrRunQueueEmpty should match itself")
 	}

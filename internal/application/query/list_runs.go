@@ -11,19 +11,19 @@ var _ inbound.ListRunsUseCase = (*ListRunsHandler)(nil)
 
 // ListRunsHandler handles run list queries.
 type ListRunsHandler struct {
-	repo outbound.RunRepository
+	reader outbound.RunReader
 }
 
 // NewListRunsHandler wires the list-runs query handler.
-func NewListRunsHandler(repo outbound.RunRepository) *ListRunsHandler {
+func NewListRunsHandler(reader outbound.RunReader) *ListRunsHandler {
 	return &ListRunsHandler{
-		repo: repo,
+		reader: reader,
 	}
 }
 
 // ListRuns returns all known runs.
 func (h *ListRunsHandler) ListRuns(ctx context.Context) ([]inbound.RunView, error) {
-	items, err := h.repo.List(ctx)
+	items, err := h.reader.List(ctx)
 	if err != nil {
 		return nil, err
 	}

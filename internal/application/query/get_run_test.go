@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/po-sen/agentpool/internal/application/port/inbound"
-	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/application/query"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
@@ -64,24 +63,10 @@ func (r *fakeRunRepository) Save(_ context.Context, item *run.Run) error {
 	return nil
 }
 
-func (r *fakeRunRepository) SaveIfStatus(_ context.Context, item *run.Run, expected run.Status) (bool, error) {
-	stored, ok := r.runs[item.ID]
-	if !ok {
-		return false, outbound.ErrRunNotFound
-	}
-	if stored.Status != expected {
-		return false, nil
-	}
-
-	r.runs[item.ID] = item.Clone()
-
-	return true, nil
-}
-
 func (r *fakeRunRepository) FindByID(_ context.Context, id run.RunID) (*run.Run, error) {
 	item, ok := r.runs[id]
 	if !ok {
-		return nil, outbound.ErrRunNotFound
+		return nil, run.ErrRunNotFound
 	}
 
 	return item.Clone(), nil

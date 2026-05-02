@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/po-sen/agentpool/internal/adapters/outbound/memory"
-	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
@@ -47,8 +46,8 @@ func TestRunRepositoryFindByIDReturnsNotFound(t *testing.T) {
 	repo := memory.NewRunRepository()
 
 	_, err := repo.FindByID(context.Background(), "run_missing")
-	if !errors.Is(err, outbound.ErrRunNotFound) {
-		t.Fatalf("find by ID error = %v, want %v", err, outbound.ErrRunNotFound)
+	if !errors.Is(err, run.ErrRunNotFound) {
+		t.Fatalf("find by ID error = %v, want %v", err, run.ErrRunNotFound)
 	}
 }
 

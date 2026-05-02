@@ -14,7 +14,7 @@ agentpool is a Go project with module path `github.com/po-sen/agentpool`.
 - `internal/application/query/`: read-only application use cases.
 - `internal/application/workflow/`: worker and lifecycle workflows.
 - `internal/application/port/inbound/`: use case contracts and application command/query/view DTOs exposed to inbound adapters. These DTOs must not have JSON, HTTP, DB, or external API tags.
-- `internal/application/port/outbound/`: external capability contracts required by the application.
+- `internal/application/port/outbound/`: external capability contracts required by the application. Do not put a vague `RunRepository` here.
 - `internal/adapters/inbound/`: inbound adapters such as HTTP and CLI.
 - `internal/adapters/outbound/`: outbound port implementations such as memory, noop integrations, and ID generation.
 - `internal/runtime/`: process/runtime helpers such as HTTP server lifecycle and logging. Runtime helpers must stay product-agnostic and must not implement business rules.
@@ -60,7 +60,15 @@ Domain imports are allowlisted. Production code may directly import `internal/do
 
 Domain concepts are isolated from each other. A package under `internal/domain/<concept>` must not import another `internal/domain/<other-concept>` package. Aggregates should reference other aggregates by ID/value, not by importing the other aggregate package. Do not add `internal/domain/shared`; if a value is needed across concepts, keep it as a primitive or define it at the application boundary until a stronger domain boundary is proven.
 
-Application dependencies are directed. `application/port/inbound` and `application/port/outbound` must stay implementation-free and must not import command, query, or workflow packages. `application/command`, `application/query`, and `application/workflow` must not import each other. They may depend on application ports. Keep domain-to-view mapping local to the command or query package that returns the view; do not create a shared application helper package for it.
+Run persistence roles are intentionally split:
+
+- `internal/domain/run.Repository`: pure DDD repository for the `Run` aggregate. It owns only `Save` and `FindByID`. Do not add list views, pagination, filters, queue behavior, status-conditional persistence, DB transaction semantics, or outbox behavior to it.
+- `internal/application/port/outbound.RunStateStore`: application persistence coordination port. It owns `SaveIfStatus` for optimistic lifecycle writes.
+- `internal/application/port/outbound.RunReader`: read/query port. It owns `List`.
+- `internal/application/port/outbound.RunQueue`: worker dispatch queue. It owns `Enqueue` and `Dequeue`.
+- Concrete adapters may implement several small interfaces with one type when appropriate. `memory.RunRepository` is allowed as a concrete adapter name because it implements `run.Repository`, `outbound.RunStateStore`, and `outbound.RunReader`.
+
+Application dependencies are directed. `application/port/inbound` and `application/port/outbound` must stay implementation-free and must not import command, query, or workflow packages. `application/command`, `application/query`, and `application/workflow` must not import each other. They may depend on application ports and domain repository interfaces. Keep domain-to-view mapping local to the command or query package that returns the view; do not create a shared application helper package for it.
 
 Unit tests are mandatory for domain packages, application port packages, application command/query/workflow packages, inbound adapters, outbound adapters, bootstrap, config, and runtime helpers. Every production `.go` file under `internal/` must have a same-directory companion test file with the same basename, such as `run_queue.go` and `run_queue_test.go`; `internal/test` is the repository policy-test exception. `cmd/agentpool` stays thin and is exempt unless business logic is added there. Application unit tests must use test-local fakes for ports instead of importing concrete adapters. Test imports are checked by `internal/test/import_policy_test.go`.
 

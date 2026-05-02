@@ -48,6 +48,7 @@ func New(version string, logOutput io.Writer) *App {
 	)
 	cancelRunHandler := command.NewCancelRunHandler(
 		runRepo,
+		runRepo,
 		eventPublisher,
 	)
 	getRunHandler := query.NewGetRunHandler(runRepo)
@@ -60,14 +61,15 @@ func New(version string, logOutput io.Writer) *App {
 	secretBroker := secrets.NewNoopBroker()
 
 	worker := workflow.NewWorker(workflow.WorkerDependencies{
-		Queue:   runQueue,
-		Repo:    runRepo,
-		Events:  eventPublisher,
-		Sandbox: sandboxProvider,
-		Agent:   agentExecutor,
-		Git:     gitProvider,
-		Policy:  policyDecision,
-		Secrets: secretBroker,
+		Queue:      runQueue,
+		Repo:       runRepo,
+		StateStore: runRepo,
+		Events:     eventPublisher,
+		Sandbox:    sandboxProvider,
+		Agent:      agentExecutor,
+		Git:        gitProvider,
+		Policy:     policyDecision,
+		Secrets:    secretBroker,
 	})
 
 	router := httpapi.NewRouter(httpapi.Dependencies{

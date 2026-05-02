@@ -241,7 +241,7 @@ func TestWorkerProcessOneCleansSandboxWithNonCancelledContext(t *testing.T) {
 
 func newWorker(
 	queue outbound.RunQueue,
-	repo outbound.RunRepository,
+	repo *fakeRunRepository,
 	publisher outbound.EventPublisher,
 	now time.Time,
 ) *workflow.Worker {
@@ -258,7 +258,7 @@ func newWorker(
 
 func newWorkerWithPorts(
 	queue outbound.RunQueue,
-	repo outbound.RunRepository,
+	repo *fakeRunRepository,
 	publisher outbound.EventPublisher,
 	now time.Time,
 	sandbox outbound.SandboxProvider,
@@ -267,14 +267,15 @@ func newWorkerWithPorts(
 ) *workflow.Worker {
 	return workflow.NewWorker(
 		workflow.WorkerDependencies{
-			Queue:   queue,
-			Repo:    repo,
-			Events:  publisher,
-			Sandbox: sandbox,
-			Agent:   agent,
-			Git:     git,
-			Policy:  fakePolicyDecision{},
-			Secrets: fakeSecretBroker{},
+			Queue:      queue,
+			Repo:       repo,
+			StateStore: repo,
+			Events:     publisher,
+			Sandbox:    sandbox,
+			Agent:      agent,
+			Git:        git,
+			Policy:     fakePolicyDecision{},
+			Secrets:    fakeSecretBroker{},
 		},
 		workflow.WithClock(func() time.Time { return now }),
 	)
@@ -299,7 +300,7 @@ func (r *fakeRunRepository) Save(_ context.Context, item *run.Run) error {
 func (r *fakeRunRepository) SaveIfStatus(_ context.Context, item *run.Run, expected run.Status) (bool, error) {
 	stored, ok := r.items[item.ID]
 	if !ok {
-		return false, outbound.ErrRunNotFound
+		return false, run.ErrRunNotFound
 	}
 	if stored.Status != expected {
 		return false, nil
@@ -313,19 +314,10 @@ func (r *fakeRunRepository) SaveIfStatus(_ context.Context, item *run.Run, expec
 func (r *fakeRunRepository) FindByID(_ context.Context, id run.RunID) (*run.Run, error) {
 	item, ok := r.items[id]
 	if !ok {
-		return nil, outbound.ErrRunNotFound
+		return nil, run.ErrRunNotFound
 	}
 
 	return item.Clone(), nil
-}
-
-func (r *fakeRunRepository) List(context.Context) ([]*run.Run, error) {
-	items := make([]*run.Run, 0, len(r.items))
-	for _, item := range r.items {
-		items = append(items, item.Clone())
-	}
-
-	return items, nil
 }
 
 type fakeRunQueue struct {

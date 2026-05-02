@@ -14,6 +14,7 @@ func TestRunSentinelErrors(t *testing.T) {
 		run.ErrPromptTooLong,
 		run.ErrInvalidTransition,
 		run.ErrUnknownStatus,
+		run.ErrRunNotFound,
 	}
 
 	for _, err := range tests {

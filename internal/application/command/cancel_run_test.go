@@ -28,6 +28,7 @@ func TestCancelRunMarksRunCancelled(t *testing.T) {
 
 	handler := command.NewCancelRunHandler(
 		repo,
+		repo,
 		publisher,
 		command.WithCancelRunClock(func() time.Time { return now.Add(time.Second) }),
 	)
@@ -71,6 +72,7 @@ func TestCancelRunReturnsConflictWhenStoredStatusChanges(t *testing.T) {
 	}
 
 	handler := command.NewCancelRunHandler(
+		repo,
 		repo,
 		publisher,
 		command.WithCancelRunClock(func() time.Time { return now.Add(time.Second) }),

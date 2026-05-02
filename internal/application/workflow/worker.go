@@ -17,7 +17,8 @@ var errRunStateChanged = errors.New("run state changed")
 // Worker processes queued runs through abstract outbound ports.
 type Worker struct {
 	queue        outbound.RunQueue
-	repo         outbound.RunRepository
+	repo         run.Repository
+	stateStore   outbound.RunStateStore
 	events       outbound.EventPublisher
 	sandbox      outbound.SandboxProvider
 	agent        outbound.AgentExecutor
@@ -33,14 +34,15 @@ type WorkerOption func(*Worker)
 
 // WorkerDependencies groups outbound ports required by the worker workflow.
 type WorkerDependencies struct {
-	Queue   outbound.RunQueue
-	Repo    outbound.RunRepository
-	Events  outbound.EventPublisher
-	Sandbox outbound.SandboxProvider
-	Agent   outbound.AgentExecutor
-	Git     outbound.GitProvider
-	Policy  outbound.PolicyDecisionPort
-	Secrets outbound.SecretBroker
+	Queue      outbound.RunQueue
+	Repo       run.Repository
+	StateStore outbound.RunStateStore
+	Events     outbound.EventPublisher
+	Sandbox    outbound.SandboxProvider
+	Agent      outbound.AgentExecutor
+	Git        outbound.GitProvider
+	Policy     outbound.PolicyDecisionPort
+	Secrets    outbound.SecretBroker
 }
 
 // WithClock injects a time source for tests.
@@ -65,6 +67,7 @@ func NewWorker(
 	worker := &Worker{
 		queue:        deps.Queue,
 		repo:         deps.Repo,
+		stateStore:   deps.StateStore,
 		events:       deps.Events,
 		sandbox:      deps.Sandbox,
 		agent:        deps.Agent,
@@ -161,7 +164,7 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) error {
 	if err := item.StartPreparing(now); err != nil {
 		return err
 	}
-	saved, err := w.repo.SaveIfStatus(ctx, item, expectedStatus)
+	saved, err := w.stateStore.SaveIfStatus(ctx, item, expectedStatus)
 	if err != nil {
 		return err
 	}
@@ -223,7 +226,7 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run) error {
 	if err := item.StartRunning(now); err != nil {
 		return err
 	}
-	saved, err := w.repo.SaveIfStatus(ctx, item, expectedStatus)
+	saved, err := w.stateStore.SaveIfStatus(ctx, item, expectedStatus)
 	if err != nil {
 		return err
 	}
@@ -249,7 +252,7 @@ func (w *Worker) completeRun(ctx context.Context, item *run.Run) error {
 	if err := item.Complete(now); err != nil {
 		return err
 	}
-	saved, err := w.repo.SaveIfStatus(ctx, item, expectedStatus)
+	saved, err := w.stateStore.SaveIfStatus(ctx, item, expectedStatus)
 	if err != nil {
 		return err
 	}
@@ -266,7 +269,7 @@ func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error 
 	if err := item.Fail(now); err != nil {
 		return errors.Join(cause, err)
 	}
-	saved, err := w.repo.SaveIfStatus(ctx, item, expectedStatus)
+	saved, err := w.stateStore.SaveIfStatus(ctx, item, expectedStatus)
 	if err != nil {
 		return errors.Join(cause, err)
 	}

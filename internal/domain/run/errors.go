@@ -16,3 +16,6 @@ var ErrInvalidTransition = errors.New("invalid run status transition")
 
 // ErrUnknownStatus is returned when a transition targets an unsupported status.
 var ErrUnknownStatus = errors.New("unknown run status")
+
+// ErrRunNotFound is returned when a run ID does not exist.
+var ErrRunNotFound = errors.New("run not found")
