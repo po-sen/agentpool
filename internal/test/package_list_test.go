@@ -15,6 +15,7 @@ import (
 const modulePath = "github.com/po-sen/agentpool"
 
 type listedPackage struct {
+	Dir          string
 	ImportPath   string
 	GoFiles      []string
 	Imports      []string

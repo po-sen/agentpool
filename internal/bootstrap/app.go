@@ -59,16 +59,16 @@ func New(version string, logOutput io.Writer) *App {
 	policyDecision := policy.NewAllowAllDecision()
 	secretBroker := secrets.NewNoopBroker()
 
-	worker := workflow.NewWorker(
-		runQueue,
-		runRepo,
-		eventPublisher,
-		sandboxProvider,
-		agentExecutor,
-		gitProvider,
-		policyDecision,
-		secretBroker,
-	)
+	worker := workflow.NewWorker(workflow.WorkerDependencies{
+		Queue:   runQueue,
+		Repo:    runRepo,
+		Events:  eventPublisher,
+		Sandbox: sandboxProvider,
+		Agent:   agentExecutor,
+		Git:     gitProvider,
+		Policy:  policyDecision,
+		Secrets: secretBroker,
+	})
 
 	router := httpapi.NewRouter(httpapi.Dependencies{
 		CreateRun: createRunHandler,

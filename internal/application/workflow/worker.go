@@ -31,6 +31,18 @@ type Worker struct {
 // WorkerOption configures a Worker.
 type WorkerOption func(*Worker)
 
+// WorkerDependencies groups outbound ports required by the worker workflow.
+type WorkerDependencies struct {
+	Queue   outbound.RunQueue
+	Repo    outbound.RunRepository
+	Events  outbound.EventPublisher
+	Sandbox outbound.SandboxProvider
+	Agent   outbound.AgentExecutor
+	Git     outbound.GitProvider
+	Policy  outbound.PolicyDecisionPort
+	Secrets outbound.SecretBroker
+}
+
 // WithClock injects a time source for tests.
 func WithClock(clock func() time.Time) WorkerOption {
 	return func(worker *Worker) {
@@ -47,25 +59,18 @@ func WithPollInterval(interval time.Duration) WorkerOption {
 
 // NewWorker wires outbound ports needed by the worker workflow.
 func NewWorker(
-	queue outbound.RunQueue,
-	repo outbound.RunRepository,
-	events outbound.EventPublisher,
-	sandbox outbound.SandboxProvider,
-	agent outbound.AgentExecutor,
-	git outbound.GitProvider,
-	policy outbound.PolicyDecisionPort,
-	secrets outbound.SecretBroker,
+	deps WorkerDependencies,
 	options ...WorkerOption,
 ) *Worker {
 	worker := &Worker{
-		queue:        queue,
-		repo:         repo,
-		events:       events,
-		sandbox:      sandbox,
-		agent:        agent,
-		git:          git,
-		policy:       policy,
-		secrets:      secrets,
+		queue:        deps.Queue,
+		repo:         deps.Repo,
+		events:       deps.Events,
+		sandbox:      deps.Sandbox,
+		agent:        deps.Agent,
+		git:          deps.Git,
+		policy:       deps.Policy,
+		secrets:      deps.Secrets,
 		pollInterval: defaultPollInterval,
 		clock: func() time.Time {
 			return time.Now().UTC()

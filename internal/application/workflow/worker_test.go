@@ -266,14 +266,16 @@ func newWorkerWithPorts(
 	git outbound.GitProvider,
 ) *workflow.Worker {
 	return workflow.NewWorker(
-		queue,
-		repo,
-		publisher,
-		sandbox,
-		agent,
-		git,
-		fakePolicyDecision{},
-		fakeSecretBroker{},
+		workflow.WorkerDependencies{
+			Queue:   queue,
+			Repo:    repo,
+			Events:  publisher,
+			Sandbox: sandbox,
+			Agent:   agent,
+			Git:     git,
+			Policy:  fakePolicyDecision{},
+			Secrets: fakeSecretBroker{},
+		},
 		workflow.WithClock(func() time.Time { return now }),
 	)
 }
