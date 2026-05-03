@@ -57,6 +57,7 @@ func TestProductionImportsStayWithinArchitectureBoundaries(t *testing.T) {
 			forbiddenImports: []string{
 				modulePath + "/internal/domain",
 				modulePath + "/internal/application/port/outbound",
+				modulePath + "/internal/application/agent",
 				modulePath + "/internal/application/command",
 				modulePath + "/internal/application/query",
 				modulePath + "/internal/application/workflow",
@@ -67,6 +68,7 @@ func TestProductionImportsStayWithinArchitectureBoundaries(t *testing.T) {
 			packagePrefix: modulePath + "/internal/application/port/outbound",
 			forbiddenImports: []string{
 				modulePath + "/internal/application/port/inbound",
+				modulePath + "/internal/application/agent",
 				modulePath + "/internal/application/command",
 				modulePath + "/internal/application/query",
 				modulePath + "/internal/application/workflow",
@@ -112,6 +114,7 @@ func TestProductionImportsStayWithinArchitectureBoundaries(t *testing.T) {
 			packagePrefix: modulePath + "/internal/delivery/",
 			forbiddenImports: []string{
 				modulePath + "/internal/application/port/outbound",
+				modulePath + "/internal/application/agent",
 				modulePath + "/internal/application/command",
 				modulePath + "/internal/application/query",
 				modulePath + "/internal/application/workflow",
@@ -127,6 +130,7 @@ func TestProductionImportsStayWithinArchitectureBoundaries(t *testing.T) {
 			forbiddenImports: []string{
 				modulePath + "/internal/delivery",
 				modulePath + "/internal/application/port/inbound",
+				modulePath + "/internal/application/agent",
 				modulePath + "/internal/application/command",
 				modulePath + "/internal/application/query",
 				modulePath + "/internal/application/workflow",
@@ -196,6 +200,7 @@ func TestUnitTestImportsStayWithinPackageBoundaries(t *testing.T) {
 			forbiddenImports: []string{
 				modulePath + "/cmd/",
 				modulePath + "/internal/application/port/inbound",
+				modulePath + "/internal/application/agent",
 				modulePath + "/internal/application/command",
 				modulePath + "/internal/application/query",
 				modulePath + "/internal/application/workflow",
@@ -280,6 +285,7 @@ func TestUnitTestImportsStayWithinPackageBoundaries(t *testing.T) {
 			packagePrefix: modulePath + "/internal/delivery/",
 			forbiddenImports: []string{
 				modulePath + "/internal/application/port/outbound",
+				modulePath + "/internal/application/agent",
 				modulePath + "/internal/application/command",
 				modulePath + "/internal/application/query",
 				modulePath + "/internal/application/workflow",
@@ -295,6 +301,7 @@ func TestUnitTestImportsStayWithinPackageBoundaries(t *testing.T) {
 			forbiddenImports: []string{
 				modulePath + "/internal/delivery",
 				modulePath + "/internal/application/port/inbound",
+				modulePath + "/internal/application/agent",
 				modulePath + "/internal/application/command",
 				modulePath + "/internal/application/query",
 				modulePath + "/internal/application/workflow",

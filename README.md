@@ -11,8 +11,8 @@ AgentPool is currently an early MVP scaffold.
 - Storage and queue are in-memory only.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
-- There is no real AI model execution yet.
-- The current model client is noop.
+- The default model client is noop.
+- Real model provider adapters are basic one-shot generation clients; there is no full agent loop or tool execution yet.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -137,6 +137,67 @@ Override the address with:
 ```sh
 AGENTPOOL_HTTP_ADDR=127.0.0.1:9000 go run ./cmd/agentpool dev
 ```
+
+## Model Providers
+
+AgentPool currently supports these model providers:
+
+- `noop`: local placeholder provider, used by default.
+- `openai_compatible`: OpenAI-style Chat Completions endpoint for Ollama, vLLM, llama.cpp server, LocalAI, LM Studio, OpenRouter-like gateways, or internal model gateways.
+- `openai`: official OpenAI API provider.
+- `anthropic`: official Anthropic Claude API provider.
+- `gemini`: official Google Gemini API provider.
+
+Provider configuration uses:
+
+```sh
+AGENTPOOL_MODEL_PROVIDER
+AGENTPOOL_MODEL_BASE_URL
+AGENTPOOL_MODEL_NAME
+AGENTPOOL_MODEL_API_KEY
+AGENTPOOL_MODEL_TIMEOUT
+```
+
+Local Ollama example:
+
+```sh
+ollama serve
+ollama pull qwen2.5-coder:7b
+
+AGENTPOOL_MODEL_PROVIDER=openai_compatible \
+AGENTPOOL_MODEL_BASE_URL=http://localhost:11434/v1 \
+AGENTPOOL_MODEL_NAME=qwen2.5-coder:7b \
+go run ./cmd/agentpool dev
+```
+
+OpenAI example:
+
+```sh
+AGENTPOOL_MODEL_PROVIDER=openai \
+AGENTPOOL_MODEL_NAME=gpt-4.1-mini \
+AGENTPOOL_MODEL_API_KEY=... \
+go run ./cmd/agentpool dev
+```
+
+Anthropic example:
+
+```sh
+AGENTPOOL_MODEL_PROVIDER=anthropic \
+AGENTPOOL_MODEL_NAME=claude-sonnet-4-5 \
+AGENTPOOL_MODEL_API_KEY=... \
+go run ./cmd/agentpool dev
+```
+
+Gemini example:
+
+```sh
+AGENTPOOL_MODEL_PROVIDER=gemini \
+AGENTPOOL_MODEL_NAME=gemini-2.5-flash \
+AGENTPOOL_MODEL_API_KEY=... \
+go run ./cmd/agentpool dev
+```
+
+Use `openai_compatible` with a local or internal endpoint for air-gapped environments. Do not configure external providers when outbound internet is disabled.
 
 ## Run Lifecycle
 

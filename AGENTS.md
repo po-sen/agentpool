@@ -18,7 +18,7 @@ agentpool is a Go project with module path `github.com/po-sen/agentpool`.
 - `internal/application/port/outbound/`: external capability contracts required by the application. Do not put a vague `RunRepository` here.
 - `internal/delivery/`: inbound delivery mechanisms such as HTTP API and CLI. Delivery code translates external formats into application commands/queries and translates application views back into external responses.
 - `internal/infrastructure/`: concrete external technology implementations such as persistence, LLM providers, sandbox providers, event publishers, Git providers, policy engines, secret brokers, and ID generators.
-- `internal/infrastructure/llm/`: model provider implementations such as noop, OpenAI, Anthropic, or local models.
+- `internal/infrastructure/llm/`: model provider implementations such as noop, OpenAI-compatible endpoints, OpenAI, Anthropic, Gemini, or local models.
 - `internal/runtime/`: process/runtime helpers such as HTTP server lifecycle and logging. Runtime helpers must stay product-agnostic and must not implement business rules.
 - `pkg/`: do not create unless there is a truly stable public API.
 
@@ -72,7 +72,7 @@ Run persistence roles are intentionally split:
 
 Application dependencies are directed. `application/port/inbound` and `application/port/outbound` must stay implementation-free and must not import command, query, or workflow packages. `application/command`, `application/query`, and `application/workflow` must not import each other. They may depend on application ports and domain repository interfaces. Keep domain-to-view mapping local to the command or query package that returns the view; do not create a shared application helper package for it.
 
-Agent behavior belongs in `internal/application/agent`. Model provider integrations belong in `internal/infrastructure/llm`. Do not put agent loops, planning, tool orchestration, or evaluation logic in infrastructure. Infrastructure LLM packages should only implement model client ports.
+Agent behavior belongs in `internal/application/agent`. Model provider integrations belong in `internal/infrastructure/llm`. Provider packages must implement `internal/application/port/outbound.ModelClient`; they must not contain agent loops, planning, tool orchestration, evaluation logic, or workflow state transitions. Do not add provider-specific SDK types, JSON wire structs, or provider-specific concepts to application ports.
 
 Unit tests are mandatory for domain packages, application port packages, application command/query/workflow packages, delivery packages, infrastructure packages, bootstrap, config, and runtime helpers. Every production `.go` file under `internal/` must have a same-directory companion test file with the same basename, such as `run_queue.go` and `run_queue_test.go`; `internal/test` is the repository policy-test exception. `cmd/agentpool` stays thin and is exempt unless business logic is added there. Application unit tests must use test-local fakes for ports instead of importing concrete infrastructure. Test imports are checked by `internal/test/import_policy_test.go`.
 

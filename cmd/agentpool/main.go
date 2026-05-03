@@ -19,11 +19,22 @@ func main() {
 		writeStderr(cli.Usage())
 		os.Exit(2)
 	}
+	if command == cli.CommandVersion {
+		if _, err := fmt.Fprintf(os.Stdout, "agentpool %s\n", version); err != nil {
+			writeStderr(err.Error() + "\n")
+			os.Exit(1)
+		}
+		return
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	app := bootstrap.New(version, os.Stderr)
+	app, err := bootstrap.New(version, os.Stderr)
+	if err != nil {
+		writeStderr(err.Error() + "\n")
+		os.Exit(1)
+	}
 
 	switch command {
 	case cli.CommandServer:
@@ -32,8 +43,6 @@ func main() {
 		err = app.RunWorker(ctx)
 	case cli.CommandDev:
 		err = app.RunDev(ctx)
-	case cli.CommandVersion:
-		_, err = fmt.Fprintln(os.Stdout, app.Version())
 	}
 
 	if err != nil {
