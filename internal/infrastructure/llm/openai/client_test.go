@@ -72,6 +72,19 @@ func TestClientGenerateHandlesNoChoices(t *testing.T) {
 	}
 }
 
+func TestClientGenerateHandlesNon2xx(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	client := newClient(t, server.URL)
+	_, err := client.Generate(context.Background(), outbound.ModelRequest{})
+	if err == nil {
+		t.Fatal("Generate() error = nil, want error")
+	}
+}
+
 func newClient(t *testing.T, baseURL string) *openai.Client {
 	t.Helper()
 
