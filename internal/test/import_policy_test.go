@@ -98,6 +98,16 @@ func TestProductionImportsStayWithinArchitectureBoundaries(t *testing.T) {
 			},
 		},
 		{
+			name:          "application agent does not depend on other application flows",
+			packagePrefix: modulePath + "/internal/application/agent",
+			forbiddenImports: []string{
+				modulePath + "/internal/application/command",
+				modulePath + "/internal/application/port/inbound",
+				modulePath + "/internal/application/query",
+				modulePath + "/internal/application/workflow",
+			},
+		},
+		{
 			name:          "delivery uses inbound application contracts only",
 			packagePrefix: modulePath + "/internal/delivery/",
 			forbiddenImports: []string{
@@ -248,6 +258,24 @@ func TestUnitTestImportsStayWithinPackageBoundaries(t *testing.T) {
 			},
 		},
 		{
+			name:          "application agent unit tests do not use infrastructure or other flows",
+			packagePrefix: modulePath + "/internal/application/agent",
+			forbiddenImports: []string{
+				modulePath + "/cmd/",
+				modulePath + "/internal/application/command",
+				modulePath + "/internal/application/port/inbound",
+				modulePath + "/internal/application/query",
+				modulePath + "/internal/application/workflow",
+				modulePath + "/internal/bootstrap",
+				modulePath + "/internal/config",
+				modulePath + "/internal/delivery/",
+				modulePath + "/internal/infrastructure/",
+				modulePath + "/internal/runtime/",
+				"database/sql",
+				"net/http",
+			},
+		},
+		{
 			name:          "delivery unit tests use inbound application contracts only",
 			packagePrefix: modulePath + "/internal/delivery/",
 			forbiddenImports: []string{
@@ -294,6 +322,7 @@ func TestDomainImportsStayCentralized(t *testing.T) {
 	packages := listPackages(t)
 	allowedImporters := []string{
 		modulePath + "/internal/domain/",
+		modulePath + "/internal/application/agent",
 		modulePath + "/internal/application/command",
 		modulePath + "/internal/application/query",
 		modulePath + "/internal/application/workflow",

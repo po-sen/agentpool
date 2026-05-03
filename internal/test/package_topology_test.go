@@ -7,6 +7,7 @@ import (
 
 func TestInternalPackageTopologyIsExplicitlyAllowlisted(t *testing.T) {
 	allowedPackages := map[string]struct{}{
+		modulePath + "/internal/application/agent":                 {},
 		modulePath + "/internal/application/command":               {},
 		modulePath + "/internal/application/port/inbound":          {},
 		modulePath + "/internal/application/port/outbound":         {},
@@ -18,10 +19,10 @@ func TestInternalPackageTopologyIsExplicitlyAllowlisted(t *testing.T) {
 		modulePath + "/internal/delivery/httpapi":                  {},
 		modulePath + "/internal/domain/approval":                   {},
 		modulePath + "/internal/domain/run":                        {},
-		modulePath + "/internal/infrastructure/agent/noop":         {},
 		modulePath + "/internal/infrastructure/event/noop":         {},
 		modulePath + "/internal/infrastructure/git/noop":           {},
 		modulePath + "/internal/infrastructure/id/crypto":          {},
+		modulePath + "/internal/infrastructure/llm/noop":           {},
 		modulePath + "/internal/infrastructure/persistence/memory": {},
 		modulePath + "/internal/infrastructure/policy/allowall":    {},
 		modulePath + "/internal/infrastructure/sandbox/noop":       {},

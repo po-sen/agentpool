@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"io"
 
+	applicationagent "github.com/po-sen/agentpool/internal/application/agent"
 	"github.com/po-sen/agentpool/internal/application/command"
 	"github.com/po-sen/agentpool/internal/application/query"
 	"github.com/po-sen/agentpool/internal/application/workflow"
 	"github.com/po-sen/agentpool/internal/config"
 	"github.com/po-sen/agentpool/internal/delivery/httpapi"
-	agentnoop "github.com/po-sen/agentpool/internal/infrastructure/agent/noop"
 	eventnoop "github.com/po-sen/agentpool/internal/infrastructure/event/noop"
 	gitnoop "github.com/po-sen/agentpool/internal/infrastructure/git/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/id/crypto"
+	llmnoop "github.com/po-sen/agentpool/internal/infrastructure/llm/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/persistence/memory"
 	"github.com/po-sen/agentpool/internal/infrastructure/policy/allowall"
 	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
@@ -55,7 +56,8 @@ func New(version string, logOutput io.Writer) *App {
 	listRunsHandler := query.NewListRunsHandler(runRepo)
 
 	sandboxProvider := sandboxnoop.NewProvider()
-	agentExecutor := agentnoop.NewExecutor()
+	modelClient := llmnoop.NewClient()
+	agentRunner := applicationagent.NewRunner(modelClient)
 	gitProvider := gitnoop.NewProvider()
 	policyDecision := allowall.NewDecision()
 	secretBroker := secretnoop.NewBroker()
@@ -66,7 +68,7 @@ func New(version string, logOutput io.Writer) *App {
 		StateStore: runRepo,
 		Events:     eventPublisher,
 		Sandbox:    sandboxProvider,
-		Agent:      agentExecutor,
+		Agent:      agentRunner,
 		Git:        gitProvider,
 		Policy:     policyDecision,
 		Secrets:    secretBroker,

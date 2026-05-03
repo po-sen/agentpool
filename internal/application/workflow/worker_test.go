@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	applicationagent "github.com/po-sen/agentpool/internal/application/agent"
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/application/workflow"
 	"github.com/po-sen/agentpool/internal/domain/run"
@@ -125,7 +126,7 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationDuringExecution(t *testing.
 		publisher,
 		now,
 		fakeSandboxProvider{},
-		cancellingAgentExecutor{
+		cancellingModelClient{
 			repo: repo,
 			id:   item.ID,
 			now:  now.Add(time.Second),
@@ -173,7 +174,7 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationWhenExecutionFails(t *testi
 		publisher,
 		now,
 		fakeSandboxProvider{},
-		cancellingFailingAgentExecutor{
+		cancellingFailingModelClient{
 			repo: repo,
 			id:   item.ID,
 			now:  now.Add(time.Second),
@@ -224,7 +225,7 @@ func TestWorkerProcessOneCleansSandboxWithNonCancelledContext(t *testing.T) {
 		publisher,
 		now,
 		sandbox,
-		cancellingContextAgentExecutor{cancel: cancel},
+		cancellingContextModelClient{cancel: cancel},
 		fakeGitProvider{},
 	)
 
@@ -251,7 +252,7 @@ func newWorker(
 		publisher,
 		now,
 		fakeSandboxProvider{},
-		fakeAgentExecutor{},
+		fakeModelClient{},
 		fakeGitProvider{},
 	)
 }
@@ -262,7 +263,7 @@ func newWorkerWithPorts(
 	publisher outbound.EventPublisher,
 	now time.Time,
 	sandbox outbound.SandboxProvider,
-	agent outbound.AgentExecutor,
+	model outbound.ModelClient,
 	git outbound.GitProvider,
 ) *workflow.Worker {
 	return workflow.NewWorker(
@@ -272,7 +273,7 @@ func newWorkerWithPorts(
 			StateStore: repo,
 			Events:     publisher,
 			Sandbox:    sandbox,
-			Agent:      agent,
+			Agent:      applicationagent.NewRunner(model),
 			Git:        git,
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
@@ -367,64 +368,64 @@ func (p *recordingSandboxProvider) Cleanup(ctx context.Context, _ outbound.Sandb
 	return nil
 }
 
-type fakeAgentExecutor struct{}
+type fakeModelClient struct{}
 
-func (e fakeAgentExecutor) Execute(context.Context, outbound.AgentExecutionRequest) (outbound.AgentExecutionResult, error) {
-	return outbound.AgentExecutionResult{Summary: "done"}, nil
+func (c fakeModelClient) Generate(context.Context, outbound.ModelRequest) (outbound.ModelResponse, error) {
+	return outbound.ModelResponse{Content: "done"}, nil
 }
 
-type cancellingAgentExecutor struct {
+type cancellingModelClient struct {
 	repo *fakeRunRepository
 	id   run.RunID
 	now  time.Time
 }
 
-func (e cancellingAgentExecutor) Execute(ctx context.Context, _ outbound.AgentExecutionRequest) (outbound.AgentExecutionResult, error) {
-	item, err := e.repo.FindByID(ctx, e.id)
+func (c cancellingModelClient) Generate(ctx context.Context, _ outbound.ModelRequest) (outbound.ModelResponse, error) {
+	item, err := c.repo.FindByID(ctx, c.id)
 	if err != nil {
-		return outbound.AgentExecutionResult{}, err
+		return outbound.ModelResponse{}, err
 	}
-	if err := item.Cancel(e.now); err != nil {
-		return outbound.AgentExecutionResult{}, err
+	if err := item.Cancel(c.now); err != nil {
+		return outbound.ModelResponse{}, err
 	}
-	if err := e.repo.Save(ctx, item); err != nil {
-		return outbound.AgentExecutionResult{}, err
+	if err := c.repo.Save(ctx, item); err != nil {
+		return outbound.ModelResponse{}, err
 	}
 
-	return outbound.AgentExecutionResult{Summary: "cancelled"}, nil
+	return outbound.ModelResponse{Content: "cancelled"}, nil
 }
 
-var errAgentExecutionFailed = errors.New("agent execution failed")
+var errModelGenerationFailed = errors.New("model generation failed")
 
-type cancellingFailingAgentExecutor struct {
+type cancellingFailingModelClient struct {
 	repo *fakeRunRepository
 	id   run.RunID
 	now  time.Time
 }
 
-func (e cancellingFailingAgentExecutor) Execute(ctx context.Context, _ outbound.AgentExecutionRequest) (outbound.AgentExecutionResult, error) {
-	item, err := e.repo.FindByID(ctx, e.id)
+func (c cancellingFailingModelClient) Generate(ctx context.Context, _ outbound.ModelRequest) (outbound.ModelResponse, error) {
+	item, err := c.repo.FindByID(ctx, c.id)
 	if err != nil {
-		return outbound.AgentExecutionResult{}, err
+		return outbound.ModelResponse{}, err
 	}
-	if err := item.Cancel(e.now); err != nil {
-		return outbound.AgentExecutionResult{}, err
+	if err := item.Cancel(c.now); err != nil {
+		return outbound.ModelResponse{}, err
 	}
-	if err := e.repo.Save(ctx, item); err != nil {
-		return outbound.AgentExecutionResult{}, err
+	if err := c.repo.Save(ctx, item); err != nil {
+		return outbound.ModelResponse{}, err
 	}
 
-	return outbound.AgentExecutionResult{}, errAgentExecutionFailed
+	return outbound.ModelResponse{}, errModelGenerationFailed
 }
 
-type cancellingContextAgentExecutor struct {
+type cancellingContextModelClient struct {
 	cancel context.CancelFunc
 }
 
-func (e cancellingContextAgentExecutor) Execute(context.Context, outbound.AgentExecutionRequest) (outbound.AgentExecutionResult, error) {
-	e.cancel()
+func (c cancellingContextModelClient) Generate(context.Context, outbound.ModelRequest) (outbound.ModelResponse, error) {
+	c.cancel()
 
-	return outbound.AgentExecutionResult{Summary: "done"}, nil
+	return outbound.ModelResponse{Content: "done"}, nil
 }
 
 type fakeGitProvider struct{}

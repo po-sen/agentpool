@@ -28,23 +28,6 @@ type SandboxProvider interface {
 	Cleanup(context.Context, Sandbox) error
 }
 
-// AgentExecutionRequest contains the input passed to an agent executor.
-type AgentExecutionRequest struct {
-	RunID   run.RunID
-	Task    run.TaskSpec
-	Sandbox Sandbox
-}
-
-// AgentExecutionResult contains the minimal execution result.
-type AgentExecutionResult struct {
-	Summary string
-}
-
-// AgentExecutor runs the requested AI agent task.
-type AgentExecutor interface {
-	Execute(context.Context, AgentExecutionRequest) (AgentExecutionResult, error)
-}
-
 // GitFetchRequest describes a source checkout request.
 type GitFetchRequest struct {
 	RepositoryURL string

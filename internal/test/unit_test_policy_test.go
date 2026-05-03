@@ -9,6 +9,7 @@ func TestRequiredPackagesHaveUnitTests(t *testing.T) {
 	packages := listPackages(t)
 	requiredPrefixes := []string{
 		modulePath + "/internal/domain/",
+		modulePath + "/internal/application/agent",
 		modulePath + "/internal/application/port/inbound",
 		modulePath + "/internal/application/port/outbound",
 		modulePath + "/internal/application/command",

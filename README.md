@@ -12,6 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - There is no real AI model execution yet.
+- The current model client is noop.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -156,14 +157,16 @@ cancelled
 ## Architecture
 
 - `internal/domain`: core business rules for runs and approvals.
-- `internal/application`: use cases, worker workflows, and ports.
+- `internal/application`: use cases, agent runner, worker workflows, and ports.
 - `internal/delivery`: HTTP and CLI entrypoints.
-- `internal/infrastructure`: concrete technology implementations such as memory persistence and noop integrations.
+- `internal/infrastructure`: concrete technology implementations such as memory persistence, noop model provider, and noop integrations.
 - `internal/bootstrap`: dependency wiring.
 - `internal/runtime`: product-agnostic process helpers.
 - `internal/test`: repository policy tests.
 
 Delivery depends only on application inbound ports. Infrastructure implements domain and application outbound contracts. Bootstrap is the only place that wires concrete implementations.
+
+The worker calls `internal/application/agent.Runner`. The agent runner calls `outbound.ModelClient`. Current and future model providers, including noop, OpenAI, Anthropic, or local models, belong under `internal/infrastructure/llm/*`.
 
 ## Development
 

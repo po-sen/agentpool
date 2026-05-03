@@ -11,7 +11,6 @@ import (
 func TestIntegrationPortContracts(t *testing.T) {
 	var ids outbound.IDGenerator = fakeIDGenerator{}
 	var sandbox outbound.SandboxProvider = fakeSandboxProvider{}
-	var agent outbound.AgentExecutor = fakeAgentExecutor{}
 	var git outbound.GitProvider = fakeGitProvider{}
 	var policy outbound.PolicyDecisionPort = fakePolicyDecision{}
 	var secrets outbound.SecretBroker = fakeSecretBroker{}
@@ -25,9 +24,6 @@ func TestIntegrationPortContracts(t *testing.T) {
 	}
 	if err := sandbox.Cleanup(ctx, outbound.Sandbox{ID: "sandbox_test"}); err != nil {
 		t.Fatalf("Cleanup() error = %v", err)
-	}
-	if _, err := agent.Execute(ctx, outbound.AgentExecutionRequest{RunID: "run_test"}); err != nil {
-		t.Fatalf("Execute() error = %v", err)
 	}
 	if _, err := git.Fetch(ctx, outbound.GitFetchRequest{RepositoryURL: "https://example.com/repo.git"}); err != nil {
 		t.Fatalf("Fetch() error = %v", err)
@@ -54,12 +50,6 @@ func (fakeSandboxProvider) Prepare(context.Context, outbound.SandboxRequest) (ou
 
 func (fakeSandboxProvider) Cleanup(context.Context, outbound.Sandbox) error {
 	return nil
-}
-
-type fakeAgentExecutor struct{}
-
-func (fakeAgentExecutor) Execute(context.Context, outbound.AgentExecutionRequest) (outbound.AgentExecutionResult, error) {
-	return outbound.AgentExecutionResult{Summary: "done"}, nil
 }
 
 type fakeGitProvider struct{}

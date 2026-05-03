@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/po-sen/agentpool/internal/application/agent"
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
@@ -21,7 +22,7 @@ type Worker struct {
 	stateStore   outbound.RunStateStore
 	events       outbound.EventPublisher
 	sandbox      outbound.SandboxProvider
-	agent        outbound.AgentExecutor
+	agent        *agent.Runner
 	git          outbound.GitProvider
 	policy       outbound.PolicyDecisionPort
 	secrets      outbound.SecretBroker
@@ -39,7 +40,7 @@ type WorkerDependencies struct {
 	StateStore outbound.RunStateStore
 	Events     outbound.EventPublisher
 	Sandbox    outbound.SandboxProvider
-	Agent      outbound.AgentExecutor
+	Agent      *agent.Runner
 	Git        outbound.GitProvider
 	Policy     outbound.PolicyDecisionPort
 	Secrets    outbound.SecretBroker
@@ -237,7 +238,7 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run) error {
 		return err
 	}
 
-	_, err = w.agent.Execute(ctx, outbound.AgentExecutionRequest{
+	_, err = w.agent.Run(ctx, agent.RunRequest{
 		RunID:   item.ID,
 		Task:    item.Task,
 		Sandbox: sandbox,
