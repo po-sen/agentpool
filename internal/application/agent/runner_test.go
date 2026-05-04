@@ -127,6 +127,117 @@ func TestRunnerFeedsUnknownToolResultBackToModel(t *testing.T) {
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool error for missing:\nunknown tool: missing")
 }
 
+func TestRunnerRejectsUnknownJSONActionTypeAndContinues(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_result","result":"hello from tool"}`},
+			{Content: `{"type":"final","summary":"corrected final"}`},
+		},
+	}
+	tools := newFakeToolRunner()
+	runner := agent.NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), agent.RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "corrected final" {
+		t.Fatalf("summary = %q, want corrected final", result.Summary)
+	}
+	if strings.Contains(result.Summary, "tool_result") {
+		t.Fatalf("summary accepted invalid action: %q", result.Summary)
+	}
+	if len(model.requests) != 2 {
+		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
+	}
+	lastMessages := model.requests[1].Messages
+	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", "tool_result")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Protocol error:")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not return tool_result.")
+	if len(tools.calls) != 0 {
+		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
+	}
+}
+
+func TestRunnerRejectsMultipleJSONObjectsAndContinues(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}{"type":"final","summary":"bad"}`},
+			{Content: `{"type":"final","summary":"corrected final"}`},
+		},
+	}
+	tools := newFakeToolRunner()
+	runner := agent.NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), agent.RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "corrected final" {
+		t.Fatalf("summary = %q, want corrected final", result.Summary)
+	}
+	if len(tools.calls) != 0 {
+		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
+	}
+	if len(model.requests) != 2 {
+		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
+	}
+	lastMessages := model.requests[1].Messages
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not return multiple JSON objects.")
+}
+
+func TestRunnerRejectsEmptyFinalSummaryAndContinues(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"final","summary":""}`},
+			{Content: `{"type":"final","summary":"fixed"}`},
+		},
+	}
+	runner := agent.NewRunner(model, newFakeToolRunner())
+
+	result, err := runner.Run(context.Background(), agent.RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "fixed" {
+		t.Fatalf("summary = %q, want fixed", result.Summary)
+	}
+}
+
+func TestRunnerRejectsToolCallWithMissingToolAndContinues(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","arguments":{"text":"hello"}}`},
+			{Content: `{"type":"final","summary":"fixed"}`},
+		},
+	}
+	tools := newFakeToolRunner()
+	runner := agent.NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), agent.RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "fixed" {
+		t.Fatalf("summary = %q, want fixed", result.Summary)
+	}
+	if len(tools.calls) != 0 {
+		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
+	}
+}
+
 func TestRunnerReturnsErrorWhenMaxTurnsExceeded(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{{Content: `{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}`}},
@@ -143,6 +254,25 @@ func TestRunnerReturnsErrorWhenMaxTurnsExceeded(t *testing.T) {
 	}
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	}
+}
+
+func TestRunnerReturnsErrorWhenProtocolErrorsExceedMaxTurns(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{{Content: `{"type":"tool_result","result":"hello from tool"}`}},
+	}
+	tools := newFakeToolRunner()
+	runner := agent.NewRunner(model, tools, agent.WithMaxTurns(1))
+
+	_, err := runner.Run(context.Background(), agent.RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "max turns") {
+		t.Fatalf("Run() error = %v, want max turns error", err)
+	}
+	if len(tools.calls) != 0 {
+		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
 	}
 }
 

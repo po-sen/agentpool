@@ -18,6 +18,9 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		`{"type":"tool_call","tool":"echo","arguments":{"text":"..."}}`,
 		"echo: Returns text",
 		"no markdown fences",
+		"Do not return tool_result.",
+		"Do not return multiple JSON objects.",
+		"return another tool_call or a final answer",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt does not contain %q:\n%s", want, prompt)

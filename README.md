@@ -280,6 +280,8 @@ Use `openai_compatible` with a local or internal endpoint for air-gapped environ
 
 AgentPool now has a minimal application-owned tool loop. Models can respond with a JSON `tool_call` action, the agent runner executes the tool through the `ToolRunner` port, and the tool result is fed back to the model for a final JSON answer.
 
+The agent protocol accepts only `tool_call` and `final` JSON actions. Unknown JSON action types, malformed JSON, or multiple JSON objects are rejected as protocol errors and the model is asked to correct itself. Plain natural-language output is still accepted as a final summary for compatibility with local models.
+
 The first builtin tool is `echo`. It returns the provided `text` argument and exists to validate tool plumbing:
 
 ```json

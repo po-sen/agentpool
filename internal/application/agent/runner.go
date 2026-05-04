@@ -116,12 +116,22 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 		return RunResult{}, false, err
 	}
 
-	parsed, ok := parseAction(response.Content)
-	if !ok {
+	parsed := parseAction(response.Content)
+	switch parsed.status {
+	case actionParseNaturalLanguage:
 		return RunResult{Summary: response.Content, ToolCallCount: session.toolCallCount}, true, nil
-	}
+	case actionParseProtocolError:
+		session.messages = append(session.messages,
+			outbound.ModelMessage{Role: "assistant", Content: response.Content},
+			outbound.ModelMessage{Role: "user", Content: protocolCorrectionMessage()},
+		)
 
-	return r.handleAction(ctx, session, response.Content, parsed)
+		return RunResult{}, false, nil
+	case actionParseValid:
+		return r.handleAction(ctx, session, response.Content, parsed.action)
+	default:
+		return RunResult{}, false, errors.New("unknown agent action parse status")
+	}
 }
 
 func (r *Runner) handleAction(ctx context.Context, session *runSession, content string, parsed action) (RunResult, bool, error) {
@@ -141,6 +151,16 @@ func finalResult(summary string, toolCallCount int) (RunResult, bool, error) {
 	}
 
 	return RunResult{Summary: summary, ToolCallCount: toolCallCount}, true, nil
+}
+
+func protocolCorrectionMessage() string {
+	return `Protocol error:
+Your previous response was JSON but did not match the AgentPool action protocol.
+Return exactly one JSON object with either:
+{"type":"final","summary":"..."}
+or
+{"type":"tool_call","tool":"echo","arguments":{"text":"..."}}
+Do not return tool_result. Do not return multiple JSON objects. Do not use markdown fences.`
 }
 
 func (r *Runner) handleToolCall(ctx context.Context, session *runSession, content string, parsed action) (RunResult, bool, error) {
