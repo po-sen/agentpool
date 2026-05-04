@@ -26,8 +26,8 @@ import (
 	storagenoop "github.com/po-sen/agentpool/internal/infrastructure/storage/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/shell"
-	workspacediff "github.com/po-sen/agentpool/internal/infrastructure/workspace/diff"
 	workspacesnapshot "github.com/po-sen/agentpool/internal/infrastructure/workspace/snapshot"
+	workspacechangediff "github.com/po-sen/agentpool/internal/infrastructure/workspacechange/diff"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
 )
@@ -149,7 +149,7 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	changeCollector := workspacediff.NewCollector()
+	changeCollector := workspacechangediff.NewCollector()
 	policyDecision := allowall.NewDecision()
 	secretBroker := secretnoop.NewBroker()
 
