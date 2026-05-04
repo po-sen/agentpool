@@ -14,12 +14,14 @@ func (id RunID) String() string {
 
 // Run is the aggregate root for a submitted agent task.
 type Run struct {
-	ID        RunID
-	Task      TaskSpec
-	Status    Status
-	Steps     []Step
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID            RunID
+	Task          TaskSpec
+	Status        Status
+	ResultSummary string
+	FailureReason string
+	Steps         []Step
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // New creates a queued run.
@@ -103,7 +105,31 @@ func (r *Run) Complete(now time.Time) error {
 	return r.TransitionTo(StatusCompleted, now)
 }
 
+// CompleteWithResult marks the run as successfully completed and stores the agent output summary.
+func (r *Run) CompleteWithResult(now time.Time, summary string) error {
+	if err := r.TransitionTo(StatusCompleted, now); err != nil {
+		return err
+	}
+
+	r.ResultSummary = summary
+	r.FailureReason = ""
+
+	return nil
+}
+
 // Fail marks the run as failed.
 func (r *Run) Fail(now time.Time) error {
 	return r.TransitionTo(StatusFailed, now)
+}
+
+// FailWithReason marks the run as failed and stores the failure reason.
+func (r *Run) FailWithReason(now time.Time, reason string) error {
+	if err := r.TransitionTo(StatusFailed, now); err != nil {
+		return err
+	}
+
+	r.ResultSummary = ""
+	r.FailureReason = reason
+
+	return nil
 }

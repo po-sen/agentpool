@@ -12,6 +12,7 @@ import (
 
 const defaultPollInterval = 200 * time.Millisecond
 const sandboxCleanupTimeout = 30 * time.Second
+const publicFailureReason = "run failed"
 
 var errRunStateChanged = errors.New("run state changed")
 
@@ -141,14 +142,15 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 
 		return w.failRun(ctx, item, err)
 	}
-	if err := w.startRun(ctx, item); err != nil {
+	result, err := w.startRun(ctx, item)
+	if err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
 		}
 
 		return w.failRun(ctx, item, err)
 	}
-	if err := w.completeRun(ctx, item); err != nil {
+	if err := w.completeRun(ctx, item, result); err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
 		}
@@ -207,13 +209,13 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) error {
 	return nil
 }
 
-func (w *Worker) startRun(ctx context.Context, item *run.Run) error {
+func (w *Worker) startRun(ctx context.Context, item *run.Run) (agent.RunResult, error) {
 	sandbox, err := w.sandbox.Prepare(ctx, outbound.SandboxRequest{
 		RunID: item.ID,
 		Task:  item.Task,
 	})
 	if err != nil {
-		return err
+		return agent.RunResult{}, err
 	}
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sandboxCleanupTimeout)
@@ -225,32 +227,32 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run) error {
 	now := w.clock()
 	expectedStatus := item.Status
 	if err := item.StartRunning(now); err != nil {
-		return err
+		return agent.RunResult{}, err
 	}
 	saved, err := w.stateStore.SaveIfStatus(ctx, item, expectedStatus)
 	if err != nil {
-		return err
+		return agent.RunResult{}, err
 	}
 	if !saved {
-		return errRunStateChanged
+		return agent.RunResult{}, errRunStateChanged
 	}
 	if err := w.publish(ctx, outbound.EventRunStarted, item.ID, now); err != nil {
-		return err
+		return agent.RunResult{}, err
 	}
 
-	_, err = w.agent.Run(ctx, agent.RunRequest{
+	result, err := w.agent.Run(ctx, agent.RunRequest{
 		RunID:   item.ID,
 		Task:    item.Task,
 		Sandbox: sandbox,
 	})
 
-	return err
+	return result, err
 }
 
-func (w *Worker) completeRun(ctx context.Context, item *run.Run) error {
+func (w *Worker) completeRun(ctx context.Context, item *run.Run, result agent.RunResult) error {
 	now := w.clock()
 	expectedStatus := item.Status
-	if err := item.Complete(now); err != nil {
+	if err := item.CompleteWithResult(now, result.Summary); err != nil {
 		return err
 	}
 	saved, err := w.stateStore.SaveIfStatus(ctx, item, expectedStatus)
@@ -267,7 +269,7 @@ func (w *Worker) completeRun(ctx context.Context, item *run.Run) error {
 func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error {
 	now := w.clock()
 	expectedStatus := item.Status
-	if err := item.Fail(now); err != nil {
+	if err := item.FailWithReason(now, publicFailureReason); err != nil {
 		return errors.Join(cause, err)
 	}
 	saved, err := w.stateStore.SaveIfStatus(ctx, item, expectedStatus)

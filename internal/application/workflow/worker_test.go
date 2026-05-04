@@ -42,6 +42,12 @@ func TestWorkerProcessOneCompletesQueuedRun(t *testing.T) {
 	if stored.Status != run.StatusCompleted {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCompleted)
 	}
+	if stored.ResultSummary != "done" {
+		t.Fatalf("stored result summary = %q, want %q", stored.ResultSummary, "done")
+	}
+	if stored.FailureReason != "" {
+		t.Fatalf("stored failure reason = %q, want empty", stored.FailureReason)
+	}
 
 	wantEvents := []string{
 		outbound.EventRunPreparing,
@@ -100,6 +106,59 @@ func TestWorkerProcessOneKeepsCompletedRunWhenCompletedEventFails(t *testing.T) 
 	}
 
 	assertEventNotPublished(t, publisher.events, outbound.EventRunFailed)
+}
+
+func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	if err := queue.Enqueue(ctx, item.ID); err != nil {
+		t.Fatalf("enqueue run: %v", err)
+	}
+
+	worker := newWorkerWithPorts(
+		queue,
+		repo,
+		publisher,
+		now,
+		fakeSandboxProvider{},
+		failingModelClient{},
+		fakeGitProvider{},
+	)
+
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored, err := repo.FindByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("find run: %v", err)
+	}
+	if stored.Status != run.StatusFailed {
+		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusFailed)
+	}
+	if stored.FailureReason != "run failed" {
+		t.Fatalf("stored failure reason = %q, want %q", stored.FailureReason, "run failed")
+	}
+	if stored.FailureReason == errModelGenerationFailed.Error() {
+		t.Fatalf("stored failure reason exposes raw error: %q", stored.FailureReason)
+	}
+	if stored.ResultSummary != "" {
+		t.Fatalf("stored result summary = %q, want empty", stored.ResultSummary)
+	}
+
+	assertEventNotPublished(t, publisher.events, outbound.EventRunCompleted)
+	assertEventPublished(t, publisher.events, outbound.EventRunFailed)
 }
 
 func TestWorkerProcessOneDoesNotOverwriteCancellationDuringExecution(t *testing.T) {
@@ -395,7 +454,13 @@ func (c cancellingModelClient) Generate(ctx context.Context, _ outbound.ModelReq
 	return outbound.ModelResponse{Content: "cancelled"}, nil
 }
 
-var errModelGenerationFailed = errors.New("model generation failed")
+var errModelGenerationFailed = errors.New("model generation failed: provider body contained api_key=secret")
+
+type failingModelClient struct{}
+
+func (c failingModelClient) Generate(context.Context, outbound.ModelRequest) (outbound.ModelResponse, error) {
+	return outbound.ModelResponse{}, errModelGenerationFailed
+}
 
 type cancellingFailingModelClient struct {
 	repo *fakeRunRepository
@@ -481,4 +546,16 @@ func assertEventNotPublished(t *testing.T, events []outbound.Event, eventType st
 			t.Fatalf("event %s was published unexpectedly", eventType)
 		}
 	}
+}
+
+func assertEventPublished(t *testing.T, events []outbound.Event, eventType string) {
+	t.Helper()
+
+	for _, event := range events {
+		if event.Type == eventType {
+			return
+		}
+	}
+
+	t.Fatalf("event %s was not published", eventType)
 }

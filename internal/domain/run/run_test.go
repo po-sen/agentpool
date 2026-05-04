@@ -39,6 +39,84 @@ func TestRunRejectsInvalidTransition(t *testing.T) {
 	assertStatus(t, item, run.StatusQueued)
 }
 
+func TestRunCompleteWithResultStoresSummary(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	item := newRun(t, now)
+	if err := item.StartRunning(now.Add(time.Second)); err != nil {
+		t.Fatalf("start running: %v", err)
+	}
+	item.FailureReason = "previous failure"
+
+	err := item.CompleteWithResult(now.Add(2*time.Second), "model output")
+	if err != nil {
+		t.Fatalf("complete with result: %v", err)
+	}
+
+	assertStatus(t, item, run.StatusCompleted)
+	if item.ResultSummary != "model output" {
+		t.Fatalf("ResultSummary = %q, want %q", item.ResultSummary, "model output")
+	}
+	if item.FailureReason != "" {
+		t.Fatalf("FailureReason = %q, want empty", item.FailureReason)
+	}
+}
+
+func TestRunFailWithReasonStoresFailureReason(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	item := newRun(t, now)
+	if err := item.StartRunning(now.Add(time.Second)); err != nil {
+		t.Fatalf("start running: %v", err)
+	}
+	item.ResultSummary = "stale result"
+
+	err := item.FailWithReason(now.Add(2*time.Second), "model failed")
+	if err != nil {
+		t.Fatalf("fail with reason: %v", err)
+	}
+
+	assertStatus(t, item, run.StatusFailed)
+	if item.FailureReason != "model failed" {
+		t.Fatalf("FailureReason = %q, want %q", item.FailureReason, "model failed")
+	}
+	if item.ResultSummary != "" {
+		t.Fatalf("ResultSummary = %q, want empty", item.ResultSummary)
+	}
+}
+
+func TestRunResultMethodsRejectInvalidTransitionsWithoutMutatingOutput(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	item := newRun(t, now)
+
+	err := item.CompleteWithResult(now.Add(time.Second), "model output")
+	if !errors.Is(err, run.ErrInvalidTransition) {
+		t.Fatalf("CompleteWithResult() error = %v, want %v", err, run.ErrInvalidTransition)
+	}
+	assertStatus(t, item, run.StatusQueued)
+	if item.ResultSummary != "" {
+		t.Fatalf("ResultSummary = %q, want empty", item.ResultSummary)
+	}
+
+	item.ResultSummary = "completed output"
+	if err := item.StartRunning(now.Add(2 * time.Second)); err != nil {
+		t.Fatalf("start running: %v", err)
+	}
+	if err := item.CompleteWithResult(now.Add(3*time.Second), "completed output"); err != nil {
+		t.Fatalf("complete with result: %v", err)
+	}
+
+	err = item.FailWithReason(now.Add(4*time.Second), "too late")
+	if !errors.Is(err, run.ErrInvalidTransition) {
+		t.Fatalf("FailWithReason() error = %v, want %v", err, run.ErrInvalidTransition)
+	}
+	assertStatus(t, item, run.StatusCompleted)
+	if item.ResultSummary != "completed output" {
+		t.Fatalf("ResultSummary = %q, want %q", item.ResultSummary, "completed output")
+	}
+	if item.FailureReason != "" {
+		t.Fatalf("FailureReason = %q, want empty", item.FailureReason)
+	}
+}
+
 func TestRunCancelTransitions(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	item := newRun(t, now)

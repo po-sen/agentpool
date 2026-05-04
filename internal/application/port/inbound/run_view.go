@@ -6,12 +6,19 @@ import (
 
 // RunView is the application-level output contract for run use cases.
 type RunView struct {
-	ID        string
-	Status    string
-	Task      TaskView
-	Steps     []StepView
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID            string
+	Status        string
+	Task          TaskView
+	Result        RunResultView
+	FailureReason string
+	Steps         []StepView
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// RunResultView is the application-level representation of successful run output.
+type RunResultView struct {
+	Summary string
 }
 
 // TaskView is the application-level representation of submitted task data.

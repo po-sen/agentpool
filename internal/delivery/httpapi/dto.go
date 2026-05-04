@@ -14,12 +14,18 @@ type createRunRequest struct {
 }
 
 type runResponse struct {
-	ID        string         `json:"id"`
-	Status    string         `json:"status"`
-	Task      taskResponse   `json:"task"`
-	Steps     []stepResponse `json:"steps"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	ID            string             `json:"id"`
+	Status        string             `json:"status"`
+	Task          taskResponse       `json:"task"`
+	Result        *runResultResponse `json:"result,omitempty"`
+	FailureReason string             `json:"failure_reason,omitempty"`
+	Steps         []stepResponse     `json:"steps"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+}
+
+type runResultResponse struct {
+	Summary string `json:"summary,omitempty"`
 }
 
 type taskResponse struct {
@@ -53,7 +59,7 @@ func toRunResponse(item inbound.RunView) runResponse {
 		})
 	}
 
-	return runResponse{
+	response := runResponse{
 		ID:     item.ID,
 		Status: item.Status,
 		Task: taskResponse{
@@ -62,8 +68,14 @@ func toRunResponse(item inbound.RunView) runResponse {
 			RepositoryURL: item.Task.RepositoryURL,
 			Branch:        item.Task.Branch,
 		},
-		Steps:     steps,
-		CreatedAt: item.CreatedAt,
-		UpdatedAt: item.UpdatedAt,
+		FailureReason: item.FailureReason,
+		Steps:         steps,
+		CreatedAt:     item.CreatedAt,
+		UpdatedAt:     item.UpdatedAt,
 	}
+	if item.Result.Summary != "" {
+		response.Result = &runResultResponse{Summary: item.Result.Summary}
+	}
+
+	return response
 }

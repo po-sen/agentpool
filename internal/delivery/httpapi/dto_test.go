@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +20,10 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 			RepositoryURL: "https://example.com/repo.git",
 			Branch:        "main",
 		},
+		Result: inbound.RunResultView{
+			Summary: "model output",
+		},
+		FailureReason: "model failed",
 		Steps: []inbound.StepView{
 			{
 				Name:      "execute",
@@ -38,6 +44,12 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	}
 	if response.Task.RepositoryURL != view.Task.RepositoryURL {
 		t.Fatalf("repository URL = %s, want %s", response.Task.RepositoryURL, view.Task.RepositoryURL)
+	}
+	if response.Result == nil || response.Result.Summary != view.Result.Summary {
+		t.Fatalf("Result = %#v, want summary %q", response.Result, view.Result.Summary)
+	}
+	if response.FailureReason != view.FailureReason {
+		t.Fatalf("FailureReason = %q, want %q", response.FailureReason, view.FailureReason)
 	}
 	if len(response.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(response.Steps))
@@ -65,5 +77,64 @@ func TestToRunResponsePreservesNilStepEndedAt(t *testing.T) {
 	}
 	if response.Steps[0].EndedAt != nil {
 		t.Fatalf("EndedAt = %v, want nil", response.Steps[0].EndedAt)
+	}
+}
+
+func TestRunResponseJSONIncludesCompletedResultSummary(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:        "run_test",
+		Status:    "completed",
+		Result:    inbound.RunResultView{Summary: "model output"},
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"result":{"summary":"model output"}`) {
+		t.Fatalf("response does not contain result summary: %s", got)
+	}
+}
+
+func TestRunResponseJSONIncludesFailureReason(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:            "run_test",
+		Status:        "failed",
+		FailureReason: "model generation failed",
+		Steps:         []inbound.StepView{},
+		CreatedAt:     time.Unix(100, 0).UTC(),
+		UpdatedAt:     time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"failure_reason":"model generation failed"`) {
+		t.Fatalf("response does not contain failure reason: %s", got)
+	}
+}
+
+func TestRunResponseJSONOmitsEmptyResultAndFailureReason(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:        "run_test",
+		Status:    "queued",
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if strings.Contains(got, `"result"`) {
+		t.Fatalf("response contains empty result: %s", got)
+	}
+	if strings.Contains(got, `"failure_reason"`) {
+		t.Fatalf("response contains empty failure reason: %s", got)
 	}
 }

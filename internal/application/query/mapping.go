@@ -34,8 +34,12 @@ func toRunView(item *run.Run) inbound.RunView {
 			RepositoryURL: item.Task.RepositoryURL,
 			Branch:        item.Task.Branch,
 		},
-		Steps:     steps,
-		CreatedAt: item.CreatedAt,
-		UpdatedAt: item.UpdatedAt,
+		Result: inbound.RunResultView{
+			Summary: item.ResultSummary,
+		},
+		FailureReason: item.FailureReason,
+		Steps:         steps,
+		CreatedAt:     item.CreatedAt,
+		UpdatedAt:     item.UpdatedAt,
 	}
 }

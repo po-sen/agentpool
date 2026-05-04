@@ -19,6 +19,8 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 		t.Fatalf("new run: %v", err)
 	}
 	item.Status = run.StatusRunning
+	item.ResultSummary = "model output"
+	item.FailureReason = "model failed"
 	item.Steps = []run.Step{
 		{
 			Name:      "execute",
@@ -36,6 +38,12 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	}
 	if view.Task.RepositoryURL != item.Task.RepositoryURL {
 		t.Fatalf("RepositoryURL = %s, want %s", view.Task.RepositoryURL, item.Task.RepositoryURL)
+	}
+	if view.Result.Summary != item.ResultSummary {
+		t.Fatalf("Result.Summary = %q, want %q", view.Result.Summary, item.ResultSummary)
+	}
+	if view.FailureReason != item.FailureReason {
+		t.Fatalf("FailureReason = %q, want %q", view.FailureReason, item.FailureReason)
 	}
 	if len(view.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(view.Steps))

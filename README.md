@@ -81,6 +81,46 @@ Get one run:
 curl -sS http://localhost:8080/v1/runs/run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
 ```
 
+Completed runs include the one-shot model response summary:
+
+```json
+{
+  "id": "run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1",
+  "status": "completed",
+  "task": {
+    "project_id": "demo",
+    "prompt": "Update the API handler tests",
+    "repository_url": "https://github.com/example/repo",
+    "branch": "main"
+  },
+  "result": {
+    "summary": "The requested handler tests were updated."
+  },
+  "steps": [],
+  "created_at": "2026-04-30T08:00:00Z",
+  "updated_at": "2026-04-30T08:00:01Z"
+}
+```
+
+Failed runs may include the failure reason:
+
+```json
+{
+  "id": "run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1",
+  "status": "failed",
+  "task": {
+    "project_id": "demo",
+    "prompt": "Update the API handler tests",
+    "repository_url": "https://github.com/example/repo",
+    "branch": "main"
+  },
+  "failure_reason": "run failed",
+  "steps": [],
+  "created_at": "2026-04-30T08:00:00Z",
+  "updated_at": "2026-04-30T08:00:01Z"
+}
+```
+
 Cancel a run:
 
 ```sh
@@ -214,6 +254,8 @@ waiting_approval
 failed
 cancelled
 ```
+
+Completed runs persist only the one-shot generation summary. AgentPool does not yet provide a full agent loop, tool execution, artifacts, logs, or streaming output.
 
 ## Architecture
 
