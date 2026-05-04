@@ -13,6 +13,7 @@ import (
 	"github.com/po-sen/agentpool/internal/config"
 	"github.com/po-sen/agentpool/internal/delivery/httpapi"
 	eventnoop "github.com/po-sen/agentpool/internal/infrastructure/event/noop"
+	gitlocal "github.com/po-sen/agentpool/internal/infrastructure/git/local"
 	gitnoop "github.com/po-sen/agentpool/internal/infrastructure/git/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/id/crypto"
 	"github.com/po-sen/agentpool/internal/infrastructure/llm/anthropic"
@@ -142,7 +143,10 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		toolRunner,
 		applicationagent.WithMaxTurns(a.config.Agent.MaxTurns),
 	)
-	gitProvider := gitnoop.NewProvider()
+	gitProvider, err := newGitProvider(a.config.Workspace)
+	if err != nil {
+		return nil, err
+	}
 	policyDecision := allowall.NewDecision()
 	secretBroker := secretnoop.NewBroker()
 
@@ -159,6 +163,14 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	})
 
 	return a.worker, nil
+}
+
+func newGitProvider(cfg config.WorkspaceConfig) (outbound.GitProvider, error) {
+	if cfg.Path == "" {
+		return gitnoop.NewProvider(), nil
+	}
+
+	return gitlocal.NewProvider(gitlocal.Config{WorkspacePath: cfg.Path})
 }
 
 func newModelClient(cfg config.LLMConfig) (outbound.ModelClient, error) {

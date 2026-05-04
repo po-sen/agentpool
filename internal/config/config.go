@@ -40,12 +40,18 @@ type AgentConfig struct {
 	MaxTurns int
 }
 
+// WorkspaceConfig contains local workspace source configuration.
+type WorkspaceConfig struct {
+	Path string
+}
+
 // Config contains runtime configuration.
 type Config struct {
-	HTTPAddr string
-	Version  string
-	LLM      LLMConfig
-	Agent    AgentConfig
+	HTTPAddr  string
+	Version   string
+	LLM       LLMConfig
+	Agent     AgentConfig
+	Workspace WorkspaceConfig
 }
 
 // Load reads runtime configuration from the environment.
@@ -60,10 +66,11 @@ func Load(version string) Config {
 	}
 
 	return Config{
-		HTTPAddr: addr,
-		Version:  version,
-		LLM:      loadLLMConfig(),
-		Agent:    loadAgentConfig(),
+		HTTPAddr:  addr,
+		Version:   version,
+		LLM:       loadLLMConfig(),
+		Agent:     loadAgentConfig(),
+		Workspace: loadWorkspaceConfig(),
 	}
 }
 
@@ -82,6 +89,12 @@ func loadLLMConfig() LLMConfig {
 func loadAgentConfig() AgentConfig {
 	return AgentConfig{
 		MaxTurns: intEnvOrDefault("AGENTPOOL_AGENT_MAX_TURNS", defaultAgentMaxTurns),
+	}
+}
+
+func loadWorkspaceConfig() WorkspaceConfig {
+	return WorkspaceConfig{
+		Path: os.Getenv("AGENTPOOL_WORKSPACE_PATH"),
 	}
 }
 

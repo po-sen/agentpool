@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"testing"
 )
 
@@ -23,6 +24,7 @@ func TestRunWorkerBuildsOpenAICompatibleModelProvider(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "openai_compatible")
 	t.Setenv("AGENTPOOL_MODEL_BASE_URL", "http://localhost:11434/v1")
 	t.Setenv("AGENTPOOL_MODEL_NAME", "local-model")
+	t.Setenv("AGENTPOOL_WORKSPACE_PATH", "")
 
 	app, err := New("test-version", io.Discard)
 	if err != nil {
@@ -49,6 +51,19 @@ func TestNewDoesNotValidateWorkerModelProvider(t *testing.T) {
 	}
 }
 
+func TestNewDoesNotValidateWorkspacePath(t *testing.T) {
+	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
+	t.Setenv("AGENTPOOL_WORKSPACE_PATH", filepath.Join(t.TempDir(), "missing"))
+
+	app, err := New("test-version", io.Discard)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if got, want := app.Version(), "agentpool test-version"; got != want {
+		t.Fatalf("Version() = %q, want %q", got, want)
+	}
+}
+
 func TestRunWorkerReturnsErrorForInvalidModelProvider(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "bad")
 
@@ -59,6 +74,34 @@ func TestRunWorkerReturnsErrorForInvalidModelProvider(t *testing.T) {
 
 	if err := app.RunWorker(context.Background()); err == nil {
 		t.Fatal("RunWorker() error = nil, want error")
+	}
+}
+
+func TestRunWorkerReturnsErrorForInvalidWorkspacePath(t *testing.T) {
+	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
+	t.Setenv("AGENTPOOL_WORKSPACE_PATH", filepath.Join(t.TempDir(), "missing"))
+
+	app, err := New("test-version", io.Discard)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if err := app.RunWorker(context.Background()); err == nil {
+		t.Fatal("RunWorker() error = nil, want error")
+	}
+}
+
+func TestRunDevReturnsErrorForInvalidWorkspacePath(t *testing.T) {
+	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
+	t.Setenv("AGENTPOOL_WORKSPACE_PATH", filepath.Join(t.TempDir(), "missing"))
+
+	app, err := New("test-version", io.Discard)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if err := app.RunDev(context.Background()); err == nil {
+		t.Fatal("RunDev() error = nil, want error")
 	}
 }
 
@@ -77,6 +120,25 @@ func TestNewLoadsAgentMaxTurnsConfig(t *testing.T) {
 
 func TestWorkerInstanceWiresCompositeToolRunner(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
+	t.Setenv("AGENTPOOL_WORKSPACE_PATH", "")
+
+	app, err := New("test-version", io.Discard)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	worker, err := app.workerInstance()
+	if err != nil {
+		t.Fatalf("workerInstance() error = %v", err)
+	}
+	if worker == nil {
+		t.Fatal("workerInstance() = nil")
+	}
+}
+
+func TestWorkerInstanceUsesConfiguredWorkspacePath(t *testing.T) {
+	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
+	t.Setenv("AGENTPOOL_WORKSPACE_PATH", t.TempDir())
 
 	app, err := New("test-version", io.Discard)
 	if err != nil {

@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol, builtin `echo`, and read-only workspace inspection tools; shell, writes, and real sandboxed execution are not implemented yet.
+- Agent loop v1 supports a minimal JSON action protocol, builtin `echo`, read-only workspace inspection tools, and an optional local workspace provider for dev runs; shell, writes, real git clone, and real sandboxed execution are not implemented yet.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -214,6 +214,14 @@ Agent loop turn limit defaults to `4` and can be overridden with:
 AGENTPOOL_AGENT_MAX_TURNS=6 go run ./cmd/agentpool dev
 ```
 
+Configure a local workspace for read-only workspace tools with:
+
+```sh
+AGENTPOOL_WORKSPACE_PATH="$(pwd)" go run ./cmd/agentpool dev
+```
+
+`AGENTPOOL_WORKSPACE_PATH` must point to an existing local directory. It is used as the workspace root for `list_files` and `read_file`. AgentPool resolves symlinks in the configured root, but this is not real git clone behavior yet.
+
 ## Model Providers
 
 AgentPool currently supports these model providers:
@@ -233,6 +241,7 @@ AGENTPOOL_MODEL_NAME
 AGENTPOOL_MODEL_API_KEY
 AGENTPOOL_MODEL_TIMEOUT
 AGENTPOOL_AGENT_MAX_TURNS
+AGENTPOOL_WORKSPACE_PATH
 ```
 
 Local Ollama example:
@@ -275,6 +284,30 @@ go run ./cmd/agentpool dev
 ```
 
 Use `openai_compatible` with a local or internal endpoint for air-gapped environments. Do not configure external providers when outbound internet is disabled.
+
+## Local Workspace
+
+For local development, point AgentPool at an existing workspace:
+
+```sh
+AGENTPOOL_WORKSPACE_PATH="$(pwd)" \
+AGENTPOOL_MODEL_PROVIDER=openai_compatible \
+AGENTPOOL_MODEL_BASE_URL=http://localhost:11434/v1 \
+AGENTPOOL_MODEL_NAME=qwen2.5-coder:7b \
+go run ./cmd/agentpool dev
+```
+
+Then submit a run that asks the agent to inspect the workspace:
+
+```sh
+curl -sS -X POST http://localhost:8080/v1/runs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "prompt": "Use tools to list files in the workspace root, then read README.md if it exists, then summarize what this project does."
+  }'
+```
+
+The local workspace provider returns the configured directory as `GitCheckout.Path`; the worker copies that path into `Sandbox.WorkspacePath`, and the read-only workspace tools use it as their root. Tools cannot escape the workspace. `read_file` only supports UTF-8 text files and size-limited content. This is not a git clone provider yet, and it does not run git commands or mutate files.
 
 ## Tools
 

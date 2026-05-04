@@ -20,6 +20,7 @@ func TestInternalPackageTopologyIsExplicitlyAllowlisted(t *testing.T) {
 		modulePath + "/internal/domain/approval":                      {},
 		modulePath + "/internal/domain/run":                           {},
 		modulePath + "/internal/infrastructure/event/noop":            {},
+		modulePath + "/internal/infrastructure/git/local":             {},
 		modulePath + "/internal/infrastructure/git/noop":              {},
 		modulePath + "/internal/infrastructure/id/crypto":             {},
 		modulePath + "/internal/infrastructure/llm/anthropic":         {},
