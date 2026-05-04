@@ -9,6 +9,7 @@ import (
 
 func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("AGENTPOOL_HTTP_ADDR", "")
+	t.Setenv("AGENTPOOL_AGENT_MAX_TURNS", "")
 	clearModelEnv(t)
 
 	cfg := config.Load("")
@@ -26,6 +27,9 @@ func TestLoadUsesDefaults(t *testing.T) {
 	}
 	if cfg.LLM.Timeout != 30*time.Second {
 		t.Fatalf("LLM.Timeout = %s, want 30s", cfg.LLM.Timeout)
+	}
+	if cfg.Agent.MaxTurns != 4 {
+		t.Fatalf("Agent.MaxTurns = %d, want 4", cfg.Agent.MaxTurns)
 	}
 }
 
@@ -63,6 +67,28 @@ func TestLoadUsesEnvironmentLLMConfig(t *testing.T) {
 	}
 	if cfg.LLM.Timeout != 5*time.Second {
 		t.Fatalf("LLM.Timeout = %s, want 5s", cfg.LLM.Timeout)
+	}
+}
+
+func TestLoadUsesEnvironmentAgentConfig(t *testing.T) {
+	t.Setenv("AGENTPOOL_AGENT_MAX_TURNS", "7")
+
+	cfg := config.Load("dev")
+	if cfg.Agent.MaxTurns != 7 {
+		t.Fatalf("Agent.MaxTurns = %d, want 7", cfg.Agent.MaxTurns)
+	}
+}
+
+func TestLoadFallsBackForInvalidAgentMaxTurns(t *testing.T) {
+	for _, value := range []string{"bad", "0", "-1"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("AGENTPOOL_AGENT_MAX_TURNS", value)
+
+			cfg := config.Load("dev")
+			if cfg.Agent.MaxTurns != 4 {
+				t.Fatalf("Agent.MaxTurns = %d, want 4", cfg.Agent.MaxTurns)
+			}
+		})
 	}
 }
 

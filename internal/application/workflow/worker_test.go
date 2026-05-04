@@ -78,6 +78,61 @@ func TestWorkerProcessOneCompletesQueuedRun(t *testing.T) {
 	}
 }
 
+func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	if err := queue.Enqueue(ctx, item.ID); err != nil {
+		t.Fatalf("enqueue run: %v", err)
+	}
+
+	worker := newWorkerWithPorts(
+		queue,
+		repo,
+		publisher,
+		now,
+		fakeSandboxProvider{},
+		&toolCallingModelClient{},
+		fakeGitProvider{},
+	)
+
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored, err := repo.FindByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("find run: %v", err)
+	}
+	if stored.ResultSummary != "done with tool" {
+		t.Fatalf("stored result summary = %q, want done with tool", stored.ResultSummary)
+	}
+	assertSteps(t, stored.Steps, []wantStep{
+		{
+			name:    "prepare",
+			status:  run.StatusCompleted,
+			message: "Prepared policy, secrets, and source context",
+			ended:   true,
+		},
+		{
+			name:    "agent",
+			status:  run.StatusCompleted,
+			message: "Agent generated result summary after 1 tool call(s)",
+			ended:   true,
+		},
+	})
+}
+
 func TestWorkerProcessOneEmptyQueue(t *testing.T) {
 	ctx := context.Background()
 	worker := newWorker(&fakeRunQueue{}, newFakeRunRepository(), &recordingPublisher{}, time.Unix(100, 0).UTC())
@@ -346,7 +401,7 @@ func TestWorkerProcessOneDoesNotLeavePrepareStepRunningWhenCancelledDuringPrepar
 			StateStore: repo,
 			Events:     publisher,
 			Sandbox:    fakeSandboxProvider{},
-			Agent:      applicationagent.NewRunner(fakeModelClient{}),
+			Agent:      applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
 			Git:        fakeGitProvider{},
 			Policy: cancellingPolicyDecision{
 				repo: repo,
@@ -520,7 +575,7 @@ func newWorkerWithPorts(
 			StateStore: repo,
 			Events:     publisher,
 			Sandbox:    sandbox,
-			Agent:      applicationagent.NewRunner(model),
+			Agent:      applicationagent.NewRunner(model, fakeToolRunner{}),
 			Git:        git,
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
@@ -619,6 +674,21 @@ type fakeModelClient struct{}
 
 func (c fakeModelClient) Generate(context.Context, outbound.ModelRequest) (outbound.ModelResponse, error) {
 	return outbound.ModelResponse{Content: "done"}, nil
+}
+
+type toolCallingModelClient struct {
+	calls int
+}
+
+func (c *toolCallingModelClient) Generate(context.Context, outbound.ModelRequest) (outbound.ModelResponse, error) {
+	c.calls++
+	if c.calls == 1 {
+		return outbound.ModelResponse{
+			Content: `{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}`,
+		}, nil
+	}
+
+	return outbound.ModelResponse{Content: `{"type":"final","summary":"done with tool"}`}, nil
 }
 
 type cancellingModelClient struct {
@@ -726,6 +796,16 @@ type fakeSecretBroker struct{}
 
 func (b fakeSecretBroker) Resolve(context.Context, outbound.SecretRequest) (outbound.SecretBundle, error) {
 	return outbound.SecretBundle{Values: map[string]string{}}, nil
+}
+
+type fakeToolRunner struct{}
+
+func (r fakeToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
+	return []outbound.ToolDefinition{{Name: "echo", Description: "Returns text"}}, nil
+}
+
+func (r fakeToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound.ToolResult, error) {
+	return outbound.ToolResult{Content: "tool result"}, nil
 }
 
 type recordingPublisher struct {

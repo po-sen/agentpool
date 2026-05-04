@@ -2,11 +2,13 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"time"
 )
 
 const defaultHTTPAddr = ":8080"
 const defaultModelTimeout = 30 * time.Second
+const defaultAgentMaxTurns = 4
 
 // ModelProvider identifies the configured model provider.
 type ModelProvider string
@@ -33,11 +35,17 @@ type LLMConfig struct {
 	Timeout  time.Duration
 }
 
+// AgentConfig contains application agent configuration.
+type AgentConfig struct {
+	MaxTurns int
+}
+
 // Config contains runtime configuration.
 type Config struct {
 	HTTPAddr string
 	Version  string
 	LLM      LLMConfig
+	Agent    AgentConfig
 }
 
 // Load reads runtime configuration from the environment.
@@ -55,6 +63,7 @@ func Load(version string) Config {
 		HTTPAddr: addr,
 		Version:  version,
 		LLM:      loadLLMConfig(),
+		Agent:    loadAgentConfig(),
 	}
 }
 
@@ -67,6 +76,12 @@ func loadLLMConfig() LLMConfig {
 		Model:    envOrDefault("AGENTPOOL_MODEL_NAME", defaultModelName(provider)),
 		APIKey:   os.Getenv("AGENTPOOL_MODEL_API_KEY"),
 		Timeout:  durationEnvOrDefault("AGENTPOOL_MODEL_TIMEOUT", defaultModelTimeout),
+	}
+}
+
+func loadAgentConfig() AgentConfig {
+	return AgentConfig{
+		MaxTurns: intEnvOrDefault("AGENTPOOL_AGENT_MAX_TURNS", defaultAgentMaxTurns),
 	}
 }
 
@@ -119,4 +134,18 @@ func durationEnvOrDefault(name string, fallback time.Duration) time.Duration {
 	}
 
 	return duration
+}
+
+func intEnvOrDefault(name string, fallback int) int {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+
+	return parsed
 }

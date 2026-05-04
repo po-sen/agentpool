@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - The default model client is noop.
-- Real model provider adapters are basic one-shot generation clients; there is no full agent loop or tool execution yet.
+- Agent loop v1 supports a minimal JSON action protocol and a safe builtin echo tool; real sandboxed tools are not implemented yet.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -208,6 +208,12 @@ Override the address with:
 AGENTPOOL_HTTP_ADDR=127.0.0.1:9000 go run ./cmd/agentpool dev
 ```
 
+Agent loop turn limit defaults to `4` and can be overridden with:
+
+```sh
+AGENTPOOL_AGENT_MAX_TURNS=6 go run ./cmd/agentpool dev
+```
+
 ## Model Providers
 
 AgentPool currently supports these model providers:
@@ -226,6 +232,7 @@ AGENTPOOL_MODEL_BASE_URL
 AGENTPOOL_MODEL_NAME
 AGENTPOOL_MODEL_API_KEY
 AGENTPOOL_MODEL_TIMEOUT
+AGENTPOOL_AGENT_MAX_TURNS
 ```
 
 Local Ollama example:
@@ -268,6 +275,33 @@ go run ./cmd/agentpool dev
 ```
 
 Use `openai_compatible` with a local or internal endpoint for air-gapped environments. Do not configure external providers when outbound internet is disabled.
+
+## Tools
+
+AgentPool now has a minimal application-owned tool loop. Models can respond with a JSON `tool_call` action, the agent runner executes the tool through the `ToolRunner` port, and the tool result is fed back to the model for a final JSON answer.
+
+The first builtin tool is `echo`. It returns the provided `text` argument and exists to validate tool plumbing:
+
+```json
+{
+  "type": "tool_call",
+  "tool": "echo",
+  "arguments": {
+    "text": "hello"
+  }
+}
+```
+
+Final answers use:
+
+```json
+{
+  "type": "final",
+  "summary": "Finished the task."
+}
+```
+
+Tool support is currently for plumbing validation. There is still no shell, filesystem access, Docker execution, Git mutation, network fetch, package install, or arbitrary command execution. Real tools will require sandbox and policy controls.
 
 ## Run Lifecycle
 

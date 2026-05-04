@@ -14,6 +14,7 @@ func TestIntegrationPortContracts(t *testing.T) {
 	var git outbound.GitProvider = fakeGitProvider{}
 	var policy outbound.PolicyDecisionPort = fakePolicyDecision{}
 	var secrets outbound.SecretBroker = fakeSecretBroker{}
+	var tools outbound.ToolRunner = fakeToolRunner{}
 
 	ctx := context.Background()
 	if _, err := ids.NewRunID(); err != nil {
@@ -33,6 +34,12 @@ func TestIntegrationPortContracts(t *testing.T) {
 	}
 	if _, err := secrets.Resolve(ctx, outbound.SecretRequest{ProjectID: "project_test"}); err != nil {
 		t.Fatalf("Resolve() error = %v", err)
+	}
+	if _, err := tools.ListTools(ctx, outbound.ToolListRequest{RunID: "run_test"}); err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if _, err := tools.RunTool(ctx, outbound.ToolCall{RunID: "run_test", Name: "echo"}); err != nil {
+		t.Fatalf("RunTool() error = %v", err)
 	}
 }
 
@@ -68,4 +75,14 @@ type fakeSecretBroker struct{}
 
 func (fakeSecretBroker) Resolve(context.Context, outbound.SecretRequest) (outbound.SecretBundle, error) {
 	return outbound.SecretBundle{Values: map[string]string{}}, nil
+}
+
+type fakeToolRunner struct{}
+
+func (fakeToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
+	return []outbound.ToolDefinition{{Name: "echo", Description: "test tool"}}, nil
+}
+
+func (fakeToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound.ToolResult, error) {
+	return outbound.ToolResult{Content: "done"}, nil
 }

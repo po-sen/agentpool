@@ -31,6 +31,7 @@ func TestInternalPackageTopologyIsExplicitlyAllowlisted(t *testing.T) {
 		modulePath + "/internal/infrastructure/policy/allowall":       {},
 		modulePath + "/internal/infrastructure/sandbox/noop":          {},
 		modulePath + "/internal/infrastructure/secret/noop":           {},
+		modulePath + "/internal/infrastructure/tool/builtin":          {},
 		modulePath + "/internal/runtime/httpserver":                   {},
 		modulePath + "/internal/runtime/logger":                       {},
 		modulePath + "/internal/test":                                 {},

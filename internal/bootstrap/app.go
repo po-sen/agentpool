@@ -24,6 +24,7 @@ import (
 	"github.com/po-sen/agentpool/internal/infrastructure/policy/allowall"
 	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
 	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
+	"github.com/po-sen/agentpool/internal/infrastructure/tool/builtin"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
 )
@@ -128,7 +129,12 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	agentRunner := applicationagent.NewRunner(modelClient)
+	toolRunner := builtin.NewRunner()
+	agentRunner := applicationagent.NewRunner(
+		modelClient,
+		toolRunner,
+		applicationagent.WithMaxTurns(a.config.Agent.MaxTurns),
+	)
 	gitProvider := gitnoop.NewProvider()
 	policyDecision := allowall.NewDecision()
 	secretBroker := secretnoop.NewBroker()

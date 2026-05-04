@@ -60,9 +60,7 @@ func NewClient(cfg Config) (*Client, error) {
 
 // Generate sends a generateContent request and returns generated content.
 func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbound.ModelResponse, error) {
-	body, err := json.Marshal(generateContentRequest{
-		Contents: toGeminiContents(req.Messages),
-	})
+	body, err := json.Marshal(toGenerateContentRequest(req.Messages))
 	if err != nil {
 		return outbound.ModelResponse{}, err
 	}
@@ -104,7 +102,12 @@ func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbo
 }
 
 type generateContentRequest struct {
-	Contents []geminiContent `json:"contents"`
+	SystemInstruction *geminiSystemInstruction `json:"system_instruction,omitempty"`
+	Contents          []geminiContent          `json:"contents"`
+}
+
+type geminiSystemInstruction struct {
+	Parts []geminiPart `json:"parts"`
 }
 
 type geminiContent struct {
@@ -127,13 +130,51 @@ type generateContentResponse struct {
 func toGeminiContents(messages []outbound.ModelMessage) []geminiContent {
 	items := make([]geminiContent, 0, len(messages))
 	for _, message := range messages {
+		if message.Role == "system" {
+			continue
+		}
+
 		items = append(items, geminiContent{
-			Role:  message.Role,
+			Role:  toGeminiRole(message.Role),
 			Parts: []geminiPart{{Text: message.Content}},
 		})
 	}
 
 	return items
+}
+
+func toGenerateContentRequest(messages []outbound.ModelMessage) generateContentRequest {
+	request := generateContentRequest{
+		Contents: toGeminiContents(messages),
+	}
+
+	system := toGeminiSystemInstruction(messages)
+	if system != "" {
+		request.SystemInstruction = &geminiSystemInstruction{
+			Parts: []geminiPart{{Text: system}},
+		}
+	}
+
+	return request
+}
+
+func toGeminiSystemInstruction(messages []outbound.ModelMessage) string {
+	var parts []string
+	for _, message := range messages {
+		if message.Role == "system" {
+			parts = append(parts, message.Content)
+		}
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
+func toGeminiRole(role string) string {
+	if role == "assistant" {
+		return "model"
+	}
+
+	return "user"
 }
 
 func readBodySnippet(reader io.Reader) string {

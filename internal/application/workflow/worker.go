@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/po-sen/agentpool/internal/application/agent"
@@ -276,7 +277,7 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run) (agent.RunResult, 
 
 	now = w.clock()
 	expectedStatus = item.Status
-	if err := item.CompleteStep(agentStepName, agentStepCompletedMessage, now); err != nil {
+	if err := item.CompleteStep(agentStepName, agentCompletedMessage(result.ToolCallCount), now); err != nil {
 		return agent.RunResult{}, err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
@@ -363,4 +364,12 @@ func failedStepMessage(name string) string {
 	default:
 		return "Run step failed"
 	}
+}
+
+func agentCompletedMessage(toolCallCount int) string {
+	if toolCallCount <= 0 {
+		return agentStepCompletedMessage
+	}
+
+	return fmt.Sprintf("Agent generated result summary after %d tool call(s)", toolCallCount)
 }

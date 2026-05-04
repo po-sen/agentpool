@@ -63,6 +63,7 @@ func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbo
 	body, err := json.Marshal(messagesRequest{
 		Model:     c.model,
 		MaxTokens: 1024,
+		System:    toAnthropicSystem(req.Messages),
 		Messages:  toAnthropicMessages(req.Messages),
 	})
 	if err != nil {
@@ -106,6 +107,7 @@ func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbo
 type messagesRequest struct {
 	Model     string             `json:"model"`
 	MaxTokens int                `json:"max_tokens"`
+	System    string             `json:"system,omitempty"`
 	Messages  []anthropicMessage `json:"messages"`
 }
 
@@ -124,6 +126,10 @@ type messagesResponse struct {
 func toAnthropicMessages(messages []outbound.ModelMessage) []anthropicMessage {
 	items := make([]anthropicMessage, 0, len(messages))
 	for _, message := range messages {
+		if message.Role == "system" {
+			continue
+		}
+
 		items = append(items, anthropicMessage{
 			Role:    message.Role,
 			Content: message.Content,
@@ -131,6 +137,17 @@ func toAnthropicMessages(messages []outbound.ModelMessage) []anthropicMessage {
 	}
 
 	return items
+}
+
+func toAnthropicSystem(messages []outbound.ModelMessage) string {
+	var parts []string
+	for _, message := range messages {
+		if message.Role == "system" {
+			parts = append(parts, message.Content)
+		}
+	}
+
+	return strings.Join(parts, "\n\n")
 }
 
 func readBodySnippet(reader io.Reader) string {

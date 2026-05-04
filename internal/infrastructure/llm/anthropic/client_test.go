@@ -14,12 +14,22 @@ import (
 func TestClientGenerateSendsHeadersAndParsesText(t *testing.T) {
 	var apiKey string
 	var version string
+	var requestBody struct {
+		System   string `json:"system"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {
 			t.Fatalf("path = %s, want /v1/messages", r.URL.Path)
 		}
 		apiKey = r.Header.Get("x-api-key")
 		version = r.Header.Get("anthropic-version")
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
 		writeJSON(t, w, map[string]any{
 			"content": []map[string]any{
 				{"type": "text", "text": "done"},
@@ -38,7 +48,11 @@ func TestClientGenerateSendsHeadersAndParsesText(t *testing.T) {
 	}
 
 	response, err := client.Generate(context.Background(), outbound.ModelRequest{
-		Messages: []outbound.ModelMessage{{Role: "user", Content: "do work"}},
+		Messages: []outbound.ModelMessage{
+			{Role: "system", Content: "follow protocol"},
+			{Role: "user", Content: "do work"},
+			{Role: "assistant", Content: "thinking"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -51,6 +65,18 @@ func TestClientGenerateSendsHeadersAndParsesText(t *testing.T) {
 	}
 	if version != "2023-06-01" {
 		t.Fatalf("anthropic-version = %q, want 2023-06-01", version)
+	}
+	if requestBody.System != "follow protocol" {
+		t.Fatalf("system = %q, want follow protocol", requestBody.System)
+	}
+	if len(requestBody.Messages) != 2 {
+		t.Fatalf("len(messages) = %d, want 2", len(requestBody.Messages))
+	}
+	if requestBody.Messages[0].Role != "user" {
+		t.Fatalf("messages[0].Role = %q, want user", requestBody.Messages[0].Role)
+	}
+	if requestBody.Messages[1].Role != "assistant" {
+		t.Fatalf("messages[1].Role = %q, want assistant", requestBody.Messages[1].Role)
 	}
 }
 
