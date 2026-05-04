@@ -130,6 +130,57 @@ func TestRunCancelTransitions(t *testing.T) {
 	}
 }
 
+func TestRunCancelEndsRunningSteps(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	item := newRun(t, now)
+	if err := item.StartStep("prepare", "Preparing execution", now.Add(time.Second)); err != nil {
+		t.Fatalf("start prepare step: %v", err)
+	}
+	if err := item.CompleteStep("prepare", "Prepared execution", now.Add(2*time.Second)); err != nil {
+		t.Fatalf("complete prepare step: %v", err)
+	}
+	if err := item.StartStep("agent", "Agent execution started", now.Add(3*time.Second)); err != nil {
+		t.Fatalf("start agent step: %v", err)
+	}
+
+	if err := item.Cancel(now.Add(4 * time.Second)); err != nil {
+		t.Fatalf("cancel run: %v", err)
+	}
+
+	if item.Steps[0].Status != run.StatusCompleted {
+		t.Fatalf("prepare step status = %s, want %s", item.Steps[0].Status, run.StatusCompleted)
+	}
+	agentStep := item.Steps[1]
+	if agentStep.Status != run.StatusCancelled {
+		t.Fatalf("agent step status = %s, want %s", agentStep.Status, run.StatusCancelled)
+	}
+	if agentStep.Message != "Run cancelled" {
+		t.Fatalf("agent step message = %q, want Run cancelled", agentStep.Message)
+	}
+	if !agentStep.EndedAt.Equal(now.Add(4 * time.Second)) {
+		t.Fatalf("agent step ended at = %v, want %v", agentStep.EndedAt, now.Add(4*time.Second))
+	}
+}
+
+func TestRunCloneReturnsDetachedStepSlice(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	item := newRun(t, now)
+	if err := item.StartStep("prepare", "Preparing execution", now.Add(time.Second)); err != nil {
+		t.Fatalf("start step: %v", err)
+	}
+
+	clone := item.Clone()
+	clone.Steps[0].Message = "changed"
+	clone.Steps = append(clone.Steps, run.Step{Name: "agent"})
+
+	if len(item.Steps) != 1 {
+		t.Fatalf("len(original Steps) = %d, want 1", len(item.Steps))
+	}
+	if item.Steps[0].Message != "Preparing execution" {
+		t.Fatalf("original step message = %q, want Preparing execution", item.Steps[0].Message)
+	}
+}
+
 func TestTaskSpecValidation(t *testing.T) {
 	tests := []struct {
 		name string

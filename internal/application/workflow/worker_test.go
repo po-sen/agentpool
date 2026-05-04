@@ -48,6 +48,20 @@ func TestWorkerProcessOneCompletesQueuedRun(t *testing.T) {
 	if stored.FailureReason != "" {
 		t.Fatalf("stored failure reason = %q, want empty", stored.FailureReason)
 	}
+	assertSteps(t, stored.Steps, []wantStep{
+		{
+			name:    "prepare",
+			status:  run.StatusCompleted,
+			message: "Prepared policy, secrets, and source context",
+			ended:   true,
+		},
+		{
+			name:    "agent",
+			status:  run.StatusCompleted,
+			message: "Agent generated result summary",
+			ended:   true,
+		},
+	})
 
 	wantEvents := []string{
 		outbound.EventRunPreparing,
@@ -104,6 +118,20 @@ func TestWorkerProcessOneKeepsCompletedRunWhenCompletedEventFails(t *testing.T) 
 	if stored.Status != run.StatusCompleted {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCompleted)
 	}
+	assertSteps(t, stored.Steps, []wantStep{
+		{
+			name:    "prepare",
+			status:  run.StatusCompleted,
+			message: "Prepared policy, secrets, and source context",
+			ended:   true,
+		},
+		{
+			name:    "agent",
+			status:  run.StatusCompleted,
+			message: "Agent generated result summary",
+			ended:   true,
+		},
+	})
 
 	assertEventNotPublished(t, publisher.events, outbound.EventRunFailed)
 }
@@ -156,8 +184,78 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 	if stored.ResultSummary != "" {
 		t.Fatalf("stored result summary = %q, want empty", stored.ResultSummary)
 	}
+	assertSteps(t, stored.Steps, []wantStep{
+		{
+			name:    "prepare",
+			status:  run.StatusCompleted,
+			message: "Prepared policy, secrets, and source context",
+			ended:   true,
+		},
+		{
+			name:    "agent",
+			status:  run.StatusFailed,
+			message: "Agent execution failed",
+			ended:   true,
+		},
+	})
 
 	assertEventNotPublished(t, publisher.events, outbound.EventRunCompleted)
+	assertEventPublished(t, publisher.events, outbound.EventRunFailed)
+}
+
+func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	if err := queue.Enqueue(ctx, item.ID); err != nil {
+		t.Fatalf("enqueue run: %v", err)
+	}
+
+	worker := newWorkerWithPorts(
+		queue,
+		repo,
+		publisher,
+		now,
+		fakeSandboxProvider{},
+		fakeModelClient{},
+		failingGitProvider{},
+	)
+
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored, err := repo.FindByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("find run: %v", err)
+	}
+	if stored.Status != run.StatusFailed {
+		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusFailed)
+	}
+	if stored.FailureReason != "run failed" {
+		t.Fatalf("stored failure reason = %q, want run failed", stored.FailureReason)
+	}
+	assertSteps(t, stored.Steps, []wantStep{
+		{
+			name:    "prepare",
+			status:  run.StatusFailed,
+			message: "Preparation failed",
+			ended:   true,
+		},
+	})
+
+	assertEventPublished(t, publisher.events, outbound.EventRunPreparing)
+	assertEventNotPublished(t, publisher.events, outbound.EventRunStarted)
 	assertEventPublished(t, publisher.events, outbound.EventRunFailed)
 }
 
@@ -204,7 +302,83 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationDuringExecution(t *testing.
 	if stored.Status != run.StatusCancelled {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCancelled)
 	}
+	assertSteps(t, stored.Steps, []wantStep{
+		{
+			name:    "prepare",
+			status:  run.StatusCompleted,
+			message: "Prepared policy, secrets, and source context",
+			ended:   true,
+		},
+		{
+			name:    "agent",
+			status:  run.StatusCancelled,
+			message: "Run cancelled",
+			ended:   true,
+		},
+	})
 
+	assertEventNotPublished(t, publisher.events, outbound.EventRunCompleted)
+	assertEventNotPublished(t, publisher.events, outbound.EventRunFailed)
+}
+
+func TestWorkerProcessOneDoesNotLeavePrepareStepRunningWhenCancelledDuringPreparation(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	if err := queue.Enqueue(ctx, item.ID); err != nil {
+		t.Fatalf("enqueue run: %v", err)
+	}
+
+	worker := workflow.NewWorker(
+		workflow.WorkerDependencies{
+			Queue:      queue,
+			Repo:       repo,
+			StateStore: repo,
+			Events:     publisher,
+			Sandbox:    fakeSandboxProvider{},
+			Agent:      applicationagent.NewRunner(fakeModelClient{}),
+			Git:        fakeGitProvider{},
+			Policy: cancellingPolicyDecision{
+				repo: repo,
+				id:   item.ID,
+				now:  now.Add(time.Second),
+			},
+			Secrets: fakeSecretBroker{},
+		},
+		workflow.WithClock(func() time.Time { return now }),
+	)
+
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored, err := repo.FindByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("find run: %v", err)
+	}
+	if stored.Status != run.StatusCancelled {
+		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCancelled)
+	}
+	assertSteps(t, stored.Steps, []wantStep{
+		{
+			name:    "prepare",
+			status:  run.StatusCancelled,
+			message: "Run cancelled",
+			ended:   true,
+		},
+	})
+
+	assertEventNotPublished(t, publisher.events, outbound.EventRunStarted)
 	assertEventNotPublished(t, publisher.events, outbound.EventRunCompleted)
 	assertEventNotPublished(t, publisher.events, outbound.EventRunFailed)
 }
@@ -252,6 +426,20 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationWhenExecutionFails(t *testi
 	if stored.Status != run.StatusCancelled {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCancelled)
 	}
+	assertSteps(t, stored.Steps, []wantStep{
+		{
+			name:    "prepare",
+			status:  run.StatusCompleted,
+			message: "Prepared policy, secrets, and source context",
+			ended:   true,
+		},
+		{
+			name:    "agent",
+			status:  run.StatusCancelled,
+			message: "Run cancelled",
+			ended:   true,
+		},
+	})
 
 	assertEventNotPublished(t, publisher.events, outbound.EventRunCompleted)
 	assertEventNotPublished(t, publisher.events, outbound.EventRunFailed)
@@ -499,9 +687,38 @@ func (p fakeGitProvider) Fetch(context.Context, outbound.GitFetchRequest) (outbo
 	return outbound.GitCheckout{Path: "/tmp/repo"}, nil
 }
 
+var errGitFetchFailed = errors.New("git fetch failed")
+
+type failingGitProvider struct{}
+
+func (p failingGitProvider) Fetch(context.Context, outbound.GitFetchRequest) (outbound.GitCheckout, error) {
+	return outbound.GitCheckout{}, errGitFetchFailed
+}
+
 type fakePolicyDecision struct{}
 
 func (p fakePolicyDecision) Decide(context.Context, outbound.PolicyDecisionRequest) (outbound.PolicyDecision, error) {
+	return outbound.PolicyDecision{Allowed: true}, nil
+}
+
+type cancellingPolicyDecision struct {
+	repo *fakeRunRepository
+	id   run.RunID
+	now  time.Time
+}
+
+func (p cancellingPolicyDecision) Decide(ctx context.Context, _ outbound.PolicyDecisionRequest) (outbound.PolicyDecision, error) {
+	item, err := p.repo.FindByID(ctx, p.id)
+	if err != nil {
+		return outbound.PolicyDecision{}, err
+	}
+	if err := item.Cancel(p.now); err != nil {
+		return outbound.PolicyDecision{}, err
+	}
+	if err := p.repo.Save(ctx, item); err != nil {
+		return outbound.PolicyDecision{}, err
+	}
+
 	return outbound.PolicyDecision{Allowed: true}, nil
 }
 
@@ -558,4 +775,39 @@ func assertEventPublished(t *testing.T, events []outbound.Event, eventType strin
 	}
 
 	t.Fatalf("event %s was not published", eventType)
+}
+
+type wantStep struct {
+	name    string
+	status  run.Status
+	message string
+	ended   bool
+}
+
+func assertSteps(t *testing.T, got []run.Step, want []wantStep) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("len(Steps) = %d, want %d; got %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].Name != want[i].name {
+			t.Fatalf("Steps[%d].Name = %q, want %q", i, got[i].Name, want[i].name)
+		}
+		if got[i].Status != want[i].status {
+			t.Fatalf("Steps[%d].Status = %s, want %s", i, got[i].Status, want[i].status)
+		}
+		if got[i].Message != want[i].message {
+			t.Fatalf("Steps[%d].Message = %q, want %q", i, got[i].Message, want[i].message)
+		}
+		if got[i].StartedAt.IsZero() {
+			t.Fatalf("Steps[%d].StartedAt is zero", i)
+		}
+		if want[i].ended && got[i].EndedAt.IsZero() {
+			t.Fatalf("Steps[%d].EndedAt is zero", i)
+		}
+		if !want[i].ended && !got[i].EndedAt.IsZero() {
+			t.Fatalf("Steps[%d].EndedAt = %v, want zero", i, got[i].EndedAt)
+		}
+	}
 }

@@ -99,6 +99,46 @@ func TestRunResponseJSONIncludesCompletedResultSummary(t *testing.T) {
 	}
 }
 
+func TestRunResponseJSONIncludesCompletedSteps(t *testing.T) {
+	endedAt := time.Unix(102, 0).UTC()
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:     "run_test",
+		Status: "completed",
+		Steps: []inbound.StepView{
+			{
+				Name:      "prepare",
+				Status:    "completed",
+				Message:   "Prepared policy, secrets, and source context",
+				StartedAt: time.Unix(101, 0).UTC(),
+				EndedAt:   &endedAt,
+			},
+			{
+				Name:      "agent",
+				Status:    "completed",
+				Message:   "Agent generated result summary",
+				StartedAt: time.Unix(101, 0).UTC(),
+				EndedAt:   &endedAt,
+			},
+		},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(103, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"name":"prepare"`) {
+		t.Fatalf("response does not contain prepare step: %s", got)
+	}
+	if !strings.Contains(got, `"message":"Agent generated result summary"`) {
+		t.Fatalf("response does not contain agent step message: %s", got)
+	}
+	if !strings.Contains(got, `"ended_at"`) {
+		t.Fatalf("response does not contain ended_at for completed steps: %s", got)
+	}
+}
+
 func TestRunResponseJSONIncludesFailureReason(t *testing.T) {
 	payload, err := json.Marshal(toRunResponse(inbound.RunView{
 		ID:            "run_test",
@@ -115,6 +155,40 @@ func TestRunResponseJSONIncludesFailureReason(t *testing.T) {
 	got := string(payload)
 	if !strings.Contains(got, `"failure_reason":"model generation failed"`) {
 		t.Fatalf("response does not contain failure reason: %s", got)
+	}
+}
+
+func TestRunResponseJSONIncludesFailedStep(t *testing.T) {
+	endedAt := time.Unix(102, 0).UTC()
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:            "run_test",
+		Status:        "failed",
+		FailureReason: "run failed",
+		Steps: []inbound.StepView{
+			{
+				Name:      "agent",
+				Status:    "failed",
+				Message:   "Agent execution failed",
+				StartedAt: time.Unix(101, 0).UTC(),
+				EndedAt:   &endedAt,
+			},
+		},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(103, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"failure_reason":"run failed"`) {
+		t.Fatalf("response does not contain failure reason: %s", got)
+	}
+	if !strings.Contains(got, `"name":"agent"`) {
+		t.Fatalf("response does not contain agent step: %s", got)
+	}
+	if !strings.Contains(got, `"status":"failed"`) {
+		t.Fatalf("response does not contain failed step status: %s", got)
 	}
 }
 

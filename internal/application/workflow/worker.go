@@ -14,6 +14,17 @@ const defaultPollInterval = 200 * time.Millisecond
 const sandboxCleanupTimeout = 30 * time.Second
 const publicFailureReason = "run failed"
 
+const (
+	prepareStepName             = "prepare"
+	prepareStepRunningMessage   = "Preparing policy, secrets, and source context"
+	prepareStepCompletedMessage = "Prepared policy, secrets, and source context"
+	prepareStepFailedMessage    = "Preparation failed"
+	agentStepName               = "agent"
+	agentStepRunningMessage     = "Agent execution started"
+	agentStepCompletedMessage   = "Agent generated result summary"
+	agentStepFailedMessage      = "Agent execution failed"
+)
+
 var errRunStateChanged = errors.New("run state changed")
 
 // Worker processes queued runs through abstract outbound ports.
@@ -164,15 +175,14 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 func (w *Worker) prepareRun(ctx context.Context, item *run.Run) error {
 	now := w.clock()
 	expectedStatus := item.Status
+	if err := item.StartStep(prepareStepName, prepareStepRunningMessage, now); err != nil {
+		return err
+	}
 	if err := item.StartPreparing(now); err != nil {
 		return err
 	}
-	saved, err := w.stateStore.SaveIfStatus(ctx, item, expectedStatus)
-	if err != nil {
+	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
 		return err
-	}
-	if !saved {
-		return errRunStateChanged
 	}
 	if err := w.publish(ctx, outbound.EventRunPreparing, item.ID, now); err != nil {
 		return err
@@ -206,10 +216,28 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) error {
 		return err
 	}
 
+	now = w.clock()
+	expectedStatus = item.Status
+	if err := item.CompleteStep(prepareStepName, prepareStepCompletedMessage, now); err != nil {
+		return err
+	}
+	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func (w *Worker) startRun(ctx context.Context, item *run.Run) (agent.RunResult, error) {
+	now := w.clock()
+	expectedStatus := item.Status
+	if err := item.StartStep(agentStepName, agentStepRunningMessage, now); err != nil {
+		return agent.RunResult{}, err
+	}
+	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
+		return agent.RunResult{}, err
+	}
+
 	sandbox, err := w.sandbox.Prepare(ctx, outbound.SandboxRequest{
 		RunID: item.ID,
 		Task:  item.Task,
@@ -224,17 +252,13 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run) (agent.RunResult, 
 		_ = w.sandbox.Cleanup(cleanupCtx, sandbox)
 	}()
 
-	now := w.clock()
-	expectedStatus := item.Status
+	now = w.clock()
+	expectedStatus = item.Status
 	if err := item.StartRunning(now); err != nil {
 		return agent.RunResult{}, err
 	}
-	saved, err := w.stateStore.SaveIfStatus(ctx, item, expectedStatus)
-	if err != nil {
+	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
 		return agent.RunResult{}, err
-	}
-	if !saved {
-		return agent.RunResult{}, errRunStateChanged
 	}
 	if err := w.publish(ctx, outbound.EventRunStarted, item.ID, now); err != nil {
 		return agent.RunResult{}, err
@@ -246,7 +270,20 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run) (agent.RunResult, 
 		Sandbox: sandbox,
 	})
 
-	return result, err
+	if err != nil {
+		return agent.RunResult{}, err
+	}
+
+	now = w.clock()
+	expectedStatus = item.Status
+	if err := item.CompleteStep(agentStepName, agentStepCompletedMessage, now); err != nil {
+		return agent.RunResult{}, err
+	}
+	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
+		return agent.RunResult{}, err
+	}
+
+	return result, nil
 }
 
 func (w *Worker) completeRun(ctx context.Context, item *run.Run, result agent.RunResult) error {
@@ -255,12 +292,8 @@ func (w *Worker) completeRun(ctx context.Context, item *run.Run, result agent.Ru
 	if err := item.CompleteWithResult(now, result.Summary); err != nil {
 		return err
 	}
-	saved, err := w.stateStore.SaveIfStatus(ctx, item, expectedStatus)
-	if err != nil {
+	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
 		return err
-	}
-	if !saved {
-		return errRunStateChanged
 	}
 
 	return w.publish(ctx, outbound.EventRunCompleted, item.ID, now)
@@ -269,15 +302,20 @@ func (w *Worker) completeRun(ctx context.Context, item *run.Run, result agent.Ru
 func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error {
 	now := w.clock()
 	expectedStatus := item.Status
+	if name, ok := latestRunningStepName(item); ok {
+		if err := item.FailStep(name, failedStepMessage(name), now); err != nil {
+			return errors.Join(cause, err)
+		}
+	}
 	if err := item.FailWithReason(now, publicFailureReason); err != nil {
 		return errors.Join(cause, err)
 	}
-	saved, err := w.stateStore.SaveIfStatus(ctx, item, expectedStatus)
-	if err != nil {
+	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
+		if errors.Is(err, errRunStateChanged) {
+			return nil
+		}
+
 		return errors.Join(cause, err)
-	}
-	if !saved {
-		return nil
 	}
 	if err := w.publish(ctx, outbound.EventRunFailed, item.ID, now); err != nil {
 		return errors.Join(cause, err)
@@ -292,4 +330,37 @@ func (w *Worker) publish(ctx context.Context, eventType string, id run.RunID, oc
 		RunID:      id,
 		OccurredAt: occurredAt,
 	})
+}
+
+func (w *Worker) saveIfCurrentStatus(ctx context.Context, item *run.Run, expected run.Status) error {
+	saved, err := w.stateStore.SaveIfStatus(ctx, item, expected)
+	if err != nil {
+		return err
+	}
+	if !saved {
+		return errRunStateChanged
+	}
+
+	return nil
+}
+
+func latestRunningStepName(item *run.Run) (string, bool) {
+	for i := len(item.Steps) - 1; i >= 0; i-- {
+		if item.Steps[i].Status == run.StatusRunning {
+			return item.Steps[i].Name, true
+		}
+	}
+
+	return "", false
+}
+
+func failedStepMessage(name string) string {
+	switch name {
+	case prepareStepName:
+		return prepareStepFailedMessage
+	case agentStepName:
+		return agentStepFailedMessage
+	default:
+		return "Run step failed"
+	}
 }

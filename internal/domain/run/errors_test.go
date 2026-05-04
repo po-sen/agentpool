@@ -15,6 +15,9 @@ func TestRunSentinelErrors(t *testing.T) {
 		run.ErrInvalidTransition,
 		run.ErrUnknownStatus,
 		run.ErrRunNotFound,
+		run.ErrStepNotFound,
+		run.ErrStepAlreadyEnded,
+		run.ErrInvalidStepName,
 	}
 
 	for _, err := range tests {

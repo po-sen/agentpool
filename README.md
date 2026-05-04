@@ -96,7 +96,22 @@ Completed runs include the one-shot model response summary:
   "result": {
     "summary": "The requested handler tests were updated."
   },
-  "steps": [],
+  "steps": [
+    {
+      "name": "prepare",
+      "status": "completed",
+      "message": "Prepared policy, secrets, and source context",
+      "started_at": "2026-04-30T08:00:00Z",
+      "ended_at": "2026-04-30T08:00:00Z"
+    },
+    {
+      "name": "agent",
+      "status": "completed",
+      "message": "Agent generated result summary",
+      "started_at": "2026-04-30T08:00:00Z",
+      "ended_at": "2026-04-30T08:00:01Z"
+    }
+  ],
   "created_at": "2026-04-30T08:00:00Z",
   "updated_at": "2026-04-30T08:00:01Z"
 }
@@ -115,7 +130,22 @@ Failed runs may include the failure reason:
     "branch": "main"
   },
   "failure_reason": "run failed",
-  "steps": [],
+  "steps": [
+    {
+      "name": "prepare",
+      "status": "completed",
+      "message": "Prepared policy, secrets, and source context",
+      "started_at": "2026-04-30T08:00:00Z",
+      "ended_at": "2026-04-30T08:00:00Z"
+    },
+    {
+      "name": "agent",
+      "status": "failed",
+      "message": "Agent execution failed",
+      "started_at": "2026-04-30T08:00:00Z",
+      "ended_at": "2026-04-30T08:00:01Z"
+    }
+  ],
   "created_at": "2026-04-30T08:00:00Z",
   "updated_at": "2026-04-30T08:00:01Z"
 }
@@ -255,7 +285,11 @@ failed
 cancelled
 ```
 
-Completed runs persist only the one-shot generation summary. AgentPool does not yet provide a full agent loop, tool execution, artifacts, logs, or streaming output.
+Completed runs persist only the one-shot generation summary.
+
+## Run Steps
+
+Run steps are coarse execution timeline entries. The current worker records `prepare` for policy, secrets, and source context preparation, and `agent` for sandbox/model execution. Steps explain the broad phase outcome, but they are not full logs. Tool logs, artifacts, and streaming output are future features.
 
 ## Architecture
 

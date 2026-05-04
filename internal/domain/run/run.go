@@ -82,7 +82,13 @@ func (r *Run) Cancel(now time.Time) error {
 		return invalidTransitionError(r.Status, StatusCancelled)
 	}
 
-	return r.TransitionTo(StatusCancelled, now)
+	if err := r.TransitionTo(StatusCancelled, now); err != nil {
+		return err
+	}
+
+	r.cancelRunningSteps(now)
+
+	return nil
 }
 
 // StartPreparing marks the run as preparing resources.
