@@ -10,6 +10,15 @@ type CreateRunCommand struct {
 	Prompt        string
 	RepositoryURL string
 	Branch        string
+	Attachments   []AttachmentInput
+}
+
+// AttachmentInput contains one already-authorized uploaded file for a run.
+type AttachmentInput struct {
+	Filename  string
+	MediaType string
+	Content   []byte
+	SizeBytes int64
 }
 
 // CancelRunCommand contains application-level input for cancelling a run.

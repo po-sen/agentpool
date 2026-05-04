@@ -60,6 +60,56 @@ func TestCreateRunCreatesQueuedRun(t *testing.T) {
 	assertEvent(t, publisher.events, outbound.EventRunCreated, run.RunID(created.ID))
 }
 
+func TestCreateRunStoresAttachments(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	handler := NewCreateRunHandler(
+		repo,
+		queue,
+		publisher,
+		fixedIDGenerator{id: "run_test"},
+		WithCreateRunClock(func() time.Time { return now }),
+	)
+	content := []byte("# Demo\n")
+
+	created, err := handler.CreateRun(ctx, inbound.CreateRunCommand{
+		Prompt: "do work",
+		Attachments: []inbound.AttachmentInput{
+			{
+				Filename:  "README.md",
+				MediaType: "text/markdown",
+				Content:   content,
+				SizeBytes: int64(len(content)),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	content[0] = 'X'
+
+	stored, err := repo.FindByID(ctx, run.RunID(created.ID))
+	if err != nil {
+		t.Fatalf("find stored run: %v", err)
+	}
+	if len(stored.Task.Attachments) != 1 {
+		t.Fatalf("len(stored attachments) = %d, want 1", len(stored.Task.Attachments))
+	}
+	if string(stored.Task.Attachments[0].Content) != "# Demo\n" {
+		t.Fatalf("stored attachment content = %q, want original", stored.Task.Attachments[0].Content)
+	}
+	if len(created.Task.Attachments) != 1 {
+		t.Fatalf("len(view attachments) = %d, want 1", len(created.Task.Attachments))
+	}
+	if created.Task.Attachments[0].Filename != "README.md" {
+		t.Fatalf("view attachment filename = %q, want README.md", created.Task.Attachments[0].Filename)
+	}
+}
+
 func TestCreateRunRejectsEmptyPrompt(t *testing.T) {
 	ctx := context.Background()
 	handler := NewCreateRunHandler(
@@ -70,6 +120,31 @@ func TestCreateRunRejectsEmptyPrompt(t *testing.T) {
 	)
 
 	_, err := handler.CreateRun(ctx, inbound.CreateRunCommand{Prompt: " "})
+	if !errors.Is(err, inbound.ErrInvalidInput) {
+		t.Fatalf("CreateRun() error = %v, want invalid input", err)
+	}
+}
+
+func TestCreateRunRejectsInvalidAttachment(t *testing.T) {
+	ctx := context.Background()
+	handler := NewCreateRunHandler(
+		newFakeRunRepository(),
+		&fakeRunQueue{},
+		&recordingPublisher{},
+		fixedIDGenerator{id: "run_test"},
+	)
+
+	_, err := handler.CreateRun(ctx, inbound.CreateRunCommand{
+		Prompt: "do work",
+		Attachments: []inbound.AttachmentInput{
+			{
+				Filename:  "../README.md",
+				MediaType: "text/markdown",
+				Content:   []byte("bad"),
+				SizeBytes: 3,
+			},
+		},
+	})
 	if !errors.Is(err, inbound.ErrInvalidInput) {
 		t.Fatalf("CreateRun() error = %v, want invalid input", err)
 	}

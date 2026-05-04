@@ -35,7 +35,7 @@ func New(id RunID, task TaskSpec, now time.Time) (*Run, error) {
 
 	return &Run{
 		ID:        id,
-		Task:      task,
+		Task:      task.Clone(),
 		Status:    StatusQueued,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -49,6 +49,7 @@ func (r *Run) Clone() *Run {
 	}
 
 	clone := *r
+	clone.Task = r.Task.Clone()
 	if len(r.Steps) > 0 {
 		clone.Steps = append([]Step(nil), r.Steps...)
 	}

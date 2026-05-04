@@ -1,6 +1,8 @@
 package run
 
 import (
+	"path"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 )
@@ -8,12 +10,42 @@ import (
 // MaxPromptLength is the maximum accepted task prompt length in characters.
 const MaxPromptLength = 8000
 
+const (
+	// MaxAttachmentCount is the maximum number of files accepted for one task.
+	MaxAttachmentCount = 10
+	// MaxAttachmentSizeBytes is the maximum size accepted for one uploaded text file.
+	MaxAttachmentSizeBytes int64 = 1 << 20
+	// MaxTotalAttachmentSizeBytes is the maximum total size accepted for all uploaded text files.
+	MaxTotalAttachmentSizeBytes int64 = 5 << 20
+)
+
+var supportedAttachmentExtensions = map[string]struct{}{
+	".go":   {},
+	".js":   {},
+	".json": {},
+	".md":   {},
+	".py":   {},
+	".ts":   {},
+	".txt":  {},
+	".yaml": {},
+	".yml":  {},
+}
+
 // TaskSpec describes the work requested by a run submitter.
 type TaskSpec struct {
 	ProjectID     string
 	Prompt        string
 	RepositoryURL string
 	Branch        string
+	Attachments   []TaskAttachment
+}
+
+// TaskAttachment describes one already-authorized file supplied with a run.
+type TaskAttachment struct {
+	Filename  string
+	MediaType string
+	Content   []byte
+	SizeBytes int64
 }
 
 // Validate checks the minimal task fields required to queue a run.
@@ -23,6 +55,102 @@ func (s TaskSpec) Validate() error {
 	}
 	if utf8.RuneCountInString(s.Prompt) > MaxPromptLength {
 		return ErrPromptTooLong
+	}
+
+	return s.validateAttachments()
+}
+
+// Clone returns a detached copy of the task spec.
+func (s TaskSpec) Clone() TaskSpec {
+	clone := s
+	if len(s.Attachments) == 0 {
+		return clone
+	}
+
+	clone.Attachments = make([]TaskAttachment, 0, len(s.Attachments))
+	for _, attachment := range s.Attachments {
+		item := attachment
+		if attachment.Content != nil {
+			item.Content = append([]byte(nil), attachment.Content...)
+		}
+		clone.Attachments = append(clone.Attachments, item)
+	}
+
+	return clone
+}
+
+func (s TaskSpec) validateAttachments() error {
+	if len(s.Attachments) > MaxAttachmentCount {
+		return ErrTooManyAttachments
+	}
+
+	var totalSize int64
+	for _, attachment := range s.Attachments {
+		if err := attachment.Validate(); err != nil {
+			return err
+		}
+		totalSize += attachment.effectiveSize()
+		if totalSize > MaxTotalAttachmentSizeBytes {
+			return ErrAttachmentsTooLarge
+		}
+	}
+
+	return nil
+}
+
+// Validate checks whether the attachment is safe for the current text-only runtime workspace.
+func (a TaskAttachment) Validate() error {
+	if err := validateAttachmentFilename(a.Filename); err != nil {
+		return err
+	}
+	if _, ok := supportedAttachmentExtensions[strings.ToLower(path.Ext(a.Filename))]; !ok {
+		return ErrUnsupportedAttachmentType
+	}
+	if a.SizeBytes < 0 {
+		return ErrAttachmentSizeMismatch
+	}
+	if a.SizeBytes != 0 && a.SizeBytes != int64(len(a.Content)) {
+		return ErrAttachmentSizeMismatch
+	}
+	if a.effectiveSize() > MaxAttachmentSizeBytes {
+		return ErrAttachmentTooLarge
+	}
+	if !utf8.Valid(a.Content) {
+		return ErrAttachmentNotText
+	}
+
+	return nil
+}
+
+func (a TaskAttachment) effectiveSize() int64 {
+	if a.SizeBytes > 0 {
+		return a.SizeBytes
+	}
+
+	return int64(len(a.Content))
+}
+
+func validateAttachmentFilename(filename string) error {
+	if strings.TrimSpace(filename) == "" {
+		return ErrMissingAttachmentFilename
+	}
+	if filename != strings.TrimSpace(filename) ||
+		path.IsAbs(filename) ||
+		filepath.IsAbs(filename) ||
+		filepath.VolumeName(filename) != "" ||
+		strings.Contains(filename, "\\") ||
+		strings.Contains(filename, ":") {
+		return ErrUnsafeAttachmentFilename
+	}
+
+	components := strings.Split(filename, "/")
+	for _, component := range components {
+		if component == "" || component == "." || component == ".." {
+			return ErrUnsafeAttachmentFilename
+		}
+	}
+	if path.Clean(filename) != filename {
+		return ErrUnsafeAttachmentFilename
 	}
 
 	return nil

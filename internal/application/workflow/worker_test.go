@@ -146,6 +146,100 @@ func TestWorkerPassesEmptyRuntimeContextToAgentTools(t *testing.T) {
 	}
 }
 
+func TestWorkerDoesNotPrepareWorkspaceWithoutAttachments(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	workspace := &recordingWorkspaceProvider{path: "/tmp/workspace"}
+	now := time.Unix(100, 0).UTC()
+
+	queueRun(ctx, t, repo, queue, now)
+
+	worker := newWorkerWithWorkspace(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
+		workspace,
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+	if workspace.prepareCalled {
+		t.Fatal("workspace prepare was called")
+	}
+	if workspace.cleanupCalled {
+		t.Fatal("workspace cleanup was called")
+	}
+}
+
+func TestWorkerPreparesWorkspaceForAttachmentsAndPassesPathToAgentTools(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	workspace := &recordingWorkspaceProvider{path: "/tmp/workspace"}
+	now := time.Unix(100, 0).UTC()
+
+	item := queueRunWithTask(ctx, t, repo, queue, run.TaskSpec{
+		Prompt: "do work",
+		Attachments: []run.TaskAttachment{
+			{
+				Filename:  "README.md",
+				MediaType: "text/markdown",
+				Content:   []byte("# Demo\n"),
+				SizeBytes: 7,
+			},
+		},
+	}, now)
+
+	tools := &recordingWorkflowToolRunner{}
+	worker := newWorkerWithWorkspace(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(&toolCallingModelClient{}, tools),
+		workspace,
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	if !workspace.prepareCalled {
+		t.Fatal("workspace prepare was not called")
+	}
+	if workspace.runID != item.ID {
+		t.Fatalf("workspace run ID = %s, want %s", workspace.runID, item.ID)
+	}
+	if len(workspace.attachments) != 1 || workspace.attachments[0].Filename != "README.md" {
+		t.Fatalf("workspace attachments = %#v, want README.md", workspace.attachments)
+	}
+	if !workspace.cleanupCalled {
+		t.Fatal("workspace cleanup was not called")
+	}
+	if workspace.cleanupContextErr != nil {
+		t.Fatalf("workspace cleanup context error = %v, want nil", workspace.cleanupContextErr)
+	}
+	if len(tools.listRequests) == 0 {
+		t.Fatal("tool list request was not recorded")
+	}
+	if tools.listRequests[0].Context.WorkspacePath != workspace.path {
+		t.Fatalf("list workspace path = %q, want %q", tools.listRequests[0].Context.WorkspacePath, workspace.path)
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	}
+	if tools.calls[0].Context.WorkspacePath != workspace.path {
+		t.Fatalf("tool workspace path = %q, want %q", tools.calls[0].Context.WorkspacePath, workspace.path)
+	}
+	if tools.calls[0].Context.Sandbox.ID != "" {
+		t.Fatalf("tool sandbox id = %q, want empty", tools.calls[0].Context.Sandbox.ID)
+	}
+}
+
 func TestWorkerProcessOneEmptyQueue(t *testing.T) {
 	ctx := context.Background()
 	worker := newWorker(&fakeRunQueue{}, newFakeRunRepository(), &recordingPublisher{}, time.Unix(100, 0).UTC())
@@ -440,7 +534,20 @@ func queueRun(
 ) *run.Run {
 	t.Helper()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
+	return queueRunWithTask(ctx, t, repo, queue, run.TaskSpec{Prompt: "do work"}, now)
+}
+
+func queueRunWithTask(
+	ctx context.Context,
+	t *testing.T,
+	repo *fakeRunRepository,
+	queue outbound.RunQueue,
+	task run.TaskSpec,
+	now time.Time,
+) *run.Run {
+	t.Helper()
+
+	item, err := run.New("run_test", task, now)
 	if err != nil {
 		t.Fatalf("new run: %v", err)
 	}
@@ -510,6 +617,29 @@ func newWorkerWithAgent(
 			StateStore: repo,
 			Events:     publisher,
 			Agent:      agentRunner,
+			Policy:     fakePolicyDecision{},
+			Secrets:    fakeSecretBroker{},
+		},
+		WithClock(func() time.Time { return now }),
+	)
+}
+
+func newWorkerWithWorkspace(
+	queue outbound.RunQueue,
+	repo *fakeRunRepository,
+	publisher outbound.EventPublisher,
+	now time.Time,
+	agentRunner *applicationagent.Runner,
+	workspace outbound.WorkspaceProvider,
+) *Worker {
+	return NewWorker(
+		WorkerDependencies{
+			Queue:      queue,
+			Repo:       repo,
+			StateStore: repo,
+			Events:     publisher,
+			Agent:      agentRunner,
+			Workspace:  workspace,
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
@@ -687,6 +817,33 @@ type fakeSecretBroker struct{}
 
 func (b fakeSecretBroker) Resolve(context.Context, outbound.SecretRequest) (outbound.SecretBundle, error) {
 	return outbound.SecretBundle{Values: map[string]string{}}, nil
+}
+
+type recordingWorkspaceProvider struct {
+	prepareCalled     bool
+	cleanupCalled     bool
+	cleanupContextErr error
+	path              string
+	runID             run.RunID
+	attachments       []run.TaskAttachment
+}
+
+func (p *recordingWorkspaceProvider) PrepareWorkspace(
+	_ context.Context,
+	request outbound.WorkspacePrepareRequest,
+) (outbound.Workspace, error) {
+	p.prepareCalled = true
+	p.runID = request.RunID
+	p.attachments = append([]run.TaskAttachment(nil), request.Attachments...)
+
+	return outbound.Workspace{Path: p.path}, nil
+}
+
+func (p *recordingWorkspaceProvider) CleanupWorkspace(ctx context.Context, _ outbound.Workspace) error {
+	p.cleanupCalled = true
+	p.cleanupContextErr = ctx.Err()
+
+	return nil
 }
 
 type fakeToolRunner struct{}

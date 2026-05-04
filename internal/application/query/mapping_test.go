@@ -14,6 +14,14 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 		Prompt:        "do work",
 		RepositoryURL: "https://example.com/repo.git",
 		Branch:        "main",
+		Attachments: []run.TaskAttachment{
+			{
+				Filename:  "README.md",
+				MediaType: "text/markdown",
+				Content:   []byte("# Demo\n"),
+				SizeBytes: 7,
+			},
+		},
 	}, time.Unix(100, 0).UTC())
 	if err != nil {
 		t.Fatalf("new run: %v", err)
@@ -38,6 +46,12 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	}
 	if view.Task.RepositoryURL != item.Task.RepositoryURL {
 		t.Fatalf("RepositoryURL = %s, want %s", view.Task.RepositoryURL, item.Task.RepositoryURL)
+	}
+	if len(view.Task.Attachments) != 1 {
+		t.Fatalf("len(Attachments) = %d, want 1", len(view.Task.Attachments))
+	}
+	if view.Task.Attachments[0].SizeBytes != 7 {
+		t.Fatalf("Attachments[0].SizeBytes = %d, want 7", view.Task.Attachments[0].SizeBytes)
 	}
 	if view.Result.Summary != item.ResultSummary {
 		t.Fatalf("Result.Summary = %q, want %q", view.Result.Summary, item.ResultSummary)

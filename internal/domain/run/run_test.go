@@ -179,6 +179,41 @@ func TestRunCloneReturnsDetachedStepSlice(t *testing.T) {
 	}
 }
 
+func TestRunNewAndCloneDetachAttachmentContent(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	content := []byte("original")
+	item, err := New("run_test", TaskSpec{
+		Prompt: "do work",
+		Attachments: []TaskAttachment{
+			{
+				Filename:  "README.md",
+				MediaType: "text/markdown",
+				Content:   content,
+				SizeBytes: int64(len(content)),
+			},
+		},
+	}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+
+	content[0] = 'X'
+	if string(item.Task.Attachments[0].Content) != "original" {
+		t.Fatalf("stored attachment content = %q, want original", item.Task.Attachments[0].Content)
+	}
+
+	clone := item.Clone()
+	clone.Task.Attachments[0].Content[0] = 'Y'
+	clone.Task.Attachments = append(clone.Task.Attachments, TaskAttachment{Filename: "extra.txt"})
+
+	if string(item.Task.Attachments[0].Content) != "original" {
+		t.Fatalf("original attachment content = %q, want original", item.Task.Attachments[0].Content)
+	}
+	if len(item.Task.Attachments) != 1 {
+		t.Fatalf("len(original Attachments) = %d, want 1", len(item.Task.Attachments))
+	}
+}
+
 func TestTaskSpecValidation(t *testing.T) {
 	tests := []struct {
 		name string

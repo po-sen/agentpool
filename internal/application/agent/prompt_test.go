@@ -23,6 +23,7 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		"echo: Returns text",
 		"list_files: Lists files",
 		"read_file: Reads text files",
+		"discover uploaded files with list_files",
 		"no markdown fences",
 		"Do not return tool_result.",
 		"Do not return multiple JSON objects.",

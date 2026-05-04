@@ -15,6 +15,9 @@ func TestRunUseCaseContractsAcceptApplicationDTOs(t *testing.T) {
 	ctx := context.Background()
 	if _, err := create.CreateRun(ctx, CreateRunCommand{
 		Prompt: "do work",
+		Attachments: []AttachmentInput{
+			{Filename: "README.md", MediaType: "text/markdown", Content: []byte("# Demo\n"), SizeBytes: 7},
+		},
 	}); err != nil {
 		t.Fatalf("CreateRun() error = %v", err)
 	}

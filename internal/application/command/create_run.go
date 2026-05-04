@@ -63,11 +63,25 @@ func (h *CreateRunHandler) CreateRun(ctx context.Context, command inbound.Create
 	}
 
 	now := h.clock()
+	attachments := make([]run.TaskAttachment, 0, len(command.Attachments))
+	for _, attachment := range command.Attachments {
+		sizeBytes := attachment.SizeBytes
+		if sizeBytes == 0 {
+			sizeBytes = int64(len(attachment.Content))
+		}
+		attachments = append(attachments, run.TaskAttachment{
+			Filename:  attachment.Filename,
+			MediaType: attachment.MediaType,
+			Content:   append([]byte(nil), attachment.Content...),
+			SizeBytes: sizeBytes,
+		})
+	}
 	created, err := run.New(id, run.TaskSpec{
 		ProjectID:     command.ProjectID,
 		Prompt:        command.Prompt,
 		RepositoryURL: command.RepositoryURL,
 		Branch:        command.Branch,
+		Attachments:   attachments,
 	}, now)
 	if err != nil {
 		return inbound.RunView{}, inbound.NewInvalidInputError(err)

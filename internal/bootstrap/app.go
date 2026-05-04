@@ -24,7 +24,9 @@ import (
 	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
 	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
+	filetools "github.com/po-sen/agentpool/internal/infrastructure/tool/file"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/shell"
+	workspacetemp "github.com/po-sen/agentpool/internal/infrastructure/workspace/temp"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
 )
@@ -133,7 +135,8 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	toolRunner, err := composite.NewRunner(shellTools)
+	fileTools := filetools.NewRunner(filetools.Config{})
+	toolRunner, err := composite.NewRunner(fileTools, shellTools)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +145,7 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		toolRunner,
 		applicationagent.WithMaxTurns(a.config.Agent.MaxTurns),
 	)
+	workspaceProvider := workspacetemp.NewProvider(workspacetemp.Config{})
 	policyDecision := allowall.NewDecision()
 	secretBroker := secretnoop.NewBroker()
 
@@ -151,6 +155,7 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		StateStore: a.runRepo,
 		Events:     a.eventPublisher,
 		Agent:      agentRunner,
+		Workspace:  workspaceProvider,
 		Policy:     policyDecision,
 		Secrets:    secretBroker,
 	})

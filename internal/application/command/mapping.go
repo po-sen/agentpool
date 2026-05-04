@@ -24,6 +24,15 @@ func toRunView(item *run.Run) inbound.RunView {
 			EndedAt:   endedAt,
 		})
 	}
+	attachments := make([]inbound.AttachmentView, 0, len(item.Task.Attachments))
+	for _, attachment := range item.Task.Attachments {
+		attachments = append(attachments, inbound.AttachmentView{
+			Filename:  attachment.Filename,
+			MediaType: attachment.MediaType,
+			SizeBytes: attachment.SizeBytes,
+		})
+	}
+
 	return inbound.RunView{
 		ID:     item.ID.String(),
 		Status: string(item.Status),
@@ -32,6 +41,7 @@ func toRunView(item *run.Run) inbound.RunView {
 			Prompt:        item.Task.Prompt,
 			RepositoryURL: item.Task.RepositoryURL,
 			Branch:        item.Task.Branch,
+			Attachments:   attachments,
 		},
 		Result: inbound.RunResultView{
 			Summary: item.ResultSummary,

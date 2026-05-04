@@ -19,6 +19,9 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 			Prompt:        "do work",
 			RepositoryURL: "https://example.com/repo.git",
 			Branch:        "main",
+			Attachments: []inbound.AttachmentView{
+				{Filename: "README.md", MediaType: "text/markdown", SizeBytes: 7},
+			},
 		},
 		Result: inbound.RunResultView{
 			Summary: "model output",
@@ -44,6 +47,12 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	}
 	if response.Task.RepositoryURL != view.Task.RepositoryURL {
 		t.Fatalf("repository URL = %s, want %s", response.Task.RepositoryURL, view.Task.RepositoryURL)
+	}
+	if len(response.Task.Attachments) != 1 {
+		t.Fatalf("len(Attachments) = %d, want 1", len(response.Task.Attachments))
+	}
+	if response.Task.Attachments[0].Filename != "README.md" {
+		t.Fatalf("Attachments[0].Filename = %q, want README.md", response.Task.Attachments[0].Filename)
 	}
 	if response.Result == nil || response.Result.Summary != view.Result.Summary {
 		t.Fatalf("Result = %#v, want summary %q", response.Result, view.Result.Summary)
@@ -214,5 +223,32 @@ func TestRunResponseJSONOmitsEmptyResultFailureReasonAndWorkspace(t *testing.T) 
 	}
 	if strings.Contains(got, `"workspace"`) {
 		t.Fatalf("response contains workspace: %s", got)
+	}
+}
+
+func TestRunResponseJSONIncludesAttachmentMetadataOnly(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:     "run_test",
+		Status: "queued",
+		Task: inbound.TaskView{
+			Prompt: "do work",
+			Attachments: []inbound.AttachmentView{
+				{Filename: "README.md", MediaType: "text/markdown", SizeBytes: 7},
+			},
+		},
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"attachments":[{"filename":"README.md","media_type":"text/markdown","size_bytes":7}]`) {
+		t.Fatalf("response does not contain attachment metadata: %s", got)
+	}
+	if strings.Contains(got, "# Demo") || strings.Contains(got, "content") {
+		t.Fatalf("response leaked attachment content: %s", got)
 	}
 }

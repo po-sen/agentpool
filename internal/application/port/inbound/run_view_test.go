@@ -16,6 +16,9 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 			Prompt:        "do work",
 			RepositoryURL: "https://example.com/repo.git",
 			Branch:        "main",
+			Attachments: []AttachmentView{
+				{Filename: "README.md", MediaType: "text/markdown", SizeBytes: 7},
+			},
 		},
 		Result: RunResultView{
 			Summary: "model output",
@@ -39,6 +42,9 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	}
 	if view.Task.Branch != "main" {
 		t.Fatalf("Branch = %s, want main", view.Task.Branch)
+	}
+	if view.Task.Attachments[0].Filename != "README.md" {
+		t.Fatalf("Attachments[0].Filename = %q, want README.md", view.Task.Attachments[0].Filename)
 	}
 	if view.Result.Summary != "model output" {
 		t.Fatalf("Result.Summary = %q, want model output", view.Result.Summary)

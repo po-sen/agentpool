@@ -27,6 +27,14 @@ type TaskView struct {
 	Prompt        string
 	RepositoryURL string
 	Branch        string
+	Attachments   []AttachmentView
+}
+
+// AttachmentView is attachment metadata exposed by application use cases.
+type AttachmentView struct {
+	Filename  string
+	MediaType string
+	SizeBytes int64
 }
 
 // StepView is the application-level representation of a run step.

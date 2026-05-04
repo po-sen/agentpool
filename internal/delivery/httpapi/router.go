@@ -4,12 +4,19 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 
 	"github.com/po-sen/agentpool/internal/application/port/inbound"
 )
 
-const maxRequestBodyBytes = 1 << 20
+const (
+	maxJSONRequestBodyBytes      = 1 << 20
+	maxMultipartRequestBodyBytes = 8 << 20
+
+	headerContentType = "Content-Type"
+)
 
 // Dependencies contains use cases required by the HTTP API.
 type Dependencies struct {
@@ -47,7 +54,7 @@ type Handler struct {
 }
 
 func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set(headerContentType, "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("ok\n")); err != nil {
 		return
@@ -55,18 +62,13 @@ func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
-	var request createRunRequest
-	if err := decodeCreateRunRequest(w, r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON request body")
+	command, err := decodeCreateRunCommand(w, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	created, err := h.createRun.CreateRun(r.Context(), inbound.CreateRunCommand{
-		ProjectID:     request.ProjectID,
-		Prompt:        request.Prompt,
-		RepositoryURL: request.RepositoryURL,
-		Branch:        request.Branch,
-	})
+	created, err := h.createRun.CreateRun(r.Context(), command)
 	if err != nil {
 		writeApplicationError(w, err)
 		return
@@ -137,24 +139,149 @@ func writeApplicationError(w http.ResponseWriter, err error) {
 	}
 }
 
-func decodeCreateRunRequest(w http.ResponseWriter, r *http.Request, request *createRunRequest) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBodyBytes))
+func decodeCreateRunCommand(w http.ResponseWriter, r *http.Request) (inbound.CreateRunCommand, error) {
+	contentType := r.Header.Get(headerContentType)
+	if contentType == "" {
+		return decodeJSONCreateRunCommand(w, r)
+	}
+
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return inbound.CreateRunCommand{}, errors.New("invalid Content-Type")
+	}
+
+	switch mediaType {
+	case "application/json":
+		return decodeJSONCreateRunCommand(w, r)
+	case "multipart/form-data":
+		return decodeMultipartCreateRunCommand(w, r, params["boundary"])
+	default:
+		return inbound.CreateRunCommand{}, errors.New("unsupported Content-Type")
+	}
+}
+
+func decodeJSONCreateRunCommand(w http.ResponseWriter, r *http.Request) (inbound.CreateRunCommand, error) {
+	var request createRunRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONRequestBodyBytes))
 	decoder.DisallowUnknownFields()
 
-	if err := decoder.Decode(request); err != nil {
-		return err
+	if err := decoder.Decode(&request); err != nil {
+		return inbound.CreateRunCommand{}, errors.New("invalid JSON request body")
 	}
 
 	var extra struct{}
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return errors.New("request body must contain a single JSON object")
+		return inbound.CreateRunCommand{}, errors.New("request body must contain a single JSON object")
+	}
+
+	return inbound.CreateRunCommand{
+		ProjectID:     request.ProjectID,
+		Prompt:        request.Prompt,
+		RepositoryURL: request.RepositoryURL,
+		Branch:        request.Branch,
+	}, nil
+}
+
+func decodeMultipartCreateRunCommand(
+	w http.ResponseWriter,
+	r *http.Request,
+	boundary string,
+) (inbound.CreateRunCommand, error) {
+	if boundary == "" {
+		return inbound.CreateRunCommand{}, errors.New("multipart boundary is required")
+	}
+
+	reader := multipart.NewReader(http.MaxBytesReader(w, r.Body, maxMultipartRequestBodyBytes), boundary)
+	var command inbound.CreateRunCommand
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return inbound.CreateRunCommand{}, errors.New("invalid multipart request body")
+		}
+
+		if err := applyCreateRunPart(&command, part); err != nil {
+			_ = part.Close()
+
+			return inbound.CreateRunCommand{}, err
+		}
+		_ = part.Close()
+	}
+
+	return command, nil
+}
+
+func applyCreateRunPart(command *inbound.CreateRunCommand, part *multipart.Part) error {
+	name := part.FormName()
+	switch name {
+	case "project_id":
+		value, err := readMultipartPart(part)
+		if err != nil {
+			return err
+		}
+		command.ProjectID = string(value)
+	case "prompt":
+		value, err := readMultipartPart(part)
+		if err != nil {
+			return err
+		}
+		command.Prompt = string(value)
+	case "repository_url":
+		value, err := readMultipartPart(part)
+		if err != nil {
+			return err
+		}
+		command.RepositoryURL = string(value)
+	case "branch":
+		value, err := readMultipartPart(part)
+		if err != nil {
+			return err
+		}
+		command.Branch = string(value)
+	case "files":
+		filename := uploadedFilename(part)
+		if filename == "" {
+			return errors.New("uploaded file filename is required")
+		}
+		content, err := readMultipartPart(part)
+		if err != nil {
+			return err
+		}
+		command.Attachments = append(command.Attachments, inbound.AttachmentInput{
+			Filename:  filename,
+			MediaType: part.Header.Get(headerContentType),
+			Content:   content,
+			SizeBytes: int64(len(content)),
+		})
+	default:
+		return errors.New("unknown multipart field")
 	}
 
 	return nil
 }
 
+func readMultipartPart(part *multipart.Part) ([]byte, error) {
+	content, err := io.ReadAll(part)
+	if err != nil {
+		return nil, errors.New("invalid multipart request body")
+	}
+
+	return content, nil
+}
+
+func uploadedFilename(part *multipart.Part) string {
+	_, params, err := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+	if err == nil && params["filename"] != "" {
+		return params["filename"]
+	}
+
+	return part.FileName()
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		return

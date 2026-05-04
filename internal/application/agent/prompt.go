@@ -13,6 +13,7 @@ func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 	builder.WriteString("For a final answer, use {\"type\":\"final\",\"summary\":\"...\"}.\n")
 	builder.WriteString("For a tool call, use {\"type\":\"tool_call\",\"tool\":\"<tool_name>\",\"arguments\":{\"key\":\"value\"}}.\n")
 	builder.WriteString("Call tools when they are useful to inspect available information. Do not call tools when the task can be answered directly.\n")
+	builder.WriteString("When list_files and read_file are available, discover uploaded files with list_files before reading only the files needed for the task.\n")
 	builder.WriteString("Do not return tool_result. Do not return multiple JSON objects.\n")
 	builder.WriteString("After receiving a tool result, return another tool_call or a final answer.\n")
 	builder.WriteString("Available tools:\n")

@@ -29,10 +29,17 @@ type runResultResponse struct {
 }
 
 type taskResponse struct {
-	ProjectID     string `json:"project_id,omitempty"`
-	Prompt        string `json:"prompt"`
-	RepositoryURL string `json:"repository_url,omitempty"`
-	Branch        string `json:"branch,omitempty"`
+	ProjectID     string               `json:"project_id,omitempty"`
+	Prompt        string               `json:"prompt"`
+	RepositoryURL string               `json:"repository_url,omitempty"`
+	Branch        string               `json:"branch,omitempty"`
+	Attachments   []attachmentResponse `json:"attachments,omitempty"`
+}
+
+type attachmentResponse struct {
+	Filename  string `json:"filename"`
+	MediaType string `json:"media_type,omitempty"`
+	SizeBytes int64  `json:"size_bytes"`
 }
 
 type stepResponse struct {
@@ -58,6 +65,14 @@ func toRunResponse(item inbound.RunView) runResponse {
 			EndedAt:   step.EndedAt,
 		})
 	}
+	attachments := make([]attachmentResponse, 0, len(item.Task.Attachments))
+	for _, attachment := range item.Task.Attachments {
+		attachments = append(attachments, attachmentResponse{
+			Filename:  attachment.Filename,
+			MediaType: attachment.MediaType,
+			SizeBytes: attachment.SizeBytes,
+		})
+	}
 	response := runResponse{
 		ID:     item.ID,
 		Status: item.Status,
@@ -66,6 +81,7 @@ func toRunResponse(item inbound.RunView) runResponse {
 			Prompt:        item.Task.Prompt,
 			RepositoryURL: item.Task.RepositoryURL,
 			Branch:        item.Task.Branch,
+			Attachments:   attachments,
 		},
 		FailureReason: item.FailureReason,
 		Steps:         steps,

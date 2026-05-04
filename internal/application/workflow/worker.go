@@ -12,6 +12,7 @@ import (
 )
 
 const defaultPollInterval = 200 * time.Millisecond
+const workspaceCleanupTimeout = 30 * time.Second
 const publicFailureReason = "run failed"
 
 const (
@@ -34,6 +35,7 @@ type Worker struct {
 	stateStore   outbound.RunStateStore
 	events       outbound.EventPublisher
 	agent        *agent.Runner
+	workspace    outbound.WorkspaceProvider
 	policy       outbound.PolicyDecisionPort
 	secrets      outbound.SecretBroker
 	clock        func() time.Time
@@ -50,6 +52,7 @@ type WorkerDependencies struct {
 	StateStore outbound.RunStateStore
 	Events     outbound.EventPublisher
 	Agent      *agent.Runner
+	Workspace  outbound.WorkspaceProvider
 	Policy     outbound.PolicyDecisionPort
 	Secrets    outbound.SecretBroker
 }
@@ -79,6 +82,7 @@ func NewWorker(
 		stateStore:   deps.StateStore,
 		events:       deps.Events,
 		agent:        deps.Agent,
+		workspace:    deps.Workspace,
 		policy:       deps.Policy,
 		secrets:      deps.Secrets,
 		pollInterval: defaultPollInterval,
@@ -140,15 +144,17 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 		return nil
 	}
 
-	if err := w.prepareRun(ctx, item); err != nil {
+	workspace, err := w.prepareRun(ctx, item)
+	if err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
 		}
 
 		return w.failRun(ctx, item, err)
 	}
+	defer w.cleanupWorkspace(ctx, workspace)
 
-	result, err := w.startRun(ctx, item)
+	result, err := w.startRun(ctx, item, workspace)
 	if err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
@@ -167,20 +173,20 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 	return nil
 }
 
-func (w *Worker) prepareRun(ctx context.Context, item *run.Run) error {
+func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (outbound.Workspace, error) {
 	now := w.clock()
 	expectedStatus := item.Status
 	if err := item.StartStep(prepareStepName, prepareStepRunningMessage, now); err != nil {
-		return err
+		return outbound.Workspace{}, err
 	}
 	if err := item.StartPreparing(now); err != nil {
-		return err
+		return outbound.Workspace{}, err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return err
+		return outbound.Workspace{}, err
 	}
 	if err := w.publish(ctx, outbound.EventRunPreparing, item.ID, now); err != nil {
-		return err
+		return outbound.Workspace{}, err
 	}
 
 	decision, err := w.policy.Decide(ctx, outbound.PolicyDecisionRequest{
@@ -188,37 +194,47 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) error {
 		Task:  item.Task,
 	})
 	if err != nil {
-		return err
+		return outbound.Workspace{}, err
 	}
 	if !decision.Allowed {
 		if decision.Reason == "" {
-			return errors.New("policy denied run")
+			return outbound.Workspace{}, errors.New("policy denied run")
 		}
 
-		return errors.New(decision.Reason)
+		return outbound.Workspace{}, errors.New(decision.Reason)
 	}
 
 	if _, err := w.secrets.Resolve(ctx, outbound.SecretRequest{
 		ProjectID: item.Task.ProjectID,
 	}); err != nil {
-		return err
+		return outbound.Workspace{}, err
+	}
+
+	workspace, err := w.prepareWorkspace(ctx, item)
+	if err != nil {
+		return outbound.Workspace{}, err
 	}
 
 	now = w.clock()
 	expectedStatus = item.Status
 	if err := item.CompleteStep(prepareStepName, prepareStepCompletedMessage, now); err != nil {
-		return err
+		w.cleanupWorkspace(ctx, workspace)
+
+		return outbound.Workspace{}, err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return err
+		w.cleanupWorkspace(ctx, workspace)
+
+		return outbound.Workspace{}, err
 	}
 
-	return nil
+	return workspace, nil
 }
 
 func (w *Worker) startRun(
 	ctx context.Context,
 	item *run.Run,
+	workspace outbound.Workspace,
 ) (agent.RunResult, error) {
 	now := w.clock()
 	expectedStatus := item.Status
@@ -244,7 +260,7 @@ func (w *Worker) startRun(
 	result, err := w.agent.Run(ctx, agent.RunRequest{
 		RunID:   item.ID,
 		Task:    item.Task,
-		Context: outbound.ToolContext{},
+		Context: outbound.ToolContext{WorkspacePath: workspace.Path},
 	})
 
 	if err != nil {
@@ -261,6 +277,31 @@ func (w *Worker) startRun(
 	}
 
 	return result, nil
+}
+
+func (w *Worker) prepareWorkspace(ctx context.Context, item *run.Run) (outbound.Workspace, error) {
+	if len(item.Task.Attachments) == 0 {
+		return outbound.Workspace{}, nil
+	}
+	if w.workspace == nil {
+		return outbound.Workspace{}, errors.New("workspace provider is required")
+	}
+
+	return w.workspace.PrepareWorkspace(ctx, outbound.WorkspacePrepareRequest{
+		RunID:       item.ID,
+		Attachments: item.Task.Attachments,
+	})
+}
+
+func (w *Worker) cleanupWorkspace(ctx context.Context, workspace outbound.Workspace) {
+	if w.workspace == nil || workspace.Path == "" {
+		return
+	}
+
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceCleanupTimeout)
+	defer cancel()
+
+	_ = w.workspace.CleanupWorkspace(cleanupCtx, workspace)
 }
 
 func (w *Worker) completeRun(

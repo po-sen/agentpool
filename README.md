@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol and a sandbox-backed shell tool contract. The default runtime has no workspace, no command-capable sandbox, and does not expose `run_shell`.
+- Agent loop v1 supports a minimal JSON action protocol and read-only uploaded-file tools. The default runtime has no command-capable sandbox and does not expose `run_shell`.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -281,11 +281,11 @@ Use `openai_compatible` with a local or internal endpoint for air-gapped environ
 
 ## Workspace And Files
 
-The current MVP supports prompt-only runs. AgentPool does not currently accept uploaded files, zip snapshots, mounted directories, or git checkout as workspace input. `repository_url` and `branch` are metadata only.
+The current MVP supports prompt-only JSON runs and multipart runs with already-authorized uploaded text files. `repository_url` and `branch` are metadata only.
 
-Product applications own file authorization, file selection, and product ACLs. A future workspace handoff should be an intentionally designed product-authorized input source. AgentPool should enforce runtime safety boundaries for prepared execution, not product file permission rules.
+Product applications own file authorization, file selection, and product ACLs before submitting a run. AgentPool receives the selected files, writes them to an ephemeral per-run temp workspace, and exposes only read-only file tools to the agent.
 
-No workspace is prepared for a normal run:
+Prompt-only JSON runs still prepare no workspace:
 
 ```json
 {
@@ -293,7 +293,18 @@ No workspace is prepared for a normal run:
 }
 ```
 
-Workspace and file handoff are future work.
+Upload run files with multipart form data:
+
+```sh
+curl -sS -X POST http://localhost:8080/v1/runs \
+  -F 'prompt=Inspect the uploaded files and summarize them' \
+  -F 'files=@README.md' \
+  -F 'files=@internal/application/workflow/worker.go'
+```
+
+Uploaded files are currently limited to UTF-8 text files with safe relative names, at most 10 files, 1 MiB per file, and 5 MiB total. Supported extensions are `.txt`, `.md`, `.json`, `.yaml`, `.yml`, `.go`, `.py`, `.js`, and `.ts`.
+
+The runtime does not persist uploaded files beyond the run workspace cleanup. AgentPool does not currently accept archive uploads, mounted directories, or git checkout as workspace input. It does not provide file mutation, workspace diffing, archive materialization, or product file permissions.
 
 ## Tools
 
@@ -301,7 +312,9 @@ AgentPool has an application-owned tool loop. Models can respond with a JSON `to
 
 The agent protocol accepts only `tool_call` and `final` JSON actions. Unknown JSON action types, malformed JSON, or multiple JSON objects are rejected as protocol errors and the model is asked to correct itself. Plain natural-language output is still accepted as a final summary for compatibility with local models.
 
-The `run_shell` tool is sandbox-backed and is advertised only when a run has workspace context and a command-capable sandbox. In the default runtime there is no workspace and no command-capable sandbox, so `run_shell` is not available.
+When uploaded files are present, the agent can discover them with `list_files` and read selected text files with `read_file`. File contents are not injected into the initial prompt by default.
+
+The `run_shell` tool is sandbox-backed and is advertised only when a run has workspace context and a command-capable sandbox. In the default runtime there is no command-capable sandbox, so `run_shell` is not available.
 
 Tool calls use this provider-neutral shape when a tool is available:
 
