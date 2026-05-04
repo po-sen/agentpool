@@ -1,4 +1,4 @@
-package workflow_test
+package workflow
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 
 	applicationagent "github.com/po-sen/agentpool/internal/application/agent"
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	"github.com/po-sen/agentpool/internal/application/workflow"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
@@ -152,8 +151,8 @@ func TestWorkerPassesGitCheckoutPathToAgentTools(t *testing.T) {
 	}
 
 	tools := &recordingWorkflowToolRunner{}
-	worker := workflow.NewWorker(
-		workflow.WorkerDependencies{
+	worker := NewWorker(
+		WorkerDependencies{
 			Queue:      queue,
 			Repo:       repo,
 			StateStore: repo,
@@ -164,7 +163,7 @@ func TestWorkerPassesGitCheckoutPathToAgentTools(t *testing.T) {
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
-		workflow.WithClock(func() time.Time { return now }),
+		WithClock(func() time.Time { return now }),
 	)
 
 	if err := worker.ProcessOne(ctx); err != nil {
@@ -439,8 +438,8 @@ func TestWorkerProcessOneDoesNotLeavePrepareStepRunningWhenCancelledDuringPrepar
 		t.Fatalf("enqueue run: %v", err)
 	}
 
-	worker := workflow.NewWorker(
-		workflow.WorkerDependencies{
+	worker := NewWorker(
+		WorkerDependencies{
 			Queue:      queue,
 			Repo:       repo,
 			StateStore: repo,
@@ -455,7 +454,7 @@ func TestWorkerProcessOneDoesNotLeavePrepareStepRunningWhenCancelledDuringPrepar
 			},
 			Secrets: fakeSecretBroker{},
 		},
-		workflow.WithClock(func() time.Time { return now }),
+		WithClock(func() time.Time { return now }),
 	)
 
 	if err := worker.ProcessOne(ctx); err != nil {
@@ -592,7 +591,7 @@ func newWorker(
 	repo *fakeRunRepository,
 	publisher outbound.EventPublisher,
 	now time.Time,
-) *workflow.Worker {
+) *Worker {
 	return newWorkerWithPorts(
 		queue,
 		repo,
@@ -612,9 +611,9 @@ func newWorkerWithPorts(
 	sandbox outbound.SandboxProvider,
 	model outbound.ModelClient,
 	git outbound.GitProvider,
-) *workflow.Worker {
-	return workflow.NewWorker(
-		workflow.WorkerDependencies{
+) *Worker {
+	return NewWorker(
+		WorkerDependencies{
 			Queue:      queue,
 			Repo:       repo,
 			StateStore: repo,
@@ -625,7 +624,7 @@ func newWorkerWithPorts(
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
-		workflow.WithClock(func() time.Time { return now }),
+		WithClock(func() time.Time { return now }),
 	)
 }
 

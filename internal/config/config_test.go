@@ -1,10 +1,8 @@
-package config_test
+package config
 
 import (
 	"testing"
 	"time"
-
-	"github.com/po-sen/agentpool/internal/config"
 )
 
 func TestLoadUsesDefaults(t *testing.T) {
@@ -12,15 +10,15 @@ func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("AGENTPOOL_AGENT_MAX_TURNS", "")
 	clearModelEnv(t)
 
-	cfg := config.Load("")
+	cfg := Load("")
 	if cfg.Version != "dev" {
 		t.Fatalf("Version = %q, want dev", cfg.Version)
 	}
 	if cfg.HTTPAddr != ":8080" {
 		t.Fatalf("HTTPAddr = %q, want :8080", cfg.HTTPAddr)
 	}
-	if cfg.LLM.Provider != config.ModelProviderNoop {
-		t.Fatalf("LLM.Provider = %q, want %q", cfg.LLM.Provider, config.ModelProviderNoop)
+	if cfg.LLM.Provider != ModelProviderNoop {
+		t.Fatalf("LLM.Provider = %q, want %q", cfg.LLM.Provider, ModelProviderNoop)
 	}
 	if cfg.LLM.Model != "noop" {
 		t.Fatalf("LLM.Model = %q, want noop", cfg.LLM.Model)
@@ -36,7 +34,7 @@ func TestLoadUsesDefaults(t *testing.T) {
 func TestLoadUsesEnvironmentHTTPAddrAndVersion(t *testing.T) {
 	t.Setenv("AGENTPOOL_HTTP_ADDR", "127.0.0.1:9000")
 
-	cfg := config.Load("v1.2.3")
+	cfg := Load("v1.2.3")
 	if cfg.Version != "v1.2.3" {
 		t.Fatalf("Version = %q, want v1.2.3", cfg.Version)
 	}
@@ -52,9 +50,9 @@ func TestLoadUsesEnvironmentLLMConfig(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_API_KEY", "test-key")
 	t.Setenv("AGENTPOOL_MODEL_TIMEOUT", "5s")
 
-	cfg := config.Load("dev")
-	if cfg.LLM.Provider != config.ModelProviderOpenAICompatible {
-		t.Fatalf("LLM.Provider = %q, want %q", cfg.LLM.Provider, config.ModelProviderOpenAICompatible)
+	cfg := Load("dev")
+	if cfg.LLM.Provider != ModelProviderOpenAICompatible {
+		t.Fatalf("LLM.Provider = %q, want %q", cfg.LLM.Provider, ModelProviderOpenAICompatible)
 	}
 	if cfg.LLM.BaseURL != "http://localhost:11434/v1" {
 		t.Fatalf("LLM.BaseURL = %q", cfg.LLM.BaseURL)
@@ -73,7 +71,7 @@ func TestLoadUsesEnvironmentLLMConfig(t *testing.T) {
 func TestLoadUsesEnvironmentAgentConfig(t *testing.T) {
 	t.Setenv("AGENTPOOL_AGENT_MAX_TURNS", "7")
 
-	cfg := config.Load("dev")
+	cfg := Load("dev")
 	if cfg.Agent.MaxTurns != 7 {
 		t.Fatalf("Agent.MaxTurns = %d, want 7", cfg.Agent.MaxTurns)
 	}
@@ -84,7 +82,7 @@ func TestLoadFallsBackForInvalidAgentMaxTurns(t *testing.T) {
 		t.Run(value, func(t *testing.T) {
 			t.Setenv("AGENTPOOL_AGENT_MAX_TURNS", value)
 
-			cfg := config.Load("dev")
+			cfg := Load("dev")
 			if cfg.Agent.MaxTurns != 4 {
 				t.Fatalf("Agent.MaxTurns = %d, want 4", cfg.Agent.MaxTurns)
 			}
@@ -94,13 +92,13 @@ func TestLoadFallsBackForInvalidAgentMaxTurns(t *testing.T) {
 
 func TestLoadUsesProviderDefaults(t *testing.T) {
 	tests := []struct {
-		provider config.ModelProvider
+		provider ModelProvider
 		baseURL  string
 		model    string
 	}{
-		{provider: config.ModelProviderOpenAI, baseURL: "https://api.openai.com/v1", model: "gpt-4.1-mini"},
-		{provider: config.ModelProviderAnthropic, baseURL: "https://api.anthropic.com", model: "claude-sonnet-4-5"},
-		{provider: config.ModelProviderGemini, baseURL: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.5-flash"},
+		{provider: ModelProviderOpenAI, baseURL: "https://api.openai.com/v1", model: "gpt-4.1-mini"},
+		{provider: ModelProviderAnthropic, baseURL: "https://api.anthropic.com", model: "claude-sonnet-4-5"},
+		{provider: ModelProviderGemini, baseURL: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-2.5-flash"},
 	}
 
 	for _, tt := range tests {
@@ -109,7 +107,7 @@ func TestLoadUsesProviderDefaults(t *testing.T) {
 			t.Setenv("AGENTPOOL_MODEL_BASE_URL", "")
 			t.Setenv("AGENTPOOL_MODEL_NAME", "")
 
-			cfg := config.Load("dev")
+			cfg := Load("dev")
 			if cfg.LLM.BaseURL != tt.baseURL {
 				t.Fatalf("LLM.BaseURL = %q, want %q", cfg.LLM.BaseURL, tt.baseURL)
 			}
@@ -123,7 +121,7 @@ func TestLoadUsesProviderDefaults(t *testing.T) {
 func TestLoadFallsBackForInvalidModelTimeout(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_TIMEOUT", "bad")
 
-	cfg := config.Load("dev")
+	cfg := Load("dev")
 	if cfg.LLM.Timeout != 30*time.Second {
 		t.Fatalf("LLM.Timeout = %s, want 30s", cfg.LLM.Timeout)
 	}

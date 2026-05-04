@@ -1,4 +1,4 @@
-package query_test
+package query
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/po-sen/agentpool/internal/application/port/inbound"
-	"github.com/po-sen/agentpool/internal/application/query"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
@@ -15,7 +14,7 @@ func TestGetRunReturnsRunByID(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	item := saveRun(ctx, t, repo, "run_test", "do work", time.Unix(100, 0).UTC())
-	handler := query.NewGetRunHandler(repo)
+	handler := NewGetRunHandler(repo)
 
 	found, err := handler.GetRun(ctx, inbound.GetRunQuery{RunID: item.ID.String()})
 	if err != nil {
@@ -31,7 +30,7 @@ func TestGetRunReturnsRunByID(t *testing.T) {
 
 func TestGetRunReturnsNotFound(t *testing.T) {
 	ctx := context.Background()
-	handler := query.NewGetRunHandler(newFakeRunRepository())
+	handler := NewGetRunHandler(newFakeRunRepository())
 
 	_, err := handler.GetRun(ctx, inbound.GetRunQuery{RunID: "run_missing"})
 	if !errors.Is(err, inbound.ErrRunNotFound) {

@@ -1,29 +1,27 @@
-package inbound_test
+package inbound
 
 import (
 	"testing"
 	"time"
-
-	"github.com/po-sen/agentpool/internal/application/port/inbound"
 )
 
 func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	endedAt := time.Unix(102, 0).UTC()
 
-	view := inbound.RunView{
+	view := RunView{
 		ID:     "run_test",
 		Status: "running",
-		Task: inbound.TaskView{
+		Task: TaskView{
 			ProjectID:     "project_test",
 			Prompt:        "do work",
 			RepositoryURL: "https://example.com/repo.git",
 			Branch:        "main",
 		},
-		Result: inbound.RunResultView{
+		Result: RunResultView{
 			Summary: "model output",
 		},
 		FailureReason: "model failed",
-		Steps: []inbound.StepView{
+		Steps: []StepView{
 			{
 				Name:      "execute",
 				Status:    "completed",

@@ -1,20 +1,18 @@
-package run_test
+package run
 
 import (
 	"testing"
-
-	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
 func TestStatusValidity(t *testing.T) {
-	valid := []run.Status{
-		run.StatusQueued,
-		run.StatusPreparing,
-		run.StatusRunning,
-		run.StatusWaitingApproval,
-		run.StatusCompleted,
-		run.StatusFailed,
-		run.StatusCancelled,
+	valid := []Status{
+		StatusQueued,
+		StatusPreparing,
+		StatusRunning,
+		StatusWaitingApproval,
+		StatusCompleted,
+		StatusFailed,
+		StatusCancelled,
 	}
 
 	for _, status := range valid {
@@ -23,16 +21,16 @@ func TestStatusValidity(t *testing.T) {
 		}
 	}
 
-	if run.Status("unknown").IsValid() {
+	if Status("unknown").IsValid() {
 		t.Fatal("unknown status should be invalid")
 	}
 }
 
 func TestStatusTerminal(t *testing.T) {
-	terminal := []run.Status{
-		run.StatusCompleted,
-		run.StatusFailed,
-		run.StatusCancelled,
+	terminal := []Status{
+		StatusCompleted,
+		StatusFailed,
+		StatusCancelled,
 	}
 
 	for _, status := range terminal {
@@ -41,7 +39,7 @@ func TestStatusTerminal(t *testing.T) {
 		}
 	}
 
-	if run.StatusRunning.IsTerminal() {
+	if StatusRunning.IsTerminal() {
 		t.Fatal("running should not be terminal")
 	}
 }

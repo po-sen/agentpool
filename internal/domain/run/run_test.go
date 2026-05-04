@@ -1,12 +1,10 @@
-package run_test
+package run
 
 import (
 	"errors"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
 func TestRunStatusTransitions(t *testing.T) {
@@ -14,29 +12,29 @@ func TestRunStatusTransitions(t *testing.T) {
 	item := newRun(t, now)
 
 	assertTransition(t, item.StartPreparing(now.Add(time.Second)))
-	assertStatus(t, item, run.StatusPreparing)
+	assertStatus(t, item, StatusPreparing)
 
 	assertTransition(t, item.StartRunning(now.Add(2*time.Second)))
-	assertStatus(t, item, run.StatusRunning)
+	assertStatus(t, item, StatusRunning)
 
 	assertTransition(t, item.WaitForApproval(now.Add(3*time.Second)))
-	assertStatus(t, item, run.StatusWaitingApproval)
+	assertStatus(t, item, StatusWaitingApproval)
 
 	assertTransition(t, item.StartRunning(now.Add(4*time.Second)))
-	assertStatus(t, item, run.StatusRunning)
+	assertStatus(t, item, StatusRunning)
 
 	assertTransition(t, item.Complete(now.Add(5*time.Second)))
-	assertStatus(t, item, run.StatusCompleted)
+	assertStatus(t, item, StatusCompleted)
 }
 
 func TestRunRejectsInvalidTransition(t *testing.T) {
 	item := newRun(t, time.Unix(100, 0).UTC())
 
 	err := item.Complete(time.Unix(101, 0).UTC())
-	if !errors.Is(err, run.ErrInvalidTransition) {
+	if !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("expected invalid transition error, got %v", err)
 	}
-	assertStatus(t, item, run.StatusQueued)
+	assertStatus(t, item, StatusQueued)
 }
 
 func TestRunCompleteWithResultStoresSummary(t *testing.T) {
@@ -52,7 +50,7 @@ func TestRunCompleteWithResultStoresSummary(t *testing.T) {
 		t.Fatalf("complete with result: %v", err)
 	}
 
-	assertStatus(t, item, run.StatusCompleted)
+	assertStatus(t, item, StatusCompleted)
 	if item.ResultSummary != "model output" {
 		t.Fatalf("ResultSummary = %q, want %q", item.ResultSummary, "model output")
 	}
@@ -74,7 +72,7 @@ func TestRunFailWithReasonStoresFailureReason(t *testing.T) {
 		t.Fatalf("fail with reason: %v", err)
 	}
 
-	assertStatus(t, item, run.StatusFailed)
+	assertStatus(t, item, StatusFailed)
 	if item.FailureReason != "model failed" {
 		t.Fatalf("FailureReason = %q, want %q", item.FailureReason, "model failed")
 	}
@@ -88,10 +86,10 @@ func TestRunResultMethodsRejectInvalidTransitionsWithoutMutatingOutput(t *testin
 	item := newRun(t, now)
 
 	err := item.CompleteWithResult(now.Add(time.Second), "model output")
-	if !errors.Is(err, run.ErrInvalidTransition) {
-		t.Fatalf("CompleteWithResult() error = %v, want %v", err, run.ErrInvalidTransition)
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("CompleteWithResult() error = %v, want %v", err, ErrInvalidTransition)
 	}
-	assertStatus(t, item, run.StatusQueued)
+	assertStatus(t, item, StatusQueued)
 	if item.ResultSummary != "" {
 		t.Fatalf("ResultSummary = %q, want empty", item.ResultSummary)
 	}
@@ -105,10 +103,10 @@ func TestRunResultMethodsRejectInvalidTransitionsWithoutMutatingOutput(t *testin
 	}
 
 	err = item.FailWithReason(now.Add(4*time.Second), "too late")
-	if !errors.Is(err, run.ErrInvalidTransition) {
-		t.Fatalf("FailWithReason() error = %v, want %v", err, run.ErrInvalidTransition)
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("FailWithReason() error = %v, want %v", err, ErrInvalidTransition)
 	}
-	assertStatus(t, item, run.StatusCompleted)
+	assertStatus(t, item, StatusCompleted)
 	if item.ResultSummary != "completed output" {
 		t.Fatalf("ResultSummary = %q, want %q", item.ResultSummary, "completed output")
 	}
@@ -122,10 +120,10 @@ func TestRunCancelTransitions(t *testing.T) {
 	item := newRun(t, now)
 
 	assertTransition(t, item.Cancel(now.Add(time.Second)))
-	assertStatus(t, item, run.StatusCancelled)
+	assertStatus(t, item, StatusCancelled)
 
 	err := item.StartRunning(now.Add(2 * time.Second))
-	if !errors.Is(err, run.ErrInvalidTransition) {
+	if !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("expected invalid transition after cancel, got %v", err)
 	}
 }
@@ -147,12 +145,12 @@ func TestRunCancelEndsRunningSteps(t *testing.T) {
 		t.Fatalf("cancel run: %v", err)
 	}
 
-	if item.Steps[0].Status != run.StatusCompleted {
-		t.Fatalf("prepare step status = %s, want %s", item.Steps[0].Status, run.StatusCompleted)
+	if item.Steps[0].Status != StatusCompleted {
+		t.Fatalf("prepare step status = %s, want %s", item.Steps[0].Status, StatusCompleted)
 	}
 	agentStep := item.Steps[1]
-	if agentStep.Status != run.StatusCancelled {
-		t.Fatalf("agent step status = %s, want %s", agentStep.Status, run.StatusCancelled)
+	if agentStep.Status != StatusCancelled {
+		t.Fatalf("agent step status = %s, want %s", agentStep.Status, StatusCancelled)
 	}
 	if agentStep.Message != "Run cancelled" {
 		t.Fatalf("agent step message = %q, want Run cancelled", agentStep.Message)
@@ -171,7 +169,7 @@ func TestRunCloneReturnsDetachedStepSlice(t *testing.T) {
 
 	clone := item.Clone()
 	clone.Steps[0].Message = "changed"
-	clone.Steps = append(clone.Steps, run.Step{Name: "agent"})
+	clone.Steps = append(clone.Steps, Step{Name: "agent"})
 
 	if len(item.Steps) != 1 {
 		t.Fatalf("len(original Steps) = %d, want 1", len(item.Steps))
@@ -184,22 +182,22 @@ func TestRunCloneReturnsDetachedStepSlice(t *testing.T) {
 func TestTaskSpecValidation(t *testing.T) {
 	tests := []struct {
 		name string
-		task run.TaskSpec
+		task TaskSpec
 		want error
 	}{
 		{
 			name: "valid",
-			task: run.TaskSpec{Prompt: "do work"},
+			task: TaskSpec{Prompt: "do work"},
 		},
 		{
 			name: "empty prompt",
-			task: run.TaskSpec{Prompt: "   "},
-			want: run.ErrEmptyPrompt,
+			task: TaskSpec{Prompt: "   "},
+			want: ErrEmptyPrompt,
 		},
 		{
 			name: "prompt too long",
-			task: run.TaskSpec{Prompt: strings.Repeat("a", run.MaxPromptLength+1)},
-			want: run.ErrPromptTooLong,
+			task: TaskSpec{Prompt: strings.Repeat("a", MaxPromptLength+1)},
+			want: ErrPromptTooLong,
 		},
 	}
 
@@ -213,10 +211,10 @@ func TestTaskSpecValidation(t *testing.T) {
 	}
 }
 
-func newRun(t *testing.T, now time.Time) *run.Run {
+func newRun(t *testing.T, now time.Time) *Run {
 	t.Helper()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
+	item, err := New("run_test", TaskSpec{Prompt: "do work"}, now)
 	if err != nil {
 		t.Fatalf("new run: %v", err)
 	}
@@ -232,7 +230,7 @@ func assertTransition(t *testing.T, err error) {
 	}
 }
 
-func assertStatus(t *testing.T, item *run.Run, want run.Status) {
+func assertStatus(t *testing.T, item *Run, want Status) {
 	t.Helper()
 
 	if item.Status != want {

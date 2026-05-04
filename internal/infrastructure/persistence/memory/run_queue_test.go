@@ -1,4 +1,4 @@
-package memory_test
+package memory
 
 import (
 	"context"
@@ -6,12 +6,11 @@ import (
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	"github.com/po-sen/agentpool/internal/infrastructure/persistence/memory"
 )
 
 func TestRunQueueDequeuesInOrderAndReportsEmpty(t *testing.T) {
 	ctx := context.Background()
-	queue := memory.NewRunQueue()
+	queue := NewRunQueue()
 
 	_, err := queue.Dequeue(ctx)
 	if !errors.Is(err, outbound.ErrRunQueueEmpty) {
@@ -46,7 +45,7 @@ func TestRunQueueDequeueHonorsCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := memory.NewRunQueue().Dequeue(ctx)
+	_, err := NewRunQueue().Dequeue(ctx)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("dequeue error = %v, want %v", err, context.Canceled)
 	}

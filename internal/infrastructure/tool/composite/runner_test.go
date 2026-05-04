@@ -1,4 +1,4 @@
-package composite_test
+package composite
 
 import (
 	"context"
@@ -6,11 +6,10 @@ import (
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
 )
 
 func TestRunnerImplementsToolRunner(t *testing.T) {
-	runner, err := composite.NewRunner(fakeToolRunner{name: "echo"})
+	runner, err := NewRunner(fakeToolRunner{name: "echo"})
 	if err != nil {
 		t.Fatalf("NewRunner() error = %v", err)
 	}
@@ -19,7 +18,7 @@ func TestRunnerImplementsToolRunner(t *testing.T) {
 }
 
 func TestRunnerCombinesTools(t *testing.T) {
-	runner, err := composite.NewRunner(
+	runner, err := NewRunner(
 		fakeToolRunner{name: "echo"},
 		fakeToolRunner{name: "read_file"},
 	)
@@ -42,7 +41,7 @@ func TestRunnerCombinesTools(t *testing.T) {
 func TestRunnerDispatchesToCorrectRunner(t *testing.T) {
 	echoRunner := &recordingToolRunner{name: "echo", content: "echoed"}
 	readRunner := &recordingToolRunner{name: "read_file", content: "read"}
-	runner, err := composite.NewRunner(echoRunner, readRunner)
+	runner, err := NewRunner(echoRunner, readRunner)
 	if err != nil {
 		t.Fatalf("NewRunner() error = %v", err)
 	}
@@ -63,7 +62,7 @@ func TestRunnerDispatchesToCorrectRunner(t *testing.T) {
 }
 
 func TestRunnerRejectsDuplicateToolNames(t *testing.T) {
-	_, err := composite.NewRunner(
+	_, err := NewRunner(
 		fakeToolRunner{name: "echo"},
 		fakeToolRunner{name: "echo"},
 	)
@@ -73,7 +72,7 @@ func TestRunnerRejectsDuplicateToolNames(t *testing.T) {
 }
 
 func TestRunnerReturnsToolErrorForUnknownTool(t *testing.T) {
-	runner, err := composite.NewRunner(fakeToolRunner{name: "echo"})
+	runner, err := NewRunner(fakeToolRunner{name: "echo"})
 	if err != nil {
 		t.Fatalf("NewRunner() error = %v", err)
 	}
@@ -93,7 +92,7 @@ func TestRunnerReturnsToolErrorForUnknownTool(t *testing.T) {
 func TestRunnerPropagatesListToolsErrorsDuringConstruction(t *testing.T) {
 	errListTools := errors.New("list tools failed")
 
-	_, err := composite.NewRunner(errorToolRunner{err: errListTools})
+	_, err := NewRunner(errorToolRunner{err: errListTools})
 	if !errors.Is(err, errListTools) {
 		t.Fatalf("NewRunner() error = %v, want %v", err, errListTools)
 	}

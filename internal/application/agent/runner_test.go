@@ -1,4 +1,4 @@
-package agent_test
+package agent
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/po-sen/agentpool/internal/application/agent"
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
@@ -16,9 +15,9 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 		responses: []outbound.ModelResponse{{Content: "done"}},
 	}
 	tools := newFakeToolRunner()
-	runner := agent.NewRunner(model, tools)
+	runner := NewRunner(model, tools)
 
-	result, err := runner.Run(context.Background(), agent.RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -44,9 +43,9 @@ func TestRunnerReturnsJSONFinalActionSummary(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{{Content: `{"type":"final","summary":"done"}`}},
 	}
-	runner := agent.NewRunner(model, newFakeToolRunner())
+	runner := NewRunner(model, newFakeToolRunner())
 
-	result, err := runner.Run(context.Background(), agent.RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -66,9 +65,9 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunner()
-	runner := agent.NewRunner(model, tools)
+	runner := NewRunner(model, tools)
 
-	result, err := runner.Run(context.Background(), agent.RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID:   "run_test",
 		Task:    run.TaskSpec{Prompt: "do work"},
 		Sandbox: outbound.Sandbox{ID: "sandbox_test", WorkspacePath: "/tmp/workspace"},
@@ -113,9 +112,9 @@ func TestRunnerFeedsUnknownToolResultBackToModel(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunner()
-	runner := agent.NewRunner(model, tools)
+	runner := NewRunner(model, tools)
 
-	result, err := runner.Run(context.Background(), agent.RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -140,9 +139,9 @@ func TestRunnerRejectsUnknownJSONActionTypeAndContinues(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunner()
-	runner := agent.NewRunner(model, tools)
+	runner := NewRunner(model, tools)
 
-	result, err := runner.Run(context.Background(), agent.RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -175,9 +174,9 @@ func TestRunnerRejectsMultipleJSONObjectsAndContinues(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunner()
-	runner := agent.NewRunner(model, tools)
+	runner := NewRunner(model, tools)
 
-	result, err := runner.Run(context.Background(), agent.RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -205,9 +204,9 @@ func TestRunnerRejectsFencedJSONActionAndContinues(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunner()
-	runner := agent.NewRunner(model, tools)
+	runner := NewRunner(model, tools)
 
-	result, err := runner.Run(context.Background(), agent.RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -235,9 +234,9 @@ func TestRunnerRejectsEmptyFinalSummaryAndContinues(t *testing.T) {
 			{Content: `{"type":"final","summary":"fixed"}`},
 		},
 	}
-	runner := agent.NewRunner(model, newFakeToolRunner())
+	runner := NewRunner(model, newFakeToolRunner())
 
-	result, err := runner.Run(context.Background(), agent.RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -257,9 +256,9 @@ func TestRunnerRejectsToolCallWithMissingToolAndContinues(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunner()
-	runner := agent.NewRunner(model, tools)
+	runner := NewRunner(model, tools)
 
-	result, err := runner.Run(context.Background(), agent.RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -279,9 +278,9 @@ func TestRunnerReturnsErrorWhenMaxTurnsExceeded(t *testing.T) {
 		responses: []outbound.ModelResponse{{Content: `{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}`}},
 	}
 	tools := newFakeToolRunner()
-	runner := agent.NewRunner(model, tools, agent.WithMaxTurns(1))
+	runner := NewRunner(model, tools, WithMaxTurns(1))
 
-	_, err := runner.Run(context.Background(), agent.RunRequest{
+	_, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -298,9 +297,9 @@ func TestRunnerReturnsErrorWhenProtocolErrorsExceedMaxTurns(t *testing.T) {
 		responses: []outbound.ModelResponse{{Content: `{"type":"tool_result","result":"hello from tool"}`}},
 	}
 	tools := newFakeToolRunner()
-	runner := agent.NewRunner(model, tools, agent.WithMaxTurns(1))
+	runner := NewRunner(model, tools, WithMaxTurns(1))
 
-	_, err := runner.Run(context.Background(), agent.RunRequest{
+	_, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -314,9 +313,9 @@ func TestRunnerReturnsErrorWhenProtocolErrorsExceedMaxTurns(t *testing.T) {
 
 func TestRunnerPropagatesModelErrors(t *testing.T) {
 	model := &recordingModelClient{err: errModelFailed}
-	runner := agent.NewRunner(model, newFakeToolRunner())
+	runner := NewRunner(model, newFakeToolRunner())
 
-	_, err := runner.Run(context.Background(), agent.RunRequest{
+	_, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -328,9 +327,9 @@ func TestRunnerPropagatesModelErrors(t *testing.T) {
 func TestRunnerPropagatesListToolsErrors(t *testing.T) {
 	model := &recordingModelClient{responses: []outbound.ModelResponse{{Content: "done"}}}
 	tools := &fakeToolRunner{listErr: errListToolsFailed}
-	runner := agent.NewRunner(model, tools)
+	runner := NewRunner(model, tools)
 
-	_, err := runner.Run(context.Background(), agent.RunRequest{
+	_, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})

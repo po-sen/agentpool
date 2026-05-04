@@ -1,44 +1,43 @@
-package outbound_test
+package outbound
 
 import (
 	"context"
 	"testing"
 
-	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
 func TestIntegrationPortContracts(t *testing.T) {
-	var ids outbound.IDGenerator = fakeIDGenerator{}
-	var sandbox outbound.SandboxProvider = fakeSandboxProvider{}
-	var git outbound.GitProvider = fakeGitProvider{}
-	var policy outbound.PolicyDecisionPort = fakePolicyDecision{}
-	var secrets outbound.SecretBroker = fakeSecretBroker{}
-	var tools outbound.ToolRunner = fakeToolRunner{}
+	var ids IDGenerator = fakeIDGenerator{}
+	var sandbox SandboxProvider = fakeSandboxProvider{}
+	var git GitProvider = fakeGitProvider{}
+	var policy PolicyDecisionPort = fakePolicyDecision{}
+	var secrets SecretBroker = fakeSecretBroker{}
+	var tools ToolRunner = fakeToolRunner{}
 
 	ctx := context.Background()
 	if _, err := ids.NewRunID(); err != nil {
 		t.Fatalf("NewRunID() error = %v", err)
 	}
-	if _, err := sandbox.Prepare(ctx, outbound.SandboxRequest{RunID: "run_test"}); err != nil {
+	if _, err := sandbox.Prepare(ctx, SandboxRequest{RunID: "run_test"}); err != nil {
 		t.Fatalf("Prepare() error = %v", err)
 	}
-	if err := sandbox.Cleanup(ctx, outbound.Sandbox{ID: "sandbox_test", WorkspacePath: "/tmp/repo"}); err != nil {
+	if err := sandbox.Cleanup(ctx, Sandbox{ID: "sandbox_test", WorkspacePath: "/tmp/repo"}); err != nil {
 		t.Fatalf("Cleanup() error = %v", err)
 	}
-	if _, err := git.Fetch(ctx, outbound.GitFetchRequest{RepositoryURL: "https://example.com/repo.git"}); err != nil {
+	if _, err := git.Fetch(ctx, GitFetchRequest{RepositoryURL: "https://example.com/repo.git"}); err != nil {
 		t.Fatalf("Fetch() error = %v", err)
 	}
-	if _, err := policy.Decide(ctx, outbound.PolicyDecisionRequest{RunID: "run_test"}); err != nil {
+	if _, err := policy.Decide(ctx, PolicyDecisionRequest{RunID: "run_test"}); err != nil {
 		t.Fatalf("Decide() error = %v", err)
 	}
-	if _, err := secrets.Resolve(ctx, outbound.SecretRequest{ProjectID: "project_test"}); err != nil {
+	if _, err := secrets.Resolve(ctx, SecretRequest{ProjectID: "project_test"}); err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	if _, err := tools.ListTools(ctx, outbound.ToolListRequest{RunID: "run_test"}); err != nil {
+	if _, err := tools.ListTools(ctx, ToolListRequest{RunID: "run_test"}); err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if _, err := tools.RunTool(ctx, outbound.ToolCall{RunID: "run_test", Name: "echo"}); err != nil {
+	if _, err := tools.RunTool(ctx, ToolCall{RunID: "run_test", Name: "echo"}); err != nil {
 		t.Fatalf("RunTool() error = %v", err)
 	}
 }
@@ -51,38 +50,38 @@ func (fakeIDGenerator) NewRunID() (run.RunID, error) {
 
 type fakeSandboxProvider struct{}
 
-func (fakeSandboxProvider) Prepare(context.Context, outbound.SandboxRequest) (outbound.Sandbox, error) {
-	return outbound.Sandbox{ID: "sandbox_test", WorkspacePath: "/tmp/repo"}, nil
+func (fakeSandboxProvider) Prepare(context.Context, SandboxRequest) (Sandbox, error) {
+	return Sandbox{ID: "sandbox_test", WorkspacePath: "/tmp/repo"}, nil
 }
 
-func (fakeSandboxProvider) Cleanup(context.Context, outbound.Sandbox) error {
+func (fakeSandboxProvider) Cleanup(context.Context, Sandbox) error {
 	return nil
 }
 
 type fakeGitProvider struct{}
 
-func (fakeGitProvider) Fetch(context.Context, outbound.GitFetchRequest) (outbound.GitCheckout, error) {
-	return outbound.GitCheckout{Path: "/tmp/repo"}, nil
+func (fakeGitProvider) Fetch(context.Context, GitFetchRequest) (GitCheckout, error) {
+	return GitCheckout{Path: "/tmp/repo"}, nil
 }
 
 type fakePolicyDecision struct{}
 
-func (fakePolicyDecision) Decide(context.Context, outbound.PolicyDecisionRequest) (outbound.PolicyDecision, error) {
-	return outbound.PolicyDecision{Allowed: true}, nil
+func (fakePolicyDecision) Decide(context.Context, PolicyDecisionRequest) (PolicyDecision, error) {
+	return PolicyDecision{Allowed: true}, nil
 }
 
 type fakeSecretBroker struct{}
 
-func (fakeSecretBroker) Resolve(context.Context, outbound.SecretRequest) (outbound.SecretBundle, error) {
-	return outbound.SecretBundle{Values: map[string]string{}}, nil
+func (fakeSecretBroker) Resolve(context.Context, SecretRequest) (SecretBundle, error) {
+	return SecretBundle{Values: map[string]string{}}, nil
 }
 
 type fakeToolRunner struct{}
 
-func (fakeToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
-	return []outbound.ToolDefinition{{Name: "echo", Description: "test tool"}}, nil
+func (fakeToolRunner) ListTools(context.Context, ToolListRequest) ([]ToolDefinition, error) {
+	return []ToolDefinition{{Name: "echo", Description: "test tool"}}, nil
 }
 
-func (fakeToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound.ToolResult, error) {
-	return outbound.ToolResult{Content: "done"}, nil
+func (fakeToolRunner) RunTool(context.Context, ToolCall) (ToolResult, error) {
+	return ToolResult{Content: "done"}, nil
 }

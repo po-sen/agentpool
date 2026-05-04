@@ -1,16 +1,15 @@
-package outbound_test
+package outbound
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
 func TestRunStateStoreContract(t *testing.T) {
-	var store outbound.RunStateStore = fakeRunStateStore{}
+	var store RunStateStore = fakeRunStateStore{}
 
 	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, time.Unix(100, 0).UTC())
 	if err != nil {

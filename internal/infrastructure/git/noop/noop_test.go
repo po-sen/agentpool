@@ -1,15 +1,14 @@
-package noop_test
+package noop
 
 import (
 	"context"
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	gitnoop "github.com/po-sen/agentpool/internal/infrastructure/git/noop"
 )
 
 func TestProviderFetchReturnsEmptyCheckout(t *testing.T) {
-	provider := gitnoop.NewProvider()
+	provider := NewProvider()
 
 	checkout, err := provider.Fetch(context.Background(), outbound.GitFetchRequest{
 		RepositoryURL: "https://example.com/repo.git",

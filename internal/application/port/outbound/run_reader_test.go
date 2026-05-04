@@ -1,16 +1,15 @@
-package outbound_test
+package outbound
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
 func TestRunReaderContract(t *testing.T) {
-	var reader outbound.RunReader = fakeRunReader{}
+	var reader RunReader = fakeRunReader{}
 
 	items, err := reader.List(context.Background())
 	if err != nil {

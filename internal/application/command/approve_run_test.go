@@ -1,16 +1,15 @@
-package command_test
+package command
 
 import (
 	"context"
 	"errors"
 	"testing"
 
-	"github.com/po-sen/agentpool/internal/application/command"
 	"github.com/po-sen/agentpool/internal/application/port/inbound"
 )
 
 func TestApproveRunReturnsNotImplemented(t *testing.T) {
-	handler := command.NewApproveRunHandler()
+	handler := NewApproveRunHandler()
 
 	_, err := handler.ApproveRun(context.Background(), inbound.ApproveRunCommand{
 		RunID:    "run_test",

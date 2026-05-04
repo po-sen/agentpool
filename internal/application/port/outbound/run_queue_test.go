@@ -1,15 +1,14 @@
-package outbound_test
+package outbound
 
 import (
 	"context"
 	"testing"
 
-	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
 func TestRunQueueContract(t *testing.T) {
-	var queue outbound.RunQueue = &fakeRunQueue{}
+	var queue RunQueue = &fakeRunQueue{}
 
 	ctx := context.Background()
 	if err := queue.Enqueue(ctx, "run_test"); err != nil {

@@ -1,19 +1,17 @@
-package approval_test
+package approval
 
 import (
 	"testing"
-
-	"github.com/po-sen/agentpool/internal/domain/approval"
 )
 
 func TestDecisionValues(t *testing.T) {
 	tests := []struct {
 		name string
-		got  approval.Decision
+		got  Decision
 		want string
 	}{
-		{name: "approved", got: approval.DecisionApproved, want: "approved"},
-		{name: "rejected", got: approval.DecisionRejected, want: "rejected"},
+		{name: "approved", got: DecisionApproved, want: "approved"},
+		{name: "rejected", got: DecisionRejected, want: "rejected"},
 	}
 
 	for _, tt := range tests {

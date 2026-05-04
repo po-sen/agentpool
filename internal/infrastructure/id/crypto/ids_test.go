@@ -1,15 +1,13 @@
-package crypto_test
+package crypto
 
 import (
 	"encoding/hex"
 	"strings"
 	"testing"
-
-	"github.com/po-sen/agentpool/internal/infrastructure/id/crypto"
 )
 
 func TestGeneratorNewRunIDCreatesOpaqueRunID(t *testing.T) {
-	generator := crypto.NewGenerator()
+	generator := NewGenerator()
 
 	first, err := generator.NewRunID()
 	if err != nil {

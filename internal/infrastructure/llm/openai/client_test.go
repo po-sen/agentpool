@@ -1,4 +1,4 @@
-package openai_test
+package openai
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	"github.com/po-sen/agentpool/internal/infrastructure/llm/openai"
 )
 
 func TestClientGenerateSendsAuthorizationAndParsesContent(t *testing.T) {
@@ -26,7 +25,7 @@ func TestClientGenerateSendsAuthorizationAndParsesContent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := openai.NewClient(openai.Config{
+	client, err := NewClient(Config{
 		BaseURL: server.URL + "/v1",
 		Model:   "gpt-4.1-mini",
 		APIKey:  "test-key",
@@ -50,7 +49,7 @@ func TestClientGenerateSendsAuthorizationAndParsesContent(t *testing.T) {
 }
 
 func TestNewClientRequiresAPIKey(t *testing.T) {
-	_, err := openai.NewClient(openai.Config{
+	_, err := NewClient(Config{
 		BaseURL: "https://api.openai.com/v1",
 		Model:   "gpt-4.1-mini",
 	})
@@ -85,10 +84,10 @@ func TestClientGenerateHandlesNon2xx(t *testing.T) {
 	}
 }
 
-func newClient(t *testing.T, baseURL string) *openai.Client {
+func newClient(t *testing.T, baseURL string) *Client {
 	t.Helper()
 
-	client, err := openai.NewClient(openai.Config{
+	client, err := NewClient(Config{
 		BaseURL: baseURL,
 		Model:   "gpt-4.1-mini",
 		APIKey:  "test-key",

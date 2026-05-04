@@ -1,4 +1,4 @@
-package gemini_test
+package gemini
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	"github.com/po-sen/agentpool/internal/infrastructure/llm/gemini"
 )
 
 func TestClientGenerateSendsAPIKeyAndParsesText(t *testing.T) {
@@ -47,7 +46,7 @@ func TestClientGenerateSendsAPIKeyAndParsesText(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := gemini.NewClient(gemini.Config{
+	client, err := NewClient(Config{
 		BaseURL: server.URL,
 		Model:   "gemini-2.5-flash",
 		APIKey:  "test-key",
@@ -96,7 +95,7 @@ func TestClientGenerateSendsAPIKeyAndParsesText(t *testing.T) {
 }
 
 func TestNewClientRequiresAPIKey(t *testing.T) {
-	_, err := gemini.NewClient(gemini.Config{
+	_, err := NewClient(Config{
 		BaseURL: "https://generativelanguage.googleapis.com/v1beta",
 		Model:   "gemini-2.5-flash",
 	})
@@ -131,10 +130,10 @@ func TestClientGenerateHandlesNoText(t *testing.T) {
 	}
 }
 
-func newClient(t *testing.T, baseURL string) *gemini.Client {
+func newClient(t *testing.T, baseURL string) *Client {
 	t.Helper()
 
-	client, err := gemini.NewClient(gemini.Config{
+	client, err := NewClient(Config{
 		BaseURL: baseURL,
 		Model:   "gemini-2.5-flash",
 		APIKey:  "test-key",

@@ -1,4 +1,4 @@
-package memory_test
+package memory
 
 import (
 	"context"
@@ -7,12 +7,11 @@ import (
 	"time"
 
 	"github.com/po-sen/agentpool/internal/domain/run"
-	"github.com/po-sen/agentpool/internal/infrastructure/persistence/memory"
 )
 
 func TestRunRepositoryListReturnsDetachedCopies(t *testing.T) {
 	ctx := context.Background()
-	repo := memory.NewRunRepository()
+	repo := NewRunRepository()
 	now := time.Unix(100, 0).UTC()
 
 	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
@@ -43,7 +42,7 @@ func TestRunRepositoryListReturnsDetachedCopies(t *testing.T) {
 }
 
 func TestRunRepositoryFindByIDReturnsNotFound(t *testing.T) {
-	repo := memory.NewRunRepository()
+	repo := NewRunRepository()
 
 	_, err := repo.FindByID(context.Background(), "run_missing")
 	if !errors.Is(err, run.ErrRunNotFound) {
@@ -53,7 +52,7 @@ func TestRunRepositoryFindByIDReturnsNotFound(t *testing.T) {
 
 func TestRunRepositorySaveIfStatusUpdatesOnlyExpectedStatus(t *testing.T) {
 	ctx := context.Background()
-	repo := memory.NewRunRepository()
+	repo := NewRunRepository()
 	now := time.Unix(100, 0).UTC()
 
 	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
@@ -93,7 +92,7 @@ func TestRunRepositorySaveIfStatusUpdatesOnlyExpectedStatus(t *testing.T) {
 
 func TestRunRepositoryListOrdersByCreatedAtThenID(t *testing.T) {
 	ctx := context.Background()
-	repo := memory.NewRunRepository()
+	repo := NewRunRepository()
 	firstTime := time.Unix(100, 0).UTC()
 	secondTime := time.Unix(200, 0).UTC()
 
@@ -118,7 +117,7 @@ func TestRunRepositoryListOrdersByCreatedAtThenID(t *testing.T) {
 	}
 }
 
-func saveRun(ctx context.Context, t *testing.T, repo *memory.RunRepository, id run.RunID, createdAt time.Time) {
+func saveRun(ctx context.Context, t *testing.T, repo *RunRepository, id run.RunID, createdAt time.Time) {
 	t.Helper()
 
 	item, err := run.New(id, run.TaskSpec{Prompt: "do work"}, createdAt)

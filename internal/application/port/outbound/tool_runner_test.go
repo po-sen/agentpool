@@ -1,16 +1,14 @@
-package outbound_test
+package outbound
 
 import (
 	"context"
 	"testing"
-
-	"github.com/po-sen/agentpool/internal/application/port/outbound"
 )
 
 func TestToolRunnerContract(t *testing.T) {
-	var runner outbound.ToolRunner = contractToolRunner{}
+	var runner ToolRunner = contractToolRunner{}
 
-	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{})
+	tools, err := runner.ListTools(context.Background(), ToolListRequest{})
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
@@ -18,7 +16,7 @@ func TestToolRunnerContract(t *testing.T) {
 		t.Fatalf("len(tools) = %d, want 1", len(tools))
 	}
 
-	result, err := runner.RunTool(context.Background(), outbound.ToolCall{Name: "echo"})
+	result, err := runner.RunTool(context.Background(), ToolCall{Name: "echo"})
 	if err != nil {
 		t.Fatalf("RunTool() error = %v", err)
 	}
@@ -29,10 +27,10 @@ func TestToolRunnerContract(t *testing.T) {
 
 type contractToolRunner struct{}
 
-func (contractToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
-	return []outbound.ToolDefinition{{Name: "echo", Description: "test tool"}}, nil
+func (contractToolRunner) ListTools(context.Context, ToolListRequest) ([]ToolDefinition, error) {
+	return []ToolDefinition{{Name: "echo", Description: "test tool"}}, nil
 }
 
-func (contractToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound.ToolResult, error) {
-	return outbound.ToolResult{Content: "ok"}, nil
+func (contractToolRunner) RunTool(context.Context, ToolCall) (ToolResult, error) {
+	return ToolResult{Content: "ok"}, nil
 }

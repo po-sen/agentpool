@@ -1,27 +1,25 @@
-package cli_test
+package cli
 
 import (
 	"errors"
 	"testing"
-
-	"github.com/po-sen/agentpool/internal/delivery/cli"
 )
 
 func TestParseValidCommands(t *testing.T) {
 	tests := []struct {
 		name string
 		arg  string
-		want cli.Command
+		want Command
 	}{
-		{name: "server", arg: "server", want: cli.CommandServer},
-		{name: "worker", arg: "worker", want: cli.CommandWorker},
-		{name: "dev", arg: "dev", want: cli.CommandDev},
-		{name: "version", arg: "version", want: cli.CommandVersion},
+		{name: "server", arg: "server", want: CommandServer},
+		{name: "worker", arg: "worker", want: CommandWorker},
+		{name: "dev", arg: "dev", want: CommandDev},
+		{name: "version", arg: "version", want: CommandVersion},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := cli.Parse([]string{tt.arg})
+			got, err := Parse([]string{tt.arg})
 			if err != nil {
 				t.Fatalf("parse command: %v", err)
 			}
@@ -33,15 +31,15 @@ func TestParseValidCommands(t *testing.T) {
 }
 
 func TestParseInvalidCommand(t *testing.T) {
-	_, err := cli.Parse([]string{"bad"})
-	if !errors.Is(err, cli.ErrUsage) {
-		t.Fatalf("Parse() error = %v, want %v", err, cli.ErrUsage)
+	_, err := Parse([]string{"bad"})
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("Parse() error = %v, want %v", err, ErrUsage)
 	}
 }
 
 func TestUsage(t *testing.T) {
 	const want = "usage: agentpool <server|worker|dev|version>\n"
-	if got := cli.Usage(); got != want {
+	if got := Usage(); got != want {
 		t.Fatalf("usage = %q, want %q", got, want)
 	}
 }

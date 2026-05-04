@@ -1,11 +1,10 @@
-package command_test
+package command
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/po-sen/agentpool/internal/application/command"
 	"github.com/po-sen/agentpool/internal/application/port/inbound"
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
@@ -18,12 +17,12 @@ func TestCreateRunCreatesQueuedRun(t *testing.T) {
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	handler := command.NewCreateRunHandler(
+	handler := NewCreateRunHandler(
 		repo,
 		queue,
 		publisher,
 		fixedIDGenerator{id: "run_test"},
-		command.WithCreateRunClock(func() time.Time { return now }),
+		WithCreateRunClock(func() time.Time { return now }),
 	)
 
 	created, err := handler.CreateRun(ctx, inbound.CreateRunCommand{

@@ -1,19 +1,17 @@
-package outbound_test
+package outbound
 
 import (
 	"testing"
-
-	"github.com/po-sen/agentpool/internal/application/port/outbound"
 )
 
 func TestRunLifecycleEventNames(t *testing.T) {
 	tests := map[string]string{
-		"created":   outbound.EventRunCreated,
-		"preparing": outbound.EventRunPreparing,
-		"started":   outbound.EventRunStarted,
-		"completed": outbound.EventRunCompleted,
-		"failed":    outbound.EventRunFailed,
-		"cancelled": outbound.EventRunCancelled,
+		"created":   EventRunCreated,
+		"preparing": EventRunPreparing,
+		"started":   EventRunStarted,
+		"completed": EventRunCompleted,
+		"failed":    EventRunFailed,
+		"cancelled": EventRunCancelled,
 	}
 
 	want := map[string]string{

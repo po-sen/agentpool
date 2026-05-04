@@ -1,17 +1,15 @@
-package run_test
+package run
 
 import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
 func TestRepositoryContract(t *testing.T) {
-	var repo run.Repository = fakeRepository{}
+	var repo Repository = fakeRepository{}
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, time.Unix(100, 0).UTC())
+	item, err := New("run_test", TaskSpec{Prompt: "do work"}, time.Unix(100, 0).UTC())
 	if err != nil {
 		t.Fatalf("new run: %v", err)
 	}
@@ -25,10 +23,10 @@ func TestRepositoryContract(t *testing.T) {
 
 type fakeRepository struct{}
 
-func (fakeRepository) Save(context.Context, *run.Run) error {
+func (fakeRepository) Save(context.Context, *Run) error {
 	return nil
 }
 
-func (fakeRepository) FindByID(context.Context, run.RunID) (*run.Run, error) {
-	return run.New("run_test", run.TaskSpec{Prompt: "do work"}, time.Unix(100, 0).UTC())
+func (fakeRepository) FindByID(context.Context, RunID) (*Run, error) {
+	return New("run_test", TaskSpec{Prompt: "do work"}, time.Unix(100, 0).UTC())
 }

@@ -1,19 +1,18 @@
-package builtin_test
+package builtin
 
 import (
 	"context"
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	"github.com/po-sen/agentpool/internal/infrastructure/tool/builtin"
 )
 
 func TestRunnerImplementsToolRunner(_ *testing.T) {
-	var _ outbound.ToolRunner = builtin.NewRunner()
+	var _ outbound.ToolRunner = NewRunner()
 }
 
 func TestRunnerListsEchoTool(t *testing.T) {
-	runner := builtin.NewRunner()
+	runner := NewRunner()
 
 	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{})
 	if err != nil {
@@ -31,7 +30,7 @@ func TestRunnerListsEchoTool(t *testing.T) {
 }
 
 func TestRunnerEchoReturnsText(t *testing.T) {
-	runner := builtin.NewRunner()
+	runner := NewRunner()
 
 	result, err := runner.RunTool(context.Background(), outbound.ToolCall{
 		Name:      "echo",
@@ -49,7 +48,7 @@ func TestRunnerEchoReturnsText(t *testing.T) {
 }
 
 func TestRunnerEchoMissingTextReturnsToolError(t *testing.T) {
-	runner := builtin.NewRunner()
+	runner := NewRunner()
 
 	result, err := runner.RunTool(context.Background(), outbound.ToolCall{
 		Name:      "echo",
@@ -67,7 +66,7 @@ func TestRunnerEchoMissingTextReturnsToolError(t *testing.T) {
 }
 
 func TestRunnerUnknownToolReturnsToolError(t *testing.T) {
-	runner := builtin.NewRunner()
+	runner := NewRunner()
 
 	result, err := runner.RunTool(context.Background(), outbound.ToolCall{Name: "missing"})
 	if err != nil {

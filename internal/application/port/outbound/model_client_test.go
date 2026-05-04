@@ -1,18 +1,16 @@
-package outbound_test
+package outbound
 
 import (
 	"context"
 	"testing"
-
-	"github.com/po-sen/agentpool/internal/application/port/outbound"
 )
 
 func TestModelClientContract(t *testing.T) {
-	var client outbound.ModelClient = fakeModelClient{}
+	var client ModelClient = fakeModelClient{}
 
-	response, err := client.Generate(context.Background(), outbound.ModelRequest{
+	response, err := client.Generate(context.Background(), ModelRequest{
 		RunID: "run_test",
-		Messages: []outbound.ModelMessage{
+		Messages: []ModelMessage{
 			{Role: "user", Content: "do work"},
 		},
 	})
@@ -26,6 +24,6 @@ func TestModelClientContract(t *testing.T) {
 
 type fakeModelClient struct{}
 
-func (fakeModelClient) Generate(context.Context, outbound.ModelRequest) (outbound.ModelResponse, error) {
-	return outbound.ModelResponse{Content: "done"}, nil
+func (fakeModelClient) Generate(context.Context, ModelRequest) (ModelResponse, error) {
+	return ModelResponse{Content: "done"}, nil
 }

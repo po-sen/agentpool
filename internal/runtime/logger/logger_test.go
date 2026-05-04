@@ -1,16 +1,14 @@
-package logger_test
+package logger
 
 import (
 	"bytes"
 	"strings"
 	"testing"
-
-	"github.com/po-sen/agentpool/internal/runtime/logger"
 )
 
 func TestLoggerWritesInfoAndErrorPrefixes(t *testing.T) {
 	var output bytes.Buffer
-	log := logger.New(&output)
+	log := New(&output)
 
 	log.Infof("hello %s", "world")
 	log.Errorf("failed %d", 1)
@@ -25,7 +23,7 @@ func TestLoggerWritesInfoAndErrorPrefixes(t *testing.T) {
 }
 
 func TestLoggerAcceptsNilWriter(_ *testing.T) {
-	log := logger.New(nil)
+	log := New(nil)
 
 	log.Infof("discarded")
 	log.Errorf("discarded")

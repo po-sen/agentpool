@@ -1,20 +1,18 @@
-package run_test
+package run
 
 import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
 func TestStepCapturesExecutionProgress(t *testing.T) {
 	startedAt := time.Unix(100, 0).UTC()
 	endedAt := time.Unix(101, 0).UTC()
 
-	step := run.Step{
+	step := Step{
 		Name:      "execute",
-		Status:    run.StatusCompleted,
+		Status:    StatusCompleted,
 		Message:   "done",
 		StartedAt: startedAt,
 		EndedAt:   endedAt,
@@ -23,8 +21,8 @@ func TestStepCapturesExecutionProgress(t *testing.T) {
 	if step.Name != "execute" {
 		t.Fatalf("Name = %s, want execute", step.Name)
 	}
-	if step.Status != run.StatusCompleted {
-		t.Fatalf("Status = %s, want %s", step.Status, run.StatusCompleted)
+	if step.Status != StatusCompleted {
+		t.Fatalf("Status = %s, want %s", step.Status, StatusCompleted)
 	}
 	if !step.EndedAt.Equal(endedAt) {
 		t.Fatalf("EndedAt = %v, want %v", step.EndedAt, endedAt)
@@ -47,8 +45,8 @@ func TestRunStartStepAppendsRunningStep(t *testing.T) {
 	if step.Name != "prepare" {
 		t.Fatalf("Name = %q, want prepare", step.Name)
 	}
-	if step.Status != run.StatusRunning {
-		t.Fatalf("Status = %s, want %s", step.Status, run.StatusRunning)
+	if step.Status != StatusRunning {
+		t.Fatalf("Status = %s, want %s", step.Status, StatusRunning)
 	}
 	if step.Message != "Preparing execution" {
 		t.Fatalf("Message = %q, want Preparing execution", step.Message)
@@ -83,8 +81,8 @@ func TestRunCompleteStepCompletesLatestMatchingRunningStep(t *testing.T) {
 		t.Fatalf("first step message = %q, want first complete", item.Steps[0].Message)
 	}
 	step := item.Steps[1]
-	if step.Status != run.StatusCompleted {
-		t.Fatalf("second step status = %s, want %s", step.Status, run.StatusCompleted)
+	if step.Status != StatusCompleted {
+		t.Fatalf("second step status = %s, want %s", step.Status, StatusCompleted)
 	}
 	if step.Message != "Agent generated result summary" {
 		t.Fatalf("second step message = %q, want Agent generated result summary", step.Message)
@@ -107,8 +105,8 @@ func TestRunFailStepFailsMatchingRunningStep(t *testing.T) {
 	}
 
 	step := item.Steps[0]
-	if step.Status != run.StatusFailed {
-		t.Fatalf("Status = %s, want %s", step.Status, run.StatusFailed)
+	if step.Status != StatusFailed {
+		t.Fatalf("Status = %s, want %s", step.Status, StatusFailed)
 	}
 	if step.Message != "Agent execution failed" {
 		t.Fatalf("Message = %q, want Agent execution failed", step.Message)
@@ -123,8 +121,8 @@ func TestRunCompleteStepReturnsErrorWithoutMatchingRunningStep(t *testing.T) {
 	item := newRun(t, now)
 
 	err := item.CompleteStep("agent", "done", now.Add(time.Second))
-	if !errors.Is(err, run.ErrStepNotFound) {
-		t.Fatalf("CompleteStep() error = %v, want %v", err, run.ErrStepNotFound)
+	if !errors.Is(err, ErrStepNotFound) {
+		t.Fatalf("CompleteStep() error = %v, want %v", err, ErrStepNotFound)
 	}
 
 	if err := item.StartStep("agent", "running", now.Add(2*time.Second)); err != nil {
@@ -135,8 +133,8 @@ func TestRunCompleteStepReturnsErrorWithoutMatchingRunningStep(t *testing.T) {
 	}
 
 	err = item.CompleteStep("agent", "done again", now.Add(4*time.Second))
-	if !errors.Is(err, run.ErrStepAlreadyEnded) {
-		t.Fatalf("CompleteStep() error = %v, want %v", err, run.ErrStepAlreadyEnded)
+	if !errors.Is(err, ErrStepAlreadyEnded) {
+		t.Fatalf("CompleteStep() error = %v, want %v", err, ErrStepAlreadyEnded)
 	}
 }
 
@@ -144,7 +142,7 @@ func TestRunStartStepRejectsInvalidName(t *testing.T) {
 	item := newRun(t, time.Unix(100, 0).UTC())
 
 	err := item.StartStep(" ", "message", time.Unix(101, 0).UTC())
-	if !errors.Is(err, run.ErrInvalidStepName) {
-		t.Fatalf("StartStep() error = %v, want %v", err, run.ErrInvalidStepName)
+	if !errors.Is(err, ErrInvalidStepName) {
+		t.Fatalf("StartStep() error = %v, want %v", err, ErrInvalidStepName)
 	}
 }

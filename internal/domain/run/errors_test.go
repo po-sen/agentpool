@@ -1,23 +1,21 @@
-package run_test
+package run
 
 import (
 	"errors"
 	"testing"
-
-	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
 func TestRunSentinelErrors(t *testing.T) {
 	tests := []error{
-		run.ErrEmptyRunID,
-		run.ErrEmptyPrompt,
-		run.ErrPromptTooLong,
-		run.ErrInvalidTransition,
-		run.ErrUnknownStatus,
-		run.ErrRunNotFound,
-		run.ErrStepNotFound,
-		run.ErrStepAlreadyEnded,
-		run.ErrInvalidStepName,
+		ErrEmptyRunID,
+		ErrEmptyPrompt,
+		ErrPromptTooLong,
+		ErrInvalidTransition,
+		ErrUnknownStatus,
+		ErrRunNotFound,
+		ErrStepNotFound,
+		ErrStepAlreadyEnded,
+		ErrInvalidStepName,
 	}
 
 	for _, err := range tests {

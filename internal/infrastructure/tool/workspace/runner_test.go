@@ -1,4 +1,4 @@
-package workspace_test
+package workspace
 
 import (
 	"context"
@@ -8,15 +8,14 @@ import (
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	"github.com/po-sen/agentpool/internal/infrastructure/tool/workspace"
 )
 
 func TestRunnerImplementsToolRunner(_ *testing.T) {
-	var _ outbound.ToolRunner = workspace.NewRunner(workspace.Config{})
+	var _ outbound.ToolRunner = NewRunner(Config{})
 }
 
 func TestRunnerListsWorkspaceTools(t *testing.T) {
-	runner := workspace.NewRunner(workspace.Config{})
+	runner := NewRunner(Config{})
 
 	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{})
 	if err != nil {
@@ -130,7 +129,7 @@ func TestRunnerReadFileRejectsBinaryFile(t *testing.T) {
 func TestRunnerReadFileRejectsOversizedFile(t *testing.T) {
 	root := t.TempDir()
 	mustWriteFile(t, filepath.Join(root, "large.txt"), "1234")
-	runner := workspace.NewRunner(workspace.Config{MaxFileBytes: 3})
+	runner := NewRunner(Config{MaxFileBytes: 3})
 
 	result, err := runner.RunTool(context.Background(), outbound.ToolCall{
 		Sandbox:   outbound.Sandbox{WorkspacePath: root},
@@ -227,7 +226,7 @@ func TestRunnerUnknownToolReturnsToolError(t *testing.T) {
 func runWorkspaceTool(t *testing.T, root string, name string, args map[string]string) outbound.ToolResult {
 	t.Helper()
 
-	runner := workspace.NewRunner(workspace.Config{})
+	runner := NewRunner(Config{})
 	result, err := runner.RunTool(context.Background(), outbound.ToolCall{
 		Sandbox:   outbound.Sandbox{WorkspacePath: root},
 		Name:      name,

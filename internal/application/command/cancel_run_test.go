@@ -1,4 +1,4 @@
-package command_test
+package command
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/po-sen/agentpool/internal/application/command"
 	"github.com/po-sen/agentpool/internal/application/port/inbound"
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
@@ -26,11 +25,11 @@ func TestCancelRunMarksRunCancelled(t *testing.T) {
 		t.Fatalf("save run: %v", err)
 	}
 
-	handler := command.NewCancelRunHandler(
+	handler := NewCancelRunHandler(
 		repo,
 		repo,
 		publisher,
-		command.WithCancelRunClock(func() time.Time { return now.Add(time.Second) }),
+		WithCancelRunClock(func() time.Time { return now.Add(time.Second) }),
 	)
 
 	cancelled, err := handler.CancelRun(ctx, inbound.CancelRunCommand{RunID: item.ID.String()})
@@ -71,11 +70,11 @@ func TestCancelRunReturnsConflictWhenStoredStatusChanges(t *testing.T) {
 		repo.items[item.ID] = stored
 	}
 
-	handler := command.NewCancelRunHandler(
+	handler := NewCancelRunHandler(
 		repo,
 		repo,
 		publisher,
-		command.WithCancelRunClock(func() time.Time { return now.Add(time.Second) }),
+		WithCancelRunClock(func() time.Time { return now.Add(time.Second) }),
 	)
 
 	_, err = handler.CancelRun(ctx, inbound.CancelRunCommand{RunID: item.ID.String()})

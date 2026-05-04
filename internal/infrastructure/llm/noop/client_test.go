@@ -1,15 +1,14 @@
-package noop_test
+package noop
 
 import (
 	"context"
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	llmnoop "github.com/po-sen/agentpool/internal/infrastructure/llm/noop"
 )
 
 func TestClientGenerateReturnsContent(t *testing.T) {
-	var client outbound.ModelClient = llmnoop.NewClient()
+	var client outbound.ModelClient = NewClient()
 
 	response, err := client.Generate(context.Background(), outbound.ModelRequest{
 		RunID: "run_test",

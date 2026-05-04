@@ -1,4 +1,4 @@
-package openaicompatible_test
+package openaicompatible
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	openaicompatible "github.com/po-sen/agentpool/internal/infrastructure/llm/openai_compatible"
 )
 
 func TestClientGenerateSendsChatCompletionRequest(t *testing.T) {
@@ -31,7 +30,7 @@ func TestClientGenerateSendsChatCompletionRequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := openaicompatible.NewClient(openaicompatible.Config{
+	client, err := NewClient(Config{
 		BaseURL: server.URL + "/v1/",
 		Model:   "local-model",
 		APIKey:  "test-key",
@@ -76,7 +75,7 @@ func TestClientGenerateOmitsAuthorizationWhenAPIKeyEmpty(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := openaicompatible.NewClient(openaicompatible.Config{
+	client, err := NewClient(Config{
 		BaseURL: server.URL,
 		Model:   "local-model",
 	})
@@ -119,18 +118,18 @@ func TestClientGenerateHandlesNoChoices(t *testing.T) {
 }
 
 func TestNewClientRequiresBaseURLAndModel(t *testing.T) {
-	if _, err := openaicompatible.NewClient(openaicompatible.Config{Model: "local-model"}); err == nil {
+	if _, err := NewClient(Config{Model: "local-model"}); err == nil {
 		t.Fatal("NewClient() missing base URL error = nil")
 	}
-	if _, err := openaicompatible.NewClient(openaicompatible.Config{BaseURL: "http://localhost"}); err == nil {
+	if _, err := NewClient(Config{BaseURL: "http://localhost"}); err == nil {
 		t.Fatal("NewClient() missing model error = nil")
 	}
 }
 
-func newClient(t *testing.T, baseURL string) *openaicompatible.Client {
+func newClient(t *testing.T, baseURL string) *Client {
 	t.Helper()
 
-	client, err := openaicompatible.NewClient(openaicompatible.Config{
+	client, err := NewClient(Config{
 		BaseURL: baseURL,
 		Model:   "local-model",
 	})

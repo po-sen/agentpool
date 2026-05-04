@@ -1,4 +1,4 @@
-package anthropic_test
+package anthropic
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	"github.com/po-sen/agentpool/internal/infrastructure/llm/anthropic"
 )
 
 func TestClientGenerateSendsHeadersAndParsesText(t *testing.T) {
@@ -38,7 +37,7 @@ func TestClientGenerateSendsHeadersAndParsesText(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := anthropic.NewClient(anthropic.Config{
+	client, err := NewClient(Config{
 		BaseURL: server.URL,
 		Model:   "claude-sonnet-4-5",
 		APIKey:  "test-key",
@@ -81,7 +80,7 @@ func TestClientGenerateSendsHeadersAndParsesText(t *testing.T) {
 }
 
 func TestNewClientRequiresAPIKey(t *testing.T) {
-	_, err := anthropic.NewClient(anthropic.Config{
+	_, err := NewClient(Config{
 		BaseURL: "https://api.anthropic.com",
 		Model:   "claude-sonnet-4-5",
 	})
@@ -116,10 +115,10 @@ func TestClientGenerateHandlesNoText(t *testing.T) {
 	}
 }
 
-func newClient(t *testing.T, baseURL string) *anthropic.Client {
+func newClient(t *testing.T, baseURL string) *Client {
 	t.Helper()
 
-	client, err := anthropic.NewClient(anthropic.Config{
+	client, err := NewClient(Config{
 		BaseURL: baseURL,
 		Model:   "claude-sonnet-4-5",
 		APIKey:  "test-key",

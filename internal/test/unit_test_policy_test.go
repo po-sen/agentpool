@@ -59,6 +59,24 @@ func TestInternalProductionFilesHaveCompanionUnitTests(t *testing.T) {
 	}
 }
 
+func TestInternalUnitTestsUseSamePackage(t *testing.T) {
+	packages := listPackages(t)
+
+	for _, pkg := range packages {
+		if !strings.HasPrefix(pkg.ImportPath, modulePath+"/internal/") {
+			continue
+		}
+		if len(pkg.XTestGoFiles) == 0 {
+			continue
+		}
+
+		t.Errorf("internal unit tests must use the production package, not external _test package: %s has %v",
+			pkg.ImportPath,
+			pkg.XTestGoFiles,
+		)
+	}
+}
+
 func requiresCompanionUnitTests(importPath string) bool {
 	if importPath == modulePath+"/internal/test" ||
 		strings.HasPrefix(importPath, modulePath+"/internal/test/") {

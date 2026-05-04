@@ -1,15 +1,14 @@
-package noop_test
+package noop
 
 import (
 	"context"
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
 )
 
 func TestBrokerResolveReturnsEmptyBundle(t *testing.T) {
-	bundle, err := secretnoop.NewBroker().Resolve(context.Background(), outbound.SecretRequest{
+	bundle, err := NewBroker().Resolve(context.Background(), outbound.SecretRequest{
 		ProjectID: "project_test",
 		Names:     []string{"TOKEN"},
 	})

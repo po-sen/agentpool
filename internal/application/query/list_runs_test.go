@@ -1,11 +1,10 @@
-package query_test
+package query
 
 import (
 	"context"
 	"testing"
 	"time"
 
-	"github.com/po-sen/agentpool/internal/application/query"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
@@ -14,7 +13,7 @@ func TestListRunsReturnsCreatedRuns(t *testing.T) {
 	repo := newFakeRunRepository()
 	first := saveRun(ctx, t, repo, "run_1", "first", time.Unix(100, 0).UTC())
 	second := saveRun(ctx, t, repo, "run_2", "second", time.Unix(101, 0).UTC())
-	handler := query.NewListRunsHandler(repo)
+	handler := NewListRunsHandler(repo)
 
 	items, err := handler.ListRuns(ctx)
 	if err != nil {
@@ -32,7 +31,7 @@ func TestListRunsReturnsDetachedCopies(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	item := saveRun(ctx, t, repo, "run_test", "do work", time.Unix(100, 0).UTC())
-	handler := query.NewListRunsHandler(repo)
+	handler := NewListRunsHandler(repo)
 
 	items, err := handler.ListRuns(ctx)
 	if err != nil {

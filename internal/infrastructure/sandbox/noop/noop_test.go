@@ -1,15 +1,14 @@
-package noop_test
+package noop
 
 import (
 	"context"
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
-	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
 )
 
 func TestProviderPrepareAndCleanup(t *testing.T) {
-	provider := sandboxnoop.NewProvider()
+	provider := NewProvider()
 
 	prepared, err := provider.Prepare(context.Background(), outbound.SandboxRequest{
 		RunID: "run_test",
