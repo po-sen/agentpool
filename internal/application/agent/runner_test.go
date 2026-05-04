@@ -192,6 +192,37 @@ func TestRunnerRejectsMultipleJSONObjectsAndContinues(t *testing.T) {
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not return multiple JSON objects.")
 }
 
+func TestRunnerRejectsFencedJSONActionAndContinues(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: "```json\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```"},
+			{Content: `{"type":"final","summary":"corrected final"}`},
+		},
+	}
+	tools := newFakeToolRunner()
+	runner := agent.NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), agent.RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "corrected final" {
+		t.Fatalf("summary = %q, want corrected final", result.Summary)
+	}
+	if len(tools.calls) != 0 {
+		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
+	}
+	if len(model.requests) != 2 {
+		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
+	}
+	lastMessages := model.requests[1].Messages
+	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", "```json")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not use markdown fences.")
+}
+
 func TestRunnerRejectsEmptyFinalSummaryAndContinues(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{

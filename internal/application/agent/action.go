@@ -37,7 +37,7 @@ type actionParseResult struct {
 
 func parseAction(content string) actionParseResult {
 	trimmed := strings.TrimSpace(content)
-	if !looksLikeJSON(trimmed) {
+	if !looksLikeProtocolResponse(trimmed) {
 		return actionParseResult{status: actionParseNaturalLanguage}
 	}
 
@@ -72,6 +72,8 @@ func parseAction(content string) actionParseResult {
 	}
 }
 
-func looksLikeJSON(content string) bool {
-	return strings.HasPrefix(content, "{") || strings.HasPrefix(content, "[")
+func looksLikeProtocolResponse(content string) bool {
+	return strings.HasPrefix(content, "{") ||
+		strings.HasPrefix(content, "[") ||
+		strings.HasPrefix(content, "```")
 }

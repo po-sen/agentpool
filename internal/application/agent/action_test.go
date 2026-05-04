@@ -49,6 +49,7 @@ func TestParseActionReturnsProtocolErrorForInvalidJSONProtocol(t *testing.T) {
 		`{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}{"type":"final","summary":"done"}`,
 		`{"type":"final","summary":"done"`,
 		`[{"type":"final","summary":"done"}]`,
+		"```json\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```",
 	}
 
 	for _, tt := range tests {
