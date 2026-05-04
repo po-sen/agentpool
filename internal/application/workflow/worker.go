@@ -13,6 +13,7 @@ import (
 
 const defaultPollInterval = 200 * time.Millisecond
 const workspaceCleanupTimeout = 30 * time.Second
+const sandboxCleanupTimeout = 30 * time.Second
 const publicFailureReason = "run failed"
 
 const (
@@ -35,6 +36,7 @@ type Worker struct {
 	stateStore   outbound.RunStateStore
 	events       outbound.EventPublisher
 	agent        *agent.Runner
+	sandbox      outbound.SandboxProvider
 	workspace    outbound.WorkspaceProvider
 	policy       outbound.PolicyDecisionPort
 	secrets      outbound.SecretBroker
@@ -83,6 +85,7 @@ func NewWorker(
 		stateStore:   deps.StateStore,
 		events:       deps.Events,
 		agent:        deps.Agent,
+		sandbox:      deps.Sandbox,
 		workspace:    deps.Workspace,
 		policy:       deps.Policy,
 		secrets:      deps.Secrets,
@@ -242,6 +245,12 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run, workspacePath stri
 		return agent.RunResult{}, err
 	}
 
+	sandbox, cleanupSandbox, err := w.prepareSandboxIfNeeded(ctx, item, workspacePath)
+	if err != nil {
+		return agent.RunResult{}, err
+	}
+	defer cleanupSandbox()
+
 	now = w.clock()
 	expectedStatus = item.Status
 	if err := item.StartRunning(now); err != nil {
@@ -260,6 +269,7 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run, workspacePath stri
 		Task:  item.Task,
 		Context: outbound.ToolContext{
 			WorkspacePath: workspacePath,
+			Sandbox:       sandbox,
 		},
 	})
 
@@ -277,6 +287,37 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run, workspacePath stri
 	}
 
 	return result, nil
+}
+
+func (w *Worker) prepareSandboxIfNeeded(
+	ctx context.Context,
+	item *run.Run,
+	workspacePath string,
+) (outbound.Sandbox, func(), error) {
+	if workspacePath == "" {
+		return outbound.Sandbox{}, func() {}, nil
+	}
+	if w.sandbox == nil {
+		return outbound.Sandbox{}, func() {}, errors.New("sandbox provider is required for workspace runs")
+	}
+
+	sandbox, err := w.sandbox.Prepare(ctx, outbound.SandboxRequest{
+		RunID:         item.ID,
+		Task:          item.Task,
+		WorkspacePath: workspacePath,
+	})
+	if err != nil {
+		return outbound.Sandbox{}, func() {}, err
+	}
+
+	cleanup := func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sandboxCleanupTimeout)
+		defer cancel()
+
+		_ = w.sandbox.Cleanup(cleanupCtx, sandbox)
+	}
+
+	return sandbox, cleanup, nil
 }
 
 func (w *Worker) completeRun(ctx context.Context, item *run.Run, result agent.RunResult) error {

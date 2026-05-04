@@ -224,6 +224,77 @@ func TestWorkerPassesEmptyWorkspaceContextToAgentTools(t *testing.T) {
 	}
 }
 
+func TestWorkerPreparesSandboxWithWorkspaceMount(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{
+		Prompt: "do work",
+		Workspace: run.WorkspaceSource{
+			Type:       run.WorkspaceSourceSnapshot,
+			SnapshotID: "wsnap_test",
+		},
+	}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	if err := queue.Enqueue(ctx, item.ID); err != nil {
+		t.Fatalf("enqueue run: %v", err)
+	}
+
+	sandbox := &recordingSandboxProvider{}
+	workspace := &workspacePathProvider{path: "/tmp/agentpool-workspace-test"}
+	tools := &recordingWorkflowToolRunner{}
+	worker := NewWorker(
+		WorkerDependencies{
+			Queue:      queue,
+			Repo:       repo,
+			StateStore: repo,
+			Events:     publisher,
+			Sandbox:    sandbox,
+			Agent:      applicationagent.NewRunner(&toolCallingModelClient{}, tools),
+			Workspace:  workspace,
+			Policy:     fakePolicyDecision{},
+			Secrets:    fakeSecretBroker{},
+		},
+		WithClock(func() time.Time { return now }),
+	)
+
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+	if !sandbox.prepareCalled {
+		t.Fatal("sandbox prepare was not called")
+	}
+	if sandbox.request.WorkspacePath != workspace.path {
+		t.Fatalf("sandbox workspace path = %q, want %q", sandbox.request.WorkspacePath, workspace.path)
+	}
+	if !sandbox.cleanupCalled {
+		t.Fatal("sandbox cleanup was not called")
+	}
+	if sandbox.cleanupContextErr != nil {
+		t.Fatalf("sandbox cleanup context error = %v, want nil", sandbox.cleanupContextErr)
+	}
+	if !workspace.cleanupCalled {
+		t.Fatal("workspace cleanup was not called")
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	}
+	if tools.calls[0].Context.WorkspacePath != workspace.path {
+		t.Fatalf("tool workspace path = %q, want %q", tools.calls[0].Context.WorkspacePath, workspace.path)
+	}
+	if tools.calls[0].Context.Sandbox.ID != "sandbox_test" {
+		t.Fatalf("tool sandbox id = %q, want sandbox_test", tools.calls[0].Context.Sandbox.ID)
+	}
+}
+
 func TestWorkerResolvesNoWorkspaceToEmptyPath(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
@@ -803,10 +874,12 @@ type recordingSandboxProvider struct {
 	prepareCalled     bool
 	cleanupCalled     bool
 	cleanupContextErr error
+	request           outbound.SandboxRequest
 }
 
-func (p *recordingSandboxProvider) Prepare(context.Context, outbound.SandboxRequest) (outbound.Sandbox, error) {
+func (p *recordingSandboxProvider) Prepare(_ context.Context, request outbound.SandboxRequest) (outbound.Sandbox, error) {
 	p.prepareCalled = true
+	p.request = request
 
 	return outbound.Sandbox{ID: "sandbox_test"}, nil
 }
@@ -926,6 +999,21 @@ func (p *recordingWorkspaceProvider) ResolveWorkspace(_ context.Context, request
 func (p *recordingWorkspaceProvider) CleanupWorkspace(ctx context.Context, _ outbound.Workspace) error {
 	p.cleanupCalled = true
 	p.cleanupContextErr = ctx.Err()
+
+	return nil
+}
+
+type workspacePathProvider struct {
+	path          string
+	cleanupCalled bool
+}
+
+func (p *workspacePathProvider) ResolveWorkspace(context.Context, outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
+	return outbound.Workspace{Path: p.path}, nil
+}
+
+func (p *workspacePathProvider) CleanupWorkspace(context.Context, outbound.Workspace) error {
+	p.cleanupCalled = true
 
 	return nil
 }

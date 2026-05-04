@@ -18,8 +18,9 @@ type Sandbox struct {
 
 // SandboxRequest contains information needed to prepare a sandbox.
 type SandboxRequest struct {
-	RunID run.RunID
-	Task  run.TaskSpec
+	RunID         run.RunID
+	Task          run.TaskSpec
+	WorkspacePath string
 }
 
 // SandboxProvider prepares and cleans up execution sandboxes.
