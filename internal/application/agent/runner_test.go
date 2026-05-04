@@ -35,6 +35,8 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 		t.Fatalf("model RunID = %s, want run_test", model.requests[0].RunID)
 	}
 	assertMessage(t, model.requests[0].Messages[0], "system", "Available tools")
+	assertMessage(t, model.requests[0].Messages[0], "system", "list_files: Lists files")
+	assertMessage(t, model.requests[0].Messages[0], "system", "read_file: Reads text files")
 	assertMessage(t, model.requests[0].Messages[1], "user", "do work")
 }
 
@@ -69,7 +71,7 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	result, err := runner.Run(context.Background(), agent.RunRequest{
 		RunID:   "run_test",
 		Task:    run.TaskSpec{Prompt: "do work"},
-		Sandbox: outbound.Sandbox{ID: "sandbox_test"},
+		Sandbox: outbound.Sandbox{ID: "sandbox_test", WorkspacePath: "/tmp/workspace"},
 	})
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
@@ -91,6 +93,9 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	}
 	if tools.calls[0].Sandbox.ID != "sandbox_test" {
 		t.Fatalf("tool sandbox = %q, want sandbox_test", tools.calls[0].Sandbox.ID)
+	}
+	if tools.calls[0].Sandbox.WorkspacePath != "/tmp/workspace" {
+		t.Fatalf("tool workspace path = %q, want /tmp/workspace", tools.calls[0].Sandbox.WorkspacePath)
 	}
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
@@ -374,6 +379,8 @@ func (r *fakeToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([
 
 	return []outbound.ToolDefinition{
 		{Name: "echo", Description: "Returns text"},
+		{Name: "list_files", Description: "Lists files"},
+		{Name: "read_file", Description: "Reads text files"},
 	}, nil
 }
 

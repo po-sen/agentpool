@@ -18,7 +18,7 @@ func TestNewLoadsAgentMaxTurnsConfig(t *testing.T) {
 	}
 }
 
-func TestWorkerInstanceWiresBuiltinToolRunner(t *testing.T) {
+func TestWorkerInstanceWiresCompositeToolRunner(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
 
 	app, err := New("test-version", io.Discard)

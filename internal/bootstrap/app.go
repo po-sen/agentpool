@@ -25,6 +25,8 @@ import (
 	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
 	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/builtin"
+	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
+	"github.com/po-sen/agentpool/internal/infrastructure/tool/workspace"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
 )
@@ -129,7 +131,12 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	toolRunner := builtin.NewRunner()
+	echoTools := builtin.NewRunner()
+	workspaceTools := workspace.NewRunner(workspace.Config{})
+	toolRunner, err := composite.NewRunner(echoTools, workspaceTools)
+	if err != nil {
+		return nil, err
+	}
 	agentRunner := applicationagent.NewRunner(
 		modelClient,
 		toolRunner,

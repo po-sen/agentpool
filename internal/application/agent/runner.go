@@ -159,7 +159,7 @@ Your previous response was JSON but did not match the AgentPool action protocol.
 Return exactly one JSON object with either:
 {"type":"final","summary":"..."}
 or
-{"type":"tool_call","tool":"echo","arguments":{"text":"..."}}
+{"type":"tool_call","tool":"<tool_name>","arguments":{"key":"value"}}
 Do not return tool_result. Do not return multiple JSON objects. Do not use markdown fences.`
 }
 

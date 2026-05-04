@@ -133,6 +133,51 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 	})
 }
 
+func TestWorkerPassesGitCheckoutPathToAgentTools(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "inspect workspace"}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	if err := queue.Enqueue(ctx, item.ID); err != nil {
+		t.Fatalf("enqueue run: %v", err)
+	}
+
+	tools := &recordingWorkflowToolRunner{}
+	worker := workflow.NewWorker(
+		workflow.WorkerDependencies{
+			Queue:      queue,
+			Repo:       repo,
+			StateStore: repo,
+			Events:     publisher,
+			Sandbox:    fakeSandboxProvider{},
+			Agent:      applicationagent.NewRunner(&toolCallingModelClient{}, tools),
+			Git:        fakeGitProvider{},
+			Policy:     fakePolicyDecision{},
+			Secrets:    fakeSecretBroker{},
+		},
+		workflow.WithClock(func() time.Time { return now }),
+	)
+
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	}
+	if tools.calls[0].Sandbox.WorkspacePath != "/tmp/repo" {
+		t.Fatalf("workspace path = %q, want /tmp/repo", tools.calls[0].Sandbox.WorkspacePath)
+	}
+}
+
 func TestWorkerProcessOneEmptyQueue(t *testing.T) {
 	ctx := context.Background()
 	worker := newWorker(&fakeRunQueue{}, newFakeRunRepository(), &recordingPublisher{}, time.Unix(100, 0).UTC())
@@ -805,6 +850,20 @@ func (r fakeToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]
 }
 
 func (r fakeToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound.ToolResult, error) {
+	return outbound.ToolResult{Content: "tool result"}, nil
+}
+
+type recordingWorkflowToolRunner struct {
+	calls []outbound.ToolCall
+}
+
+func (r *recordingWorkflowToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
+	return []outbound.ToolDefinition{{Name: "echo", Description: "Returns text"}}, nil
+}
+
+func (r *recordingWorkflowToolRunner) RunTool(_ context.Context, call outbound.ToolCall) (outbound.ToolResult, error) {
+	r.calls = append(r.calls, call)
+
 	return outbound.ToolResult{Content: "tool result"}, nil
 }
 

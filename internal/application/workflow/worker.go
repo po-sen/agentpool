@@ -147,14 +147,15 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 		return nil
 	}
 
-	if err := w.prepareRun(ctx, item); err != nil {
+	workspacePath, err := w.prepareRun(ctx, item)
+	if err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
 		}
 
 		return w.failRun(ctx, item, err)
 	}
-	result, err := w.startRun(ctx, item)
+	result, err := w.startRun(ctx, item, workspacePath)
 	if err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
@@ -173,20 +174,20 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 	return nil
 }
 
-func (w *Worker) prepareRun(ctx context.Context, item *run.Run) error {
+func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (string, error) {
 	now := w.clock()
 	expectedStatus := item.Status
 	if err := item.StartStep(prepareStepName, prepareStepRunningMessage, now); err != nil {
-		return err
+		return "", err
 	}
 	if err := item.StartPreparing(now); err != nil {
-		return err
+		return "", err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return err
+		return "", err
 	}
 	if err := w.publish(ctx, outbound.EventRunPreparing, item.ID, now); err != nil {
-		return err
+		return "", err
 	}
 
 	decision, err := w.policy.Decide(ctx, outbound.PolicyDecisionRequest{
@@ -194,42 +195,43 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) error {
 		Task:  item.Task,
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !decision.Allowed {
 		if decision.Reason == "" {
-			return errors.New("policy denied run")
+			return "", errors.New("policy denied run")
 		}
 
-		return errors.New(decision.Reason)
+		return "", errors.New(decision.Reason)
 	}
 
 	if _, err := w.secrets.Resolve(ctx, outbound.SecretRequest{
 		ProjectID: item.Task.ProjectID,
 	}); err != nil {
-		return err
+		return "", err
 	}
 
-	if _, err := w.git.Fetch(ctx, outbound.GitFetchRequest{
+	checkout, err := w.git.Fetch(ctx, outbound.GitFetchRequest{
 		RepositoryURL: item.Task.RepositoryURL,
 		Branch:        item.Task.Branch,
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return "", err
 	}
 
 	now = w.clock()
 	expectedStatus = item.Status
 	if err := item.CompleteStep(prepareStepName, prepareStepCompletedMessage, now); err != nil {
-		return err
+		return "", err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return err
+		return "", err
 	}
 
-	return nil
+	return checkout.Path, nil
 }
 
-func (w *Worker) startRun(ctx context.Context, item *run.Run) (agent.RunResult, error) {
+func (w *Worker) startRun(ctx context.Context, item *run.Run, workspacePath string) (agent.RunResult, error) {
 	now := w.clock()
 	expectedStatus := item.Status
 	if err := item.StartStep(agentStepName, agentStepRunningMessage, now); err != nil {
@@ -245,6 +247,9 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run) (agent.RunResult, 
 	})
 	if err != nil {
 		return agent.RunResult{}, err
+	}
+	if workspacePath != "" {
+		sandbox.WorkspacePath = workspacePath
 	}
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sandboxCleanupTimeout)

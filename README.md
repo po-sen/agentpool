@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol and a safe builtin echo tool; real sandboxed tools are not implemented yet.
+- Agent loop v1 supports a minimal JSON action protocol, builtin `echo`, and read-only workspace inspection tools; shell, writes, and real sandboxed execution are not implemented yet.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -282,7 +282,13 @@ AgentPool now has a minimal application-owned tool loop. Models can respond with
 
 The agent protocol accepts only `tool_call` and `final` JSON actions. Unknown JSON action types, malformed JSON, or multiple JSON objects are rejected as protocol errors and the model is asked to correct itself. Plain natural-language output is still accepted as a final summary for compatibility with local models.
 
-The first builtin tool is `echo`. It returns the provided `text` argument and exists to validate tool plumbing:
+Available tools:
+
+- `echo`: returns the provided `text` argument and exists to validate tool plumbing.
+- `list_files`: lists files and directories under the run workspace.
+- `read_file`: reads UTF-8 text files under the run workspace.
+
+Example `echo` call:
 
 ```json
 {
@@ -290,6 +296,30 @@ The first builtin tool is `echo`. It returns the provided `text` argument and ex
   "tool": "echo",
   "arguments": {
     "text": "hello"
+  }
+}
+```
+
+Example `list_files` call:
+
+```json
+{
+  "type": "tool_call",
+  "tool": "list_files",
+  "arguments": {
+    "path": "."
+  }
+}
+```
+
+Example `read_file` call:
+
+```json
+{
+  "type": "tool_call",
+  "tool": "read_file",
+  "arguments": {
+    "path": "README.md"
   }
 }
 ```
@@ -303,7 +333,15 @@ Final answers use:
 }
 ```
 
-Tool support is currently for plumbing validation. There is still no shell, filesystem access, Docker execution, Git mutation, network fetch, package install, or arbitrary command execution. Real tools will require sandbox and policy controls.
+Workspace tools are read-only. `read_file` is text-only, rejects files larger than 64 KiB by default, rejects path traversal and absolute paths, and rejects symlink escapes outside the workspace. If no workspace path is configured or prepared, workspace tools return a tool error.
+
+Example prompt:
+
+```text
+Use tools to inspect the workspace. List files in the root, then read README.md if present, then summarize what the project does.
+```
+
+There is still no shell, write access, Docker execution, Git mutation, network fetch, package install, or arbitrary command execution. Real write-capable or command tools will require sandbox and policy controls.
 
 ## Run Lifecycle
 
@@ -321,7 +359,7 @@ failed
 cancelled
 ```
 
-Completed runs persist only the one-shot generation summary.
+Completed runs persist the agent result summary.
 
 ## Run Steps
 
