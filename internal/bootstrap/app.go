@@ -23,9 +23,7 @@ import (
 	"github.com/po-sen/agentpool/internal/infrastructure/policy/allowall"
 	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
 	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
-	"github.com/po-sen/agentpool/internal/infrastructure/tool/builtin"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
-	"github.com/po-sen/agentpool/internal/infrastructure/tool/workspace"
 	workspacenoop "github.com/po-sen/agentpool/internal/infrastructure/workspace/noop"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
@@ -131,9 +129,7 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	echoTools := builtin.NewRunner()
-	workspaceTools := workspace.NewRunner(workspace.Config{})
-	toolRunner, err := composite.NewRunner(echoTools, workspaceTools)
+	toolRunner, err := composite.NewRunner()
 	if err != nil {
 		return nil, err
 	}

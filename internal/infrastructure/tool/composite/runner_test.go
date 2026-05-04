@@ -38,6 +38,32 @@ func TestRunnerCombinesTools(t *testing.T) {
 	}
 }
 
+func TestRunnerSupportsNoTools(t *testing.T) {
+	runner, err := NewRunner()
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("len(tools) = %d, want 0", len(tools))
+	}
+
+	result, err := runner.RunTool(context.Background(), outbound.ToolCall{Name: "missing"})
+	if err != nil {
+		t.Fatalf("RunTool() error = %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("IsError = false, want true")
+	}
+	if result.Content != "unknown tool: missing" {
+		t.Fatalf("Content = %q, want unknown tool: missing", result.Content)
+	}
+}
+
 func TestRunnerDispatchesToCorrectRunner(t *testing.T) {
 	echoRunner := &recordingToolRunner{name: "echo", content: "echoed"}
 	readRunner := &recordingToolRunner{name: "read_file", content: "read"}

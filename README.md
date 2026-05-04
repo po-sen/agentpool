@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol and builtin `echo`; workspace is a run-level concept reserved for future sources, and shell, writes, real git clone, and real sandboxed execution are not implemented yet.
+- Agent loop v1 supports a minimal JSON action protocol; workspace is a run-level concept reserved for future sources, and shell, writes, real git clone, and real sandboxed execution are not implemented yet.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -280,7 +280,7 @@ Use `openai_compatible` with a local or internal endpoint for air-gapped environ
 
 Workspace is a run-level concept for future sources such as snapshot upload, git clone, or mounted workspace. Core AgentPool currently supports only no workspace access.
 
-Without a workspace request, workspace tools are not advertised to the model:
+Without a workspace request, no workspace is prepared:
 
 ```json
 {
@@ -303,51 +303,11 @@ Any other workspace source type, including `configured`, is rejected until an ex
 
 ## Tools
 
-AgentPool now has a minimal application-owned tool loop. Models can respond with a JSON `tool_call` action, the agent runner executes the tool through the `ToolRunner` port, and the tool result is fed back to the model for a final JSON answer.
+AgentPool has an application-owned tool loop. Models can respond with a JSON `tool_call` action, the agent runner executes the tool through the `ToolRunner` port, and the tool result is fed back to the model for a final JSON answer.
 
 The agent protocol accepts only `tool_call` and `final` JSON actions. Unknown JSON action types, malformed JSON, or multiple JSON objects are rejected as protocol errors and the model is asked to correct itself. Plain natural-language output is still accepted as a final summary for compatibility with local models.
 
-Available tools:
-
-- `echo`: returns the provided `text` argument and exists to validate tool plumbing.
-- `list_files`: lists files and directories under a resolved run workspace. It is hidden in normal runs until a workspace source is implemented.
-- `read_file`: reads UTF-8 text files under a resolved run workspace. It is hidden in normal runs until a workspace source is implemented.
-
-Example `echo` call:
-
-```json
-{
-  "type": "tool_call",
-  "tool": "echo",
-  "arguments": {
-    "text": "hello"
-  }
-}
-```
-
-Example `list_files` call for a future run with a resolved workspace:
-
-```json
-{
-  "type": "tool_call",
-  "tool": "list_files",
-  "arguments": {
-    "path": "."
-  }
-}
-```
-
-Example `read_file` call for a future run with a resolved workspace:
-
-```json
-{
-  "type": "tool_call",
-  "tool": "read_file",
-  "arguments": {
-    "path": "README.md"
-  }
-}
-```
+No tools are exposed in the current default runtime. Future sandbox-backed tools, such as `run_shell`, will be exposed only when a run has the required workspace and sandbox context.
 
 Final answers use:
 
@@ -358,12 +318,12 @@ Final answers use:
 }
 ```
 
-Workspace tools are read-only and dynamically advertised. Runs without a resolved workspace path do not expose `list_files` or `read_file` to the model. Workspace path is separate from sandbox state, so these read-only tools can inspect a resolved workspace without preparing a sandbox. `read_file` is text-only, rejects files larger than 64 KiB by default, rejects path traversal and absolute paths, and rejects symlink escapes outside the workspace. If a workspace tool is called without a workspace path, it returns a tool error.
+Tools are dynamically advertised. Runs without the required context do not expose unavailable tools to the model. Workspace path is separate from sandbox state, and sandbox execution is reserved for future side-effectful tools.
 
 Example prompt:
 
 ```text
-When workspace sources are implemented, use tools to inspect the workspace, list files in the root, read README.md if present, and summarize what the project does.
+When workspace and sandbox tools are implemented, inspect the workspace, run scripts, and summarize what the project does.
 ```
 
 There is still no shell, write access, Docker execution, Git mutation, network fetch, package install, or arbitrary command execution. Sandbox execution is reserved for future shell, write, and test tools that intentionally require it.
