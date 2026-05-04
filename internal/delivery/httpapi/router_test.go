@@ -44,17 +44,48 @@ func TestCreateRunWithoutWorkspace(t *testing.T) {
 	}
 }
 
-func TestCreateRunWithConfiguredWorkspace(t *testing.T) {
+func TestCreateRunWithNoneWorkspace(t *testing.T) {
 	create := &createRunStub{
 		view: inbound.RunView{
 			ID:     "run_test",
 			Status: "queued",
 			Task: inbound.TaskView{
 				Prompt:    "do work",
-				Workspace: inbound.WorkspaceSourceView{Type: "configured"},
+				Workspace: inbound.WorkspaceSourceView{Type: "none"},
 			},
 			Steps: []inbound.StepView{},
 		},
+	}
+	router := NewRouter(Dependencies{
+		CreateRun: create,
+		ListRuns:  &listRunsStub{},
+		GetRun:    &getRunStub{},
+		CancelRun: &cancelRunStub{},
+	})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/runs",
+		strings.NewReader(`{"prompt":"do work","workspace":{"type":"none"}}`),
+	)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusCreated)
+	}
+	if create.command.Workspace.Type != "none" {
+		t.Fatalf("workspace type = %q, want none", create.command.Workspace.Type)
+	}
+	if strings.Contains(response.Body.String(), `"workspace"`) {
+		t.Fatalf("response contains none workspace: %s", response.Body.String())
+	}
+}
+
+func TestCreateRunConfiguredWorkspaceReturnsBadRequest(t *testing.T) {
+	create := &createRunStub{
+		err: inbound.NewInvalidInputError(errCreateRunInvalid),
 	}
 	router := NewRouter(Dependencies{
 		CreateRun: create,
@@ -72,14 +103,8 @@ func TestCreateRunWithConfiguredWorkspace(t *testing.T) {
 
 	router.ServeHTTP(response, request)
 
-	if response.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d", response.Code, http.StatusCreated)
-	}
-	if create.command.Workspace.Type != "configured" {
-		t.Fatalf("workspace type = %q, want configured", create.command.Workspace.Type)
-	}
-	if !strings.Contains(response.Body.String(), `"workspace":{"type":"configured"}`) {
-		t.Fatalf("response does not contain workspace: %s", response.Body.String())
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
 	}
 }
 

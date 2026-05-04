@@ -26,7 +26,7 @@ import (
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/builtin"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/workspace"
-	workspacelocal "github.com/po-sen/agentpool/internal/infrastructure/workspace/local"
+	workspacenoop "github.com/po-sen/agentpool/internal/infrastructure/workspace/noop"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
 )
@@ -142,10 +142,7 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		toolRunner,
 		applicationagent.WithMaxTurns(a.config.Agent.MaxTurns),
 	)
-	workspaceProvider, err := newWorkspaceProvider(a.config.Workspace)
-	if err != nil {
-		return nil, err
-	}
+	workspaceProvider := workspacenoop.NewProvider()
 	policyDecision := allowall.NewDecision()
 	secretBroker := secretnoop.NewBroker()
 
@@ -162,10 +159,6 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	})
 
 	return a.worker, nil
-}
-
-func newWorkspaceProvider(cfg config.WorkspaceConfig) (outbound.WorkspaceProvider, error) {
-	return workspacelocal.NewProvider(workspacelocal.Config{ConfiguredPath: cfg.Path})
 }
 
 func newModelClient(cfg config.LLMConfig) (outbound.ModelClient, error) {

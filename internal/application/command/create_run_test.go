@@ -63,7 +63,7 @@ func TestCreateRunCreatesQueuedRun(t *testing.T) {
 	assertEvent(t, publisher.events, outbound.EventRunCreated, run.RunID(created.ID))
 }
 
-func TestCreateRunStoresConfiguredWorkspace(t *testing.T) {
+func TestCreateRunStoresExplicitNoneWorkspace(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	queue := &fakeRunQueue{}
@@ -80,7 +80,7 @@ func TestCreateRunStoresConfiguredWorkspace(t *testing.T) {
 
 	created, err := handler.CreateRun(ctx, inbound.CreateRunCommand{
 		Prompt:    "do work",
-		Workspace: inbound.WorkspaceSourceInput{Type: string(run.WorkspaceSourceConfigured)},
+		Workspace: inbound.WorkspaceSourceInput{Type: string(run.WorkspaceSourceNone)},
 	})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -90,11 +90,29 @@ func TestCreateRunStoresConfiguredWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find stored run: %v", err)
 	}
-	if stored.Task.Workspace.Type != run.WorkspaceSourceConfigured {
-		t.Fatalf("stored workspace = %q, want configured", stored.Task.Workspace.Type)
+	if stored.Task.Workspace.Type != run.WorkspaceSourceNone {
+		t.Fatalf("stored workspace = %q, want none", stored.Task.Workspace.Type)
 	}
-	if created.Task.Workspace.Type != string(run.WorkspaceSourceConfigured) {
-		t.Fatalf("view workspace = %q, want configured", created.Task.Workspace.Type)
+	if created.Task.Workspace.Type != string(run.WorkspaceSourceNone) {
+		t.Fatalf("view workspace = %q, want none", created.Task.Workspace.Type)
+	}
+}
+
+func TestCreateRunRejectsConfiguredWorkspace(t *testing.T) {
+	ctx := context.Background()
+	handler := NewCreateRunHandler(
+		newFakeRunRepository(),
+		&fakeRunQueue{},
+		&recordingPublisher{},
+		fixedIDGenerator{id: "run_test"},
+	)
+
+	_, err := handler.CreateRun(ctx, inbound.CreateRunCommand{
+		Prompt:    "do work",
+		Workspace: inbound.WorkspaceSourceInput{Type: "configured"},
+	})
+	if !errors.Is(err, inbound.ErrInvalidInput) {
+		t.Fatalf("CreateRun() error = %v, want invalid input", err)
 	}
 }
 

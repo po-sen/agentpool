@@ -14,8 +14,6 @@ type WorkspaceSourceType string
 const (
 	// WorkspaceSourceNone means the run should not receive workspace access.
 	WorkspaceSourceNone WorkspaceSourceType = "none"
-	// WorkspaceSourceConfigured means the run should use the configured local workspace source.
-	WorkspaceSourceConfigured WorkspaceSourceType = "configured"
 )
 
 // WorkspaceSource describes the workspace capability requested by a run.
@@ -59,7 +57,7 @@ func (s WorkspaceSource) EffectiveType() WorkspaceSourceType {
 // IsValid reports whether the workspace source is supported.
 func (s WorkspaceSource) IsValid() bool {
 	switch s.EffectiveType() {
-	case WorkspaceSourceNone, WorkspaceSourceConfigured:
+	case WorkspaceSourceNone:
 		return true
 	default:
 		return false

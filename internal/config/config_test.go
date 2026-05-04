@@ -8,7 +8,6 @@ import (
 func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("AGENTPOOL_HTTP_ADDR", "")
 	t.Setenv("AGENTPOOL_AGENT_MAX_TURNS", "")
-	t.Setenv("AGENTPOOL_WORKSPACE_PATH", "")
 	clearModelEnv(t)
 
 	cfg := Load("")
@@ -29,9 +28,6 @@ func TestLoadUsesDefaults(t *testing.T) {
 	}
 	if cfg.Agent.MaxTurns != 4 {
 		t.Fatalf("Agent.MaxTurns = %d, want 4", cfg.Agent.MaxTurns)
-	}
-	if cfg.Workspace.Path != "" {
-		t.Fatalf("Workspace.Path = %q, want empty", cfg.Workspace.Path)
 	}
 }
 
@@ -78,15 +74,6 @@ func TestLoadUsesEnvironmentAgentConfig(t *testing.T) {
 	cfg := Load("dev")
 	if cfg.Agent.MaxTurns != 7 {
 		t.Fatalf("Agent.MaxTurns = %d, want 7", cfg.Agent.MaxTurns)
-	}
-}
-
-func TestLoadUsesEnvironmentWorkspacePath(t *testing.T) {
-	t.Setenv("AGENTPOOL_WORKSPACE_PATH", "/tmp/agentpool-workspace")
-
-	cfg := Load("dev")
-	if cfg.Workspace.Path != "/tmp/agentpool-workspace" {
-		t.Fatalf("Workspace.Path = %q, want /tmp/agentpool-workspace", cfg.Workspace.Path)
 	}
 }
 

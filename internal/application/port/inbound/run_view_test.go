@@ -16,7 +16,7 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 			Prompt:        "do work",
 			RepositoryURL: "https://example.com/repo.git",
 			Branch:        "main",
-			Workspace:     WorkspaceSourceView{Type: "configured"},
+			Workspace:     WorkspaceSourceView{Type: "none"},
 		},
 		Result: RunResultView{
 			Summary: "model output",
@@ -41,8 +41,8 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	if view.Task.Branch != "main" {
 		t.Fatalf("Branch = %s, want main", view.Task.Branch)
 	}
-	if view.Task.Workspace.Type != "configured" {
-		t.Fatalf("Workspace.Type = %s, want configured", view.Task.Workspace.Type)
+	if view.Task.Workspace.Type != "none" {
+		t.Fatalf("Workspace.Type = %s, want none", view.Task.Workspace.Type)
 	}
 	if view.Result.Summary != "model output" {
 		t.Fatalf("Result.Summary = %q, want model output", view.Result.Summary)

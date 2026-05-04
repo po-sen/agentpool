@@ -208,17 +208,13 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (string, error) 
 		return "", err
 	}
 
-	workspacePath := ""
-	if item.Task.Workspace.EffectiveType() == run.WorkspaceSourceConfigured {
-		workspace, err := w.workspace.ResolveWorkspace(ctx, outbound.WorkspaceResolveRequest{
-			RunID:  item.ID,
-			Task:   item.Task,
-			Source: item.Task.Workspace,
-		})
-		if err != nil {
-			return "", err
-		}
-		workspacePath = workspace.Path
+	workspace, err := w.workspace.ResolveWorkspace(ctx, outbound.WorkspaceResolveRequest{
+		RunID:  item.ID,
+		Task:   item.Task,
+		Source: item.Task.Workspace,
+	})
+	if err != nil {
+		return "", err
 	}
 
 	now = w.clock()
@@ -230,7 +226,7 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (string, error) 
 		return "", err
 	}
 
-	return workspacePath, nil
+	return workspace.Path, nil
 }
 
 func (w *Worker) startRun(ctx context.Context, item *run.Run, workspacePath string) (agent.RunResult, error) {

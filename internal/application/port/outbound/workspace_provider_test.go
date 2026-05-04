@@ -12,18 +12,18 @@ func TestWorkspaceProviderContract(t *testing.T) {
 
 	workspace, err := provider.ResolveWorkspace(context.Background(), WorkspaceResolveRequest{
 		RunID:  "run_test",
-		Source: run.WorkspaceSource{Type: run.WorkspaceSourceConfigured},
+		Source: run.WorkspaceSource{Type: run.WorkspaceSourceNone},
 	})
 	if err != nil {
 		t.Fatalf("ResolveWorkspace() error = %v", err)
 	}
-	if workspace.Path != "/tmp/repo" {
-		t.Fatalf("workspace path = %q, want /tmp/repo", workspace.Path)
+	if workspace.Path != "" {
+		t.Fatalf("workspace path = %q, want empty", workspace.Path)
 	}
 }
 
 type contractWorkspaceProvider struct{}
 
 func (contractWorkspaceProvider) ResolveWorkspace(context.Context, WorkspaceResolveRequest) (Workspace, error) {
-	return Workspace{Path: "/tmp/repo"}, nil
+	return Workspace{}, nil
 }

@@ -86,7 +86,7 @@ func toRunResponse(item inbound.RunView) runResponse {
 	if item.Result.Summary != "" {
 		response.Result = &runResultResponse{Summary: item.Result.Summary}
 	}
-	if item.Task.Workspace.Type == "configured" {
+	if item.Task.Workspace.Type != "" && item.Task.Workspace.Type != "none" {
 		response.Task.Workspace = &workspaceResponse{Type: item.Task.Workspace.Type}
 	}
 

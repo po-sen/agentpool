@@ -172,19 +172,14 @@ func TestWorkerProcessOneDoesNotPrepareSandboxByDefault(t *testing.T) {
 	}
 }
 
-func TestWorkerPassesConfiguredWorkspacePathToAgentTools(t *testing.T) {
+func TestWorkerPassesEmptyWorkspaceContextToAgentTools(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	queue := &fakeRunQueue{}
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{
-		Prompt: "inspect workspace",
-		Workspace: run.WorkspaceSource{
-			Type: run.WorkspaceSourceConfigured,
-		},
-	}, now)
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
 	if err != nil {
 		t.Fatalf("new run: %v", err)
 	}
@@ -218,8 +213,8 @@ func TestWorkerPassesConfiguredWorkspacePathToAgentTools(t *testing.T) {
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
-	if tools.calls[0].Context.WorkspacePath != "/tmp/repo" {
-		t.Fatalf("workspace path = %q, want /tmp/repo", tools.calls[0].Context.WorkspacePath)
+	if tools.calls[0].Context.WorkspacePath != "" {
+		t.Fatalf("workspace path = %q, want empty", tools.calls[0].Context.WorkspacePath)
 	}
 	if sandbox.prepareCalled {
 		t.Fatal("sandbox prepare was called")
@@ -229,7 +224,7 @@ func TestWorkerPassesConfiguredWorkspacePathToAgentTools(t *testing.T) {
 	}
 }
 
-func TestWorkerSkipsWorkspaceResolutionForNoWorkspace(t *testing.T) {
+func TestWorkerResolvesNoWorkspaceToEmptyPath(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	queue := &fakeRunQueue{}
@@ -247,6 +242,7 @@ func TestWorkerSkipsWorkspaceResolutionForNoWorkspace(t *testing.T) {
 		t.Fatalf("enqueue run: %v", err)
 	}
 
+	workspace := &recordingWorkspaceProvider{}
 	worker := newWorkerWithPorts(
 		queue,
 		repo,
@@ -254,7 +250,7 @@ func TestWorkerSkipsWorkspaceResolutionForNoWorkspace(t *testing.T) {
 		now,
 		fakeSandboxProvider{},
 		fakeModelClient{},
-		failingWorkspaceProvider{},
+		workspace,
 	)
 
 	if err := worker.ProcessOne(ctx); err != nil {
@@ -267,6 +263,12 @@ func TestWorkerSkipsWorkspaceResolutionForNoWorkspace(t *testing.T) {
 	}
 	if stored.Status != run.StatusCompleted {
 		t.Fatalf("stored status = %s, want completed", stored.Status)
+	}
+	if !workspace.called {
+		t.Fatal("workspace provider was not called")
+	}
+	if workspace.source != run.WorkspaceSourceNone {
+		t.Fatalf("workspace source = %q, want none", workspace.source)
 	}
 }
 
@@ -335,12 +337,7 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{
-		Prompt: "do work",
-		Workspace: run.WorkspaceSource{
-			Type: run.WorkspaceSourceConfigured,
-		},
-	}, now)
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
 	if err != nil {
 		t.Fatalf("new run: %v", err)
 	}
@@ -407,12 +404,7 @@ func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{
-		Prompt: "do work",
-		Workspace: run.WorkspaceSource{
-			Type: run.WorkspaceSourceConfigured,
-		},
-	}, now)
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
 	if err != nil {
 		t.Fatalf("new run: %v", err)
 	}
@@ -903,12 +895,20 @@ func (c cancellingContextModelClient) Generate(context.Context, outbound.ModelRe
 
 type fakeWorkspaceProvider struct{}
 
-func (p fakeWorkspaceProvider) ResolveWorkspace(_ context.Context, request outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
-	if request.Source.EffectiveType() != run.WorkspaceSourceConfigured {
-		return outbound.Workspace{}, nil
-	}
+func (p fakeWorkspaceProvider) ResolveWorkspace(context.Context, outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
+	return outbound.Workspace{}, nil
+}
 
-	return outbound.Workspace{Path: "/tmp/repo"}, nil
+type recordingWorkspaceProvider struct {
+	called bool
+	source run.WorkspaceSourceType
+}
+
+func (p *recordingWorkspaceProvider) ResolveWorkspace(_ context.Context, request outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
+	p.called = true
+	p.source = request.Source.EffectiveType()
+
+	return outbound.Workspace{}, nil
 }
 
 var errWorkspaceResolveFailed = errors.New("workspace resolve failed")

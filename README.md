@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol, builtin `echo`, run-requested read-only workspace inspection tools, and an optional configured local workspace source for dev runs; simple prompt-only runs do not prepare a sandbox, and shell, writes, real git clone, and real sandboxed execution are not implemented yet.
+- Agent loop v1 supports a minimal JSON action protocol and builtin `echo`; workspace is a run-level concept reserved for future sources, and shell, writes, real git clone, and real sandboxed execution are not implemented yet.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -214,14 +214,6 @@ Agent loop turn limit defaults to `4` and can be overridden with:
 AGENTPOOL_AGENT_MAX_TURNS=6 go run ./cmd/agentpool dev
 ```
 
-Configure a local workspace for read-only workspace tools with:
-
-```sh
-AGENTPOOL_WORKSPACE_PATH="$(pwd)" go run ./cmd/agentpool dev
-```
-
-`AGENTPOOL_WORKSPACE_PATH` must point to an existing local directory when a run requests the configured workspace source. Setting it does not force every run to use workspace tools.
-
 ## Model Providers
 
 AgentPool currently supports these model providers:
@@ -241,7 +233,6 @@ AGENTPOOL_MODEL_NAME
 AGENTPOOL_MODEL_API_KEY
 AGENTPOOL_MODEL_TIMEOUT
 AGENTPOOL_AGENT_MAX_TURNS
-AGENTPOOL_WORKSPACE_PATH
 ```
 
 Local Ollama example:
@@ -285,30 +276,9 @@ go run ./cmd/agentpool dev
 
 Use `openai_compatible` with a local or internal endpoint for air-gapped environments. Do not configure external providers when outbound internet is disabled.
 
-## Local Workspace
+## Workspace Sources
 
-For local development, point AgentPool at an existing workspace:
-
-```sh
-AGENTPOOL_WORKSPACE_PATH="$(pwd)" \
-AGENTPOOL_MODEL_PROVIDER=openai_compatible \
-AGENTPOOL_MODEL_BASE_URL=http://localhost:11434/v1 \
-AGENTPOOL_MODEL_NAME=qwen2.5-coder:7b \
-go run ./cmd/agentpool dev
-```
-
-Then submit a run that explicitly requests the configured workspace:
-
-```sh
-curl -sS -X POST http://localhost:8080/v1/runs \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt": "Use tools to list files in the workspace root, then read README.md if it exists, then summarize what this project does.",
-    "workspace": {
-      "type": "configured"
-    }
-  }'
-```
+Workspace is a run-level concept for future sources such as snapshot upload, git clone, or mounted workspace. Core AgentPool currently supports only no workspace access.
 
 Without a workspace request, workspace tools are not advertised to the model:
 
@@ -329,7 +299,7 @@ The explicit no-workspace form is also accepted:
 }
 ```
 
-The local workspace provider resolves the configured directory only for runs that request `workspace.type=configured`; the worker passes that path through the tool context, and the read-only workspace tools use it as their root. This does not prepare a sandbox. Tools cannot escape the workspace. `read_file` only supports UTF-8 text files and size-limited content. This is not a git clone provider yet, and it does not run git commands or mutate files. Future workspace source types may include snapshot, git, or mounted workspaces.
+Any other workspace source type, including `configured`, is rejected until an explicit source provider is implemented.
 
 ## Tools
 
@@ -340,8 +310,8 @@ The agent protocol accepts only `tool_call` and `final` JSON actions. Unknown JS
 Available tools:
 
 - `echo`: returns the provided `text` argument and exists to validate tool plumbing.
-- `list_files`: lists files and directories under the run workspace. Only available when the run requested a workspace.
-- `read_file`: reads UTF-8 text files under the run workspace. Only available when the run requested a workspace.
+- `list_files`: lists files and directories under a resolved run workspace. It is hidden in normal runs until a workspace source is implemented.
+- `read_file`: reads UTF-8 text files under a resolved run workspace. It is hidden in normal runs until a workspace source is implemented.
 
 Example `echo` call:
 
@@ -355,7 +325,7 @@ Example `echo` call:
 }
 ```
 
-Example `list_files` call:
+Example `list_files` call for a future run with a resolved workspace:
 
 ```json
 {
@@ -367,7 +337,7 @@ Example `list_files` call:
 }
 ```
 
-Example `read_file` call:
+Example `read_file` call for a future run with a resolved workspace:
 
 ```json
 {
@@ -388,12 +358,12 @@ Final answers use:
 }
 ```
 
-Workspace tools are read-only and dynamically advertised. Runs without workspace access do not expose `list_files` or `read_file` to the model. Workspace path is separate from sandbox state, so these read-only tools can inspect the resolved workspace without preparing a sandbox. `read_file` is text-only, rejects files larger than 64 KiB by default, rejects path traversal and absolute paths, and rejects symlink escapes outside the workspace. If a workspace tool is called without a workspace path, it returns a tool error.
+Workspace tools are read-only and dynamically advertised. Runs without a resolved workspace path do not expose `list_files` or `read_file` to the model. Workspace path is separate from sandbox state, so these read-only tools can inspect a resolved workspace without preparing a sandbox. `read_file` is text-only, rejects files larger than 64 KiB by default, rejects path traversal and absolute paths, and rejects symlink escapes outside the workspace. If a workspace tool is called without a workspace path, it returns a tool error.
 
 Example prompt:
 
 ```text
-Use tools to inspect the workspace. List files in the root, then read README.md if present, then summarize what the project does.
+When workspace sources are implemented, use tools to inspect the workspace, list files in the root, read README.md if present, and summarize what the project does.
 ```
 
 There is still no shell, write access, Docker execution, Git mutation, network fetch, package install, or arbitrary command execution. Sandbox execution is reserved for future shell, write, and test tools that intentionally require it.

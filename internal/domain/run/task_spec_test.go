@@ -25,14 +25,26 @@ func TestTaskSpecValidateTreatsEmptyWorkspaceAsNone(t *testing.T) {
 	}
 }
 
-func TestTaskSpecValidateAcceptsConfiguredWorkspace(t *testing.T) {
+func TestTaskSpecValidateAcceptsExplicitNoneWorkspace(t *testing.T) {
 	task := TaskSpec{
 		Prompt:    "do work",
-		Workspace: WorkspaceSource{Type: WorkspaceSourceConfigured},
+		Workspace: WorkspaceSource{Type: WorkspaceSourceNone},
 	}
 
 	if err := task.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestTaskSpecValidateRejectsConfiguredWorkspace(t *testing.T) {
+	task := TaskSpec{
+		Prompt:    "do work",
+		Workspace: WorkspaceSource{Type: "configured"},
+	}
+
+	err := task.Validate()
+	if !errors.Is(err, ErrUnknownWorkspaceSource) {
+		t.Fatalf("Validate() error = %v, want %v", err, ErrUnknownWorkspaceSource)
 	}
 }
 

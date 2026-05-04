@@ -15,7 +15,7 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 		RepositoryURL: "https://example.com/repo.git",
 		Branch:        "main",
 		Workspace: run.WorkspaceSource{
-			Type: run.WorkspaceSourceConfigured,
+			Type: run.WorkspaceSourceNone,
 		},
 	}, time.Unix(100, 0).UTC())
 	if err != nil {
@@ -42,8 +42,8 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	if view.Task.ProjectID != item.Task.ProjectID {
 		t.Fatalf("ProjectID = %s, want %s", view.Task.ProjectID, item.Task.ProjectID)
 	}
-	if view.Task.Workspace.Type != string(run.WorkspaceSourceConfigured) {
-		t.Fatalf("Workspace.Type = %s, want configured", view.Task.Workspace.Type)
+	if view.Task.Workspace.Type != string(run.WorkspaceSourceNone) {
+		t.Fatalf("Workspace.Type = %s, want none", view.Task.Workspace.Type)
 	}
 	if view.Result.Summary != item.ResultSummary {
 		t.Fatalf("Result.Summary = %q, want %q", view.Result.Summary, item.ResultSummary)
