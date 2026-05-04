@@ -18,26 +18,14 @@ func TestWorkerProcessOneCompletesQueuedRun(t *testing.T) {
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
+	item := queueRun(ctx, t, repo, queue, now)
 
 	worker := newWorker(queue, repo, publisher, now)
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
 
-	stored, err := repo.FindByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("find run: %v", err)
-	}
+	stored := findRun(ctx, t, repo, item.ID)
 	if stored.Status != run.StatusCompleted {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCompleted)
 	}
@@ -84,35 +72,20 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
+	item := queueRun(ctx, t, repo, queue, now)
 
-	worker := newWorkerWithPorts(
+	worker := newWorkerWithModel(
 		queue,
 		repo,
 		publisher,
 		now,
-		fakeSandboxProvider{},
 		&toolCallingModelClient{},
-		fakeWorkspaceProvider{},
 	)
-
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
 
-	stored, err := repo.FindByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("find run: %v", err)
-	}
+	stored := findRun(ctx, t, repo, item.ID)
 	if stored.ResultSummary != "done with tool" {
 		t.Fatalf("stored result summary = %q, want done with tool", stored.ResultSummary)
 	}
@@ -132,362 +105,44 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 	})
 }
 
-func TestWorkerProcessOneDoesNotPrepareSandboxByDefault(t *testing.T) {
+func TestWorkerPassesEmptyRuntimeContextToAgentTools(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	queue := &fakeRunQueue{}
 	publisher := &recordingPublisher{}
-	sandbox := &recordingSandboxProvider{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
+	queueRun(ctx, t, repo, queue, now)
 
-	worker := newWorkerWithPorts(
+	tools := &recordingWorkflowToolRunner{}
+	worker := newWorkerWithAgent(
 		queue,
 		repo,
 		publisher,
 		now,
-		sandbox,
-		fakeModelClient{},
-		fakeWorkspaceProvider{},
+		applicationagent.NewRunner(&toolCallingModelClient{}, tools),
 	)
-
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
-	if sandbox.prepareCalled {
-		t.Fatal("sandbox prepare was called")
-	}
-	if sandbox.cleanupCalled {
-		t.Fatal("sandbox cleanup was called")
-	}
-}
 
-func TestWorkerPassesEmptyWorkspaceContextToAgentTools(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeRunRepository()
-	queue := &fakeRunQueue{}
-	publisher := &recordingPublisher{}
-	now := time.Unix(100, 0).UTC()
-
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
+	if len(tools.listRequests) == 0 {
+		t.Fatal("tool list request was not recorded")
 	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
+	if tools.listRequests[0].Context.WorkspacePath != "" {
+		t.Fatalf("list workspace path = %q, want empty", tools.listRequests[0].Context.WorkspacePath)
 	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
-
-	sandbox := &recordingSandboxProvider{}
-	tools := &recordingWorkflowToolRunner{}
-	worker := NewWorker(
-		WorkerDependencies{
-			Queue:      queue,
-			Repo:       repo,
-			StateStore: repo,
-			Events:     publisher,
-			Sandbox:    sandbox,
-			Agent:      applicationagent.NewRunner(&toolCallingModelClient{}, tools),
-			Workspace:  fakeWorkspaceProvider{},
-			Changes:    fakeWorkspaceChangeCollector{},
-			Policy:     fakePolicyDecision{},
-			Secrets:    fakeSecretBroker{},
-		},
-		WithClock(func() time.Time { return now }),
-	)
-
-	if err := worker.ProcessOne(ctx); err != nil {
-		t.Fatalf("process one: %v", err)
+	if tools.listRequests[0].Context.Sandbox.ID != "" {
+		t.Fatalf("list sandbox id = %q, want empty", tools.listRequests[0].Context.Sandbox.ID)
 	}
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
 	if tools.calls[0].Context.WorkspacePath != "" {
-		t.Fatalf("workspace path = %q, want empty", tools.calls[0].Context.WorkspacePath)
-	}
-	if sandbox.prepareCalled {
-		t.Fatal("sandbox prepare was called")
-	}
-	if sandbox.cleanupCalled {
-		t.Fatal("sandbox cleanup was called")
-	}
-}
-
-func TestWorkerDoesNotPrepareSandboxForWorkspaceWhenCommandsUnsupported(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeRunRepository()
-	queue := &fakeRunQueue{}
-	publisher := &recordingPublisher{}
-	now := time.Unix(100, 0).UTC()
-
-	item, err := run.New("run_test", run.TaskSpec{
-		Prompt: "do work",
-		Workspace: run.WorkspaceSource{
-			Type:       run.WorkspaceSourceSnapshot,
-			SnapshotID: "wsnap_test",
-		},
-	}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
-
-	sandbox := &recordingSandboxProvider{}
-	workspace := &workspacePathProvider{path: "/tmp/agentpool-workspace-test"}
-	tools := &recordingWorkflowToolRunner{}
-	worker := NewWorker(
-		WorkerDependencies{
-			Queue:      queue,
-			Repo:       repo,
-			StateStore: repo,
-			Events:     publisher,
-			Sandbox:    sandbox,
-			Agent:      applicationagent.NewRunner(&toolCallingModelClient{}, tools),
-			Workspace:  workspace,
-			Changes:    fakeWorkspaceChangeCollector{},
-			Policy:     fakePolicyDecision{},
-			Secrets:    fakeSecretBroker{},
-		},
-		WithClock(func() time.Time { return now }),
-	)
-
-	if err := worker.ProcessOne(ctx); err != nil {
-		t.Fatalf("process one: %v", err)
-	}
-	if sandbox.prepareCalled {
-		t.Fatal("sandbox prepare was called")
-	}
-	if sandbox.cleanupCalled {
-		t.Fatal("sandbox cleanup was called")
-	}
-	if len(tools.calls) != 1 {
-		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
-	}
-	if tools.calls[0].Context.WorkspacePath != workspace.path {
-		t.Fatalf("tool workspace path = %q, want %q", tools.calls[0].Context.WorkspacePath, workspace.path)
+		t.Fatalf("tool workspace path = %q, want empty", tools.calls[0].Context.WorkspacePath)
 	}
 	if tools.calls[0].Context.Sandbox.ID != "" {
 		t.Fatalf("tool sandbox id = %q, want empty", tools.calls[0].Context.Sandbox.ID)
-	}
-}
-
-func TestWorkerPreparesCommandCapableSandboxWithWorkspaceMount(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeRunRepository()
-	queue := &fakeRunQueue{}
-	publisher := &recordingPublisher{}
-	now := time.Unix(100, 0).UTC()
-
-	item, err := run.New("run_test", run.TaskSpec{
-		Prompt: "do work",
-		Workspace: run.WorkspaceSource{
-			Type:       run.WorkspaceSourceSnapshot,
-			SnapshotID: "wsnap_test",
-		},
-	}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
-
-	sandbox := &recordingSandboxProvider{supportsCommands: true}
-	workspace := &workspacePathProvider{path: "/tmp/agentpool-workspace-test"}
-	tools := &recordingWorkflowToolRunner{}
-	worker := NewWorker(
-		WorkerDependencies{
-			Queue:      queue,
-			Repo:       repo,
-			StateStore: repo,
-			Events:     publisher,
-			Sandbox:    sandbox,
-			Agent:      applicationagent.NewRunner(&toolCallingModelClient{}, tools),
-			Workspace:  workspace,
-			Changes:    fakeWorkspaceChangeCollector{},
-			Policy:     fakePolicyDecision{},
-			Secrets:    fakeSecretBroker{},
-		},
-		WithClock(func() time.Time { return now }),
-	)
-
-	if err := worker.ProcessOne(ctx); err != nil {
-		t.Fatalf("process one: %v", err)
-	}
-	if !sandbox.prepareCalled {
-		t.Fatal("sandbox prepare was not called")
-	}
-	if sandbox.request.WorkspacePath != workspace.path {
-		t.Fatalf("sandbox workspace path = %q, want %q", sandbox.request.WorkspacePath, workspace.path)
-	}
-	if !sandbox.cleanupCalled {
-		t.Fatal("sandbox cleanup was not called")
-	}
-	if sandbox.cleanupContextErr != nil {
-		t.Fatalf("sandbox cleanup context error = %v, want nil", sandbox.cleanupContextErr)
-	}
-	if !workspace.cleanupCalled {
-		t.Fatal("workspace cleanup was not called")
-	}
-	if len(tools.calls) != 1 {
-		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
-	}
-	if tools.calls[0].Context.WorkspacePath != workspace.path {
-		t.Fatalf("tool workspace path = %q, want %q", tools.calls[0].Context.WorkspacePath, workspace.path)
-	}
-	if tools.calls[0].Context.Sandbox.ID != "sandbox_test" {
-		t.Fatalf("tool sandbox id = %q, want sandbox_test", tools.calls[0].Context.Sandbox.ID)
-	}
-	if !tools.calls[0].Context.Sandbox.SupportsCommands {
-		t.Fatal("tool sandbox command support = false, want true")
-	}
-}
-
-func TestWorkerCollectsWorkspaceChangesAfterAgentRun(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeRunRepository()
-	queue := &fakeRunQueue{}
-	publisher := &recordingPublisher{}
-	now := time.Unix(100, 0).UTC()
-
-	item, err := run.New("run_test", run.TaskSpec{
-		Prompt: "do work",
-		Workspace: run.WorkspaceSource{
-			Type:       run.WorkspaceSourceSnapshot,
-			SnapshotID: "wsnap_test",
-		},
-	}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
-
-	workspace := &workspacePathProvider{
-		path:     "/tmp/agentpool-workspace-test",
-		basePath: "/tmp/agentpool-workspace-base-test",
-	}
-	changes := &recordingWorkspaceChangeCollector{
-		changes: []outbound.WorkspaceChange{
-			{Path: "README.md", Status: outbound.WorkspaceChangeModified},
-		},
-	}
-	worker := NewWorker(
-		WorkerDependencies{
-			Queue:      queue,
-			Repo:       repo,
-			StateStore: repo,
-			Events:     publisher,
-			Sandbox:    fakeSandboxProvider{},
-			Agent:      applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
-			Workspace:  workspace,
-			Changes:    changes,
-			Policy:     fakePolicyDecision{},
-			Secrets:    fakeSecretBroker{},
-		},
-		WithClock(func() time.Time { return now }),
-	)
-
-	if err := worker.ProcessOne(ctx); err != nil {
-		t.Fatalf("process one: %v", err)
-	}
-
-	stored, err := repo.FindByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("find run: %v", err)
-	}
-	if len(stored.WorkspaceChanges) != 1 {
-		t.Fatalf("len(WorkspaceChanges) = %d, want 1", len(stored.WorkspaceChanges))
-	}
-	if stored.WorkspaceChanges[0].Path != "README.md" {
-		t.Fatalf("WorkspaceChanges[0].Path = %q, want README.md", stored.WorkspaceChanges[0].Path)
-	}
-	if stored.WorkspaceChanges[0].Status != run.WorkspaceChangeModified {
-		t.Fatalf("WorkspaceChanges[0].Status = %q, want modified", stored.WorkspaceChanges[0].Status)
-	}
-	if !changes.called {
-		t.Fatal("workspace change collector was not called")
-	}
-	if changes.workspace.Path != workspace.path || changes.workspace.BasePath != workspace.basePath {
-		t.Fatalf("collector workspace = %#v, want workspace/base paths", changes.workspace)
-	}
-}
-
-func TestWorkerResolvesNoWorkspaceToEmptyPath(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeRunRepository()
-	queue := &fakeRunQueue{}
-	publisher := &recordingPublisher{}
-	now := time.Unix(100, 0).UTC()
-
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
-
-	workspace := &recordingWorkspaceProvider{}
-	worker := newWorkerWithPorts(
-		queue,
-		repo,
-		publisher,
-		now,
-		fakeSandboxProvider{},
-		fakeModelClient{},
-		workspace,
-	)
-
-	if err := worker.ProcessOne(ctx); err != nil {
-		t.Fatalf("process one: %v", err)
-	}
-
-	stored, err := repo.FindByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("find run: %v", err)
-	}
-	if stored.Status != run.StatusCompleted {
-		t.Fatalf("stored status = %s, want completed", stored.Status)
-	}
-	if !workspace.called {
-		t.Fatal("workspace provider was not called")
-	}
-	if workspace.source != run.WorkspaceSourceNone {
-		t.Fatalf("workspace source = %q, want none", workspace.source)
-	}
-	if !workspace.cleanupCalled {
-		t.Fatal("workspace cleanup was not called")
-	}
-	if workspace.cleanupContextErr != nil {
-		t.Fatalf("workspace cleanup context error = %v, want nil", workspace.cleanupContextErr)
 	}
 }
 
@@ -507,27 +162,15 @@ func TestWorkerProcessOneKeepsCompletedRunWhenCompletedEventFails(t *testing.T) 
 	publisher := &failingPublisher{failOn: outbound.EventRunCompleted}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
+	item := queueRun(ctx, t, repo, queue, now)
 
 	worker := newWorker(queue, repo, publisher, now)
-	err = worker.ProcessOne(ctx)
+	err := worker.ProcessOne(ctx)
 	if !errors.Is(err, errPublishFailed) {
 		t.Fatalf("process one error = %v, want %v", err, errPublishFailed)
 	}
 
-	stored, err := repo.FindByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("find run: %v", err)
-	}
+	stored := findRun(ctx, t, repo, item.ID)
 	if stored.Status != run.StatusCompleted {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCompleted)
 	}
@@ -556,35 +199,20 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
+	item := queueRun(ctx, t, repo, queue, now)
 
-	worker := newWorkerWithPorts(
+	worker := newWorkerWithModel(
 		queue,
 		repo,
 		publisher,
 		now,
-		fakeSandboxProvider{},
 		failingModelClient{},
-		fakeWorkspaceProvider{},
 	)
-
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
 
-	stored, err := repo.FindByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("find run: %v", err)
-	}
+	stored := findRun(ctx, t, repo, item.ID)
 	if stored.Status != run.StatusFailed {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusFailed)
 	}
@@ -616,72 +244,6 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 	assertEventPublished(t, publisher.events, outbound.EventRunFailed)
 }
 
-func TestWorkerProcessOneStoresSnapshotNotFoundFailureReason(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeRunRepository()
-	queue := &fakeRunQueue{}
-	publisher := &recordingPublisher{}
-	now := time.Unix(100, 0).UTC()
-
-	item, err := run.New("run_test", run.TaskSpec{
-		Prompt: "do work",
-		Workspace: run.WorkspaceSource{
-			Type:       run.WorkspaceSourceSnapshot,
-			SnapshotID: "wsnap_missing",
-		},
-	}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
-
-	worker := newWorkerWithPorts(
-		queue,
-		repo,
-		publisher,
-		now,
-		fakeSandboxProvider{},
-		fakeModelClient{},
-		workspaceErrorProvider{err: outbound.ErrSnapshotNotFound},
-	)
-
-	if err := worker.ProcessOne(ctx); err != nil {
-		t.Fatalf("process one: %v", err)
-	}
-
-	stored, err := repo.FindByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("find run: %v", err)
-	}
-	if stored.Status != run.StatusFailed {
-		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusFailed)
-	}
-	if stored.FailureReason != "workspace snapshot not found" {
-		t.Fatalf("stored failure reason = %q, want workspace snapshot not found", stored.FailureReason)
-	}
-}
-
-func TestPublicFailureReasonForKnownWorkspaceFailures(t *testing.T) {
-	tests := map[error]string{
-		outbound.ErrSnapshotNotFound:          "workspace snapshot not found",
-		outbound.ErrInvalidSnapshotID:         "invalid workspace snapshot id",
-		run.ErrUnknownWorkspaceSource:         "unknown workspace source",
-		errModelGenerationFailed:              "run failed",
-		errors.New("provider api_key=secret"): "run failed",
-	}
-
-	for cause, want := range tests {
-		if got := publicFailureReasonFor(cause); got != want {
-			t.Fatalf("publicFailureReasonFor(%v) = %q, want %q", cause, got, want)
-		}
-	}
-}
-
 func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
@@ -689,35 +251,25 @@ func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
+	item := queueRun(ctx, t, repo, queue, now)
 
-	worker := newWorkerWithPorts(
-		queue,
-		repo,
-		publisher,
-		now,
-		fakeSandboxProvider{},
-		fakeModelClient{},
-		failingWorkspaceProvider{},
+	worker := NewWorker(
+		WorkerDependencies{
+			Queue:      queue,
+			Repo:       repo,
+			StateStore: repo,
+			Events:     publisher,
+			Agent:      applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
+			Policy:     failingPolicyDecision{},
+			Secrets:    fakeSecretBroker{},
+		},
+		WithClock(func() time.Time { return now }),
 	)
-
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
 
-	stored, err := repo.FindByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("find run: %v", err)
-	}
+	stored := findRun(ctx, t, repo, item.ID)
 	if stored.Status != run.StatusFailed {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusFailed)
 	}
@@ -745,39 +297,24 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationDuringExecution(t *testing.
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
+	item := queueRun(ctx, t, repo, queue, now)
 
-	worker := newWorkerWithPorts(
+	worker := newWorkerWithModel(
 		queue,
 		repo,
 		publisher,
 		now,
-		fakeSandboxProvider{},
 		cancellingModelClient{
 			repo: repo,
 			id:   item.ID,
 			now:  now.Add(time.Second),
 		},
-		fakeWorkspaceProvider{},
 	)
-
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
 
-	stored, err := repo.FindByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("find run: %v", err)
-	}
+	stored := findRun(ctx, t, repo, item.ID)
 	if stored.Status != run.StatusCancelled {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCancelled)
 	}
@@ -807,16 +344,7 @@ func TestWorkerProcessOneDoesNotLeavePrepareStepRunningWhenCancelledDuringPrepar
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
+	item := queueRun(ctx, t, repo, queue, now)
 
 	worker := NewWorker(
 		WorkerDependencies{
@@ -824,10 +352,7 @@ func TestWorkerProcessOneDoesNotLeavePrepareStepRunningWhenCancelledDuringPrepar
 			Repo:       repo,
 			StateStore: repo,
 			Events:     publisher,
-			Sandbox:    fakeSandboxProvider{},
 			Agent:      applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
-			Workspace:  fakeWorkspaceProvider{},
-			Changes:    fakeWorkspaceChangeCollector{},
 			Policy: cancellingPolicyDecision{
 				repo: repo,
 				id:   item.ID,
@@ -837,15 +362,11 @@ func TestWorkerProcessOneDoesNotLeavePrepareStepRunningWhenCancelledDuringPrepar
 		},
 		WithClock(func() time.Time { return now }),
 	)
-
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
 
-	stored, err := repo.FindByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("find run: %v", err)
-	}
+	stored := findRun(ctx, t, repo, item.ID)
 	if stored.Status != run.StatusCancelled {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCancelled)
 	}
@@ -870,39 +391,24 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationWhenExecutionFails(t *testi
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
-	if err != nil {
-		t.Fatalf("new run: %v", err)
-	}
-	if err := repo.Save(ctx, item); err != nil {
-		t.Fatalf("save run: %v", err)
-	}
-	if err := queue.Enqueue(ctx, item.ID); err != nil {
-		t.Fatalf("enqueue run: %v", err)
-	}
+	item := queueRun(ctx, t, repo, queue, now)
 
-	worker := newWorkerWithPorts(
+	worker := newWorkerWithModel(
 		queue,
 		repo,
 		publisher,
 		now,
-		fakeSandboxProvider{},
 		cancellingFailingModelClient{
 			repo: repo,
 			id:   item.ID,
 			now:  now.Add(time.Second),
 		},
-		fakeWorkspaceProvider{},
 	)
-
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
 
-	stored, err := repo.FindByID(ctx, item.ID)
-	if err != nil {
-		t.Fatalf("find run: %v", err)
-	}
+	stored := findRun(ctx, t, repo, item.ID)
 	if stored.Status != run.StatusCancelled {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCancelled)
 	}
@@ -925,15 +431,14 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationWhenExecutionFails(t *testi
 	assertEventNotPublished(t, publisher.events, outbound.EventRunFailed)
 }
 
-func TestWorkerProcessOneDoesNotCleanupWhenSandboxWasNeverPrepared(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	repo := newFakeRunRepository()
-	queue := &fakeRunQueue{}
-	publisher := &recordingPublisher{}
-	sandbox := &recordingSandboxProvider{}
-	now := time.Unix(100, 0).UTC()
+func queueRun(
+	ctx context.Context,
+	t *testing.T,
+	repo *fakeRunRepository,
+	queue outbound.RunQueue,
+	now time.Time,
+) *run.Run {
+	t.Helper()
 
 	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
 	if err != nil {
@@ -946,25 +451,18 @@ func TestWorkerProcessOneDoesNotCleanupWhenSandboxWasNeverPrepared(t *testing.T)
 		t.Fatalf("enqueue run: %v", err)
 	}
 
-	worker := newWorkerWithPorts(
-		queue,
-		repo,
-		publisher,
-		now,
-		sandbox,
-		cancellingContextModelClient{cancel: cancel},
-		fakeWorkspaceProvider{},
-	)
+	return item
+}
 
-	if err := worker.ProcessOne(ctx); err != nil {
-		t.Fatalf("process one: %v", err)
+func findRun(ctx context.Context, t *testing.T, repo *fakeRunRepository, id run.RunID) *run.Run {
+	t.Helper()
+
+	item, err := repo.FindByID(ctx, id)
+	if err != nil {
+		t.Fatalf("find run: %v", err)
 	}
-	if sandbox.prepareCalled {
-		t.Fatal("sandbox prepare was called")
-	}
-	if sandbox.cleanupCalled {
-		t.Fatal("sandbox cleanup was called")
-	}
+
+	return item
 }
 
 func newWorker(
@@ -973,25 +471,37 @@ func newWorker(
 	publisher outbound.EventPublisher,
 	now time.Time,
 ) *Worker {
-	return newWorkerWithPorts(
+	return newWorkerWithModel(
 		queue,
 		repo,
 		publisher,
 		now,
-		fakeSandboxProvider{},
 		fakeModelClient{},
-		fakeWorkspaceProvider{},
 	)
 }
 
-func newWorkerWithPorts(
+func newWorkerWithModel(
 	queue outbound.RunQueue,
 	repo *fakeRunRepository,
 	publisher outbound.EventPublisher,
 	now time.Time,
-	sandbox outbound.SandboxProvider,
 	model outbound.ModelClient,
-	workspace outbound.WorkspaceProvider,
+) *Worker {
+	return newWorkerWithAgent(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(model, fakeToolRunner{}),
+	)
+}
+
+func newWorkerWithAgent(
+	queue outbound.RunQueue,
+	repo *fakeRunRepository,
+	publisher outbound.EventPublisher,
+	now time.Time,
+	agentRunner *applicationagent.Runner,
 ) *Worker {
 	return NewWorker(
 		WorkerDependencies{
@@ -999,10 +509,7 @@ func newWorkerWithPorts(
 			Repo:       repo,
 			StateStore: repo,
 			Events:     publisher,
-			Sandbox:    sandbox,
-			Agent:      applicationagent.NewRunner(model, fakeToolRunner{}),
-			Workspace:  workspace,
-			Changes:    fakeWorkspaceChangeCollector{},
+			Agent:      agentRunner,
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
@@ -1068,42 +575,6 @@ func (q *fakeRunQueue) Dequeue(context.Context) (run.RunID, error) {
 	q.ids = q.ids[1:]
 
 	return id, nil
-}
-
-type fakeSandboxProvider struct{}
-
-func (p fakeSandboxProvider) Prepare(context.Context, outbound.SandboxRequest) (outbound.Sandbox, error) {
-	return outbound.Sandbox{ID: "sandbox_test"}, nil
-}
-
-func (p fakeSandboxProvider) Cleanup(context.Context, outbound.Sandbox) error {
-	return nil
-}
-
-type recordingSandboxProvider struct {
-	prepareCalled     bool
-	cleanupCalled     bool
-	cleanupContextErr error
-	supportsCommands  bool
-	request           outbound.SandboxRequest
-}
-
-func (p *recordingSandboxProvider) Prepare(_ context.Context, request outbound.SandboxRequest) (outbound.Sandbox, error) {
-	p.prepareCalled = true
-	p.request = request
-
-	return outbound.Sandbox{ID: "sandbox_test", SupportsCommands: p.supportsCommands}, nil
-}
-
-func (p *recordingSandboxProvider) Cleanup(ctx context.Context, _ outbound.Sandbox) error {
-	p.cleanupCalled = true
-	p.cleanupContextErr = ctx.Err()
-
-	return nil
-}
-
-func (p *recordingSandboxProvider) Capabilities() outbound.SandboxCapabilities {
-	return outbound.SandboxCapabilities{SupportsCommands: p.supportsCommands}
 }
 
 type fakeModelClient struct{}
@@ -1177,113 +648,18 @@ func (c cancellingFailingModelClient) Generate(ctx context.Context, _ outbound.M
 	return outbound.ModelResponse{}, errModelGenerationFailed
 }
 
-type cancellingContextModelClient struct {
-	cancel context.CancelFunc
-}
-
-func (c cancellingContextModelClient) Generate(context.Context, outbound.ModelRequest) (outbound.ModelResponse, error) {
-	c.cancel()
-
-	return outbound.ModelResponse{Content: "done"}, nil
-}
-
-type fakeWorkspaceProvider struct{}
-
-func (p fakeWorkspaceProvider) ResolveWorkspace(context.Context, outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
-	return outbound.Workspace{}, nil
-}
-
-func (p fakeWorkspaceProvider) CleanupWorkspace(context.Context, outbound.Workspace) error {
-	return nil
-}
-
-type recordingWorkspaceProvider struct {
-	called            bool
-	cleanupCalled     bool
-	cleanupContextErr error
-	source            run.WorkspaceSourceType
-}
-
-func (p *recordingWorkspaceProvider) ResolveWorkspace(_ context.Context, request outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
-	p.called = true
-	p.source = request.Source.EffectiveType()
-
-	return outbound.Workspace{}, nil
-}
-
-func (p *recordingWorkspaceProvider) CleanupWorkspace(ctx context.Context, _ outbound.Workspace) error {
-	p.cleanupCalled = true
-	p.cleanupContextErr = ctx.Err()
-
-	return nil
-}
-
-type workspacePathProvider struct {
-	path          string
-	basePath      string
-	cleanupCalled bool
-}
-
-func (p *workspacePathProvider) ResolveWorkspace(context.Context, outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
-	return outbound.Workspace{Path: p.path, BasePath: p.basePath}, nil
-}
-
-func (p *workspacePathProvider) CleanupWorkspace(context.Context, outbound.Workspace) error {
-	p.cleanupCalled = true
-
-	return nil
-}
-
-type fakeWorkspaceChangeCollector struct{}
-
-func (c fakeWorkspaceChangeCollector) CollectWorkspaceChanges(context.Context, outbound.Workspace) ([]outbound.WorkspaceChange, error) {
-	return nil, nil
-}
-
-type recordingWorkspaceChangeCollector struct {
-	called    bool
-	workspace outbound.Workspace
-	changes   []outbound.WorkspaceChange
-}
-
-func (c *recordingWorkspaceChangeCollector) CollectWorkspaceChanges(
-	_ context.Context,
-	workspace outbound.Workspace,
-) ([]outbound.WorkspaceChange, error) {
-	c.called = true
-	c.workspace = workspace
-
-	return c.changes, nil
-}
-
-var errWorkspaceResolveFailed = errors.New("workspace resolve failed")
-
-type failingWorkspaceProvider struct{}
-
-func (p failingWorkspaceProvider) ResolveWorkspace(context.Context, outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
-	return outbound.Workspace{}, errWorkspaceResolveFailed
-}
-
-func (p failingWorkspaceProvider) CleanupWorkspace(context.Context, outbound.Workspace) error {
-	return nil
-}
-
-type workspaceErrorProvider struct {
-	err error
-}
-
-func (p workspaceErrorProvider) ResolveWorkspace(context.Context, outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
-	return outbound.Workspace{}, p.err
-}
-
-func (p workspaceErrorProvider) CleanupWorkspace(context.Context, outbound.Workspace) error {
-	return nil
-}
-
 type fakePolicyDecision struct{}
 
 func (p fakePolicyDecision) Decide(context.Context, outbound.PolicyDecisionRequest) (outbound.PolicyDecision, error) {
 	return outbound.PolicyDecision{Allowed: true}, nil
+}
+
+var errPolicyFailed = errors.New("policy failed: product ACL details")
+
+type failingPolicyDecision struct{}
+
+func (p failingPolicyDecision) Decide(context.Context, outbound.PolicyDecisionRequest) (outbound.PolicyDecision, error) {
+	return outbound.PolicyDecision{}, errPolicyFailed
 }
 
 type cancellingPolicyDecision struct {
@@ -1324,10 +700,16 @@ func (r fakeToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound.To
 }
 
 type recordingWorkflowToolRunner struct {
-	calls []outbound.ToolCall
+	listRequests []outbound.ToolListRequest
+	calls        []outbound.ToolCall
 }
 
-func (r *recordingWorkflowToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
+func (r *recordingWorkflowToolRunner) ListTools(
+	_ context.Context,
+	request outbound.ToolListRequest,
+) ([]outbound.ToolDefinition, error) {
+	r.listRequests = append(r.listRequests, request)
+
 	return []outbound.ToolDefinition{{Name: "echo", Description: "Returns text"}}, nil
 }
 

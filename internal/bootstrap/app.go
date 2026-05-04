@@ -23,12 +23,8 @@ import (
 	"github.com/po-sen/agentpool/internal/infrastructure/policy/allowall"
 	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
 	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
-	storagefile "github.com/po-sen/agentpool/internal/infrastructure/storage/file"
-	storagenoop "github.com/po-sen/agentpool/internal/infrastructure/storage/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/shell"
-	workspacesnapshot "github.com/po-sen/agentpool/internal/infrastructure/workspace/snapshot"
-	workspacechangediff "github.com/po-sen/agentpool/internal/infrastructure/workspacechange/diff"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
 )
@@ -146,15 +142,6 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		toolRunner,
 		applicationagent.WithMaxTurns(a.config.Agent.MaxTurns),
 	)
-	snapshotStore, err := newSnapshotStore(a.config.Workspace)
-	if err != nil {
-		return nil, err
-	}
-	workspaceProvider, err := workspacesnapshot.NewProvider(snapshotStore, workspacesnapshot.Config{})
-	if err != nil {
-		return nil, err
-	}
-	changeCollector := workspacechangediff.NewCollector()
 	policyDecision := allowall.NewDecision()
 	secretBroker := secretnoop.NewBroker()
 
@@ -163,23 +150,12 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		Repo:       a.runRepo,
 		StateStore: a.runRepo,
 		Events:     a.eventPublisher,
-		Sandbox:    sandboxProvider,
 		Agent:      agentRunner,
-		Workspace:  workspaceProvider,
-		Changes:    changeCollector,
 		Policy:     policyDecision,
 		Secrets:    secretBroker,
 	})
 
 	return a.worker, nil
-}
-
-func newSnapshotStore(cfg config.WorkspaceConfig) (outbound.SnapshotStore, error) {
-	if cfg.SnapshotDir == "" {
-		return storagenoop.NewSnapshotStore(), nil
-	}
-
-	return storagefile.NewSnapshotStore(cfg.SnapshotDir)
 }
 
 func newModelClient(cfg config.LLMConfig) (outbound.ModelClient, error) {

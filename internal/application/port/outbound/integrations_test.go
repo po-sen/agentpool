@@ -12,8 +12,6 @@ func TestIntegrationPortContracts(t *testing.T) {
 	var sandbox SandboxProvider = fakeSandboxProvider{}
 	var sandboxCommands SandboxCommandRunner = fakeSandboxCommandRunner{}
 	var git GitProvider = fakeGitProvider{}
-	var workspace WorkspaceProvider = fakeWorkspaceProvider{}
-	var changes WorkspaceChangeCollector = fakeWorkspaceChangeCollector{}
 	var policy PolicyDecisionPort = fakePolicyDecision{}
 	var secrets SecretBroker = fakeSecretBroker{}
 	var tools ToolRunner = fakeToolRunner{}
@@ -36,15 +34,6 @@ func TestIntegrationPortContracts(t *testing.T) {
 	}
 	if _, err := git.Fetch(ctx, GitFetchRequest{RepositoryURL: "https://example.com/repo.git"}); err != nil {
 		t.Fatalf("Fetch() error = %v", err)
-	}
-	if _, err := workspace.ResolveWorkspace(ctx, WorkspaceResolveRequest{RunID: "run_test"}); err != nil {
-		t.Fatalf("ResolveWorkspace() error = %v", err)
-	}
-	if err := workspace.CleanupWorkspace(ctx, Workspace{Path: "/tmp/repo"}); err != nil {
-		t.Fatalf("CleanupWorkspace() error = %v", err)
-	}
-	if _, err := changes.CollectWorkspaceChanges(ctx, Workspace{Path: "/tmp/repo", BasePath: "/tmp/base"}); err != nil {
-		t.Fatalf("CollectWorkspaceChanges() error = %v", err)
 	}
 	if _, err := policy.Decide(ctx, PolicyDecisionRequest{RunID: "run_test"}); err != nil {
 		t.Fatalf("Decide() error = %v", err)
@@ -90,22 +79,6 @@ type fakeGitProvider struct{}
 
 func (fakeGitProvider) Fetch(context.Context, GitFetchRequest) (GitCheckout, error) {
 	return GitCheckout{Path: "/tmp/repo"}, nil
-}
-
-type fakeWorkspaceProvider struct{}
-
-func (fakeWorkspaceProvider) ResolveWorkspace(context.Context, WorkspaceResolveRequest) (Workspace, error) {
-	return Workspace{Path: "/tmp/repo"}, nil
-}
-
-func (fakeWorkspaceProvider) CleanupWorkspace(context.Context, Workspace) error {
-	return nil
-}
-
-type fakeWorkspaceChangeCollector struct{}
-
-func (fakeWorkspaceChangeCollector) CollectWorkspaceChanges(context.Context, Workspace) ([]WorkspaceChange, error) {
-	return []WorkspaceChange{{Path: "README.md", Status: WorkspaceChangeModified}}, nil
 }
 
 type fakePolicyDecision struct{}

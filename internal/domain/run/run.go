@@ -14,15 +14,14 @@ func (id RunID) String() string {
 
 // Run is the aggregate root for a submitted agent task.
 type Run struct {
-	ID               RunID
-	Task             TaskSpec
-	Status           Status
-	ResultSummary    string
-	FailureReason    string
-	WorkspaceChanges []WorkspaceChange
-	Steps            []Step
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID            RunID
+	Task          TaskSpec
+	Status        Status
+	ResultSummary string
+	FailureReason string
+	Steps         []Step
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // New creates a queued run.
@@ -52,9 +51,6 @@ func (r *Run) Clone() *Run {
 	clone := *r
 	if len(r.Steps) > 0 {
 		clone.Steps = append([]Step(nil), r.Steps...)
-	}
-	if len(r.WorkspaceChanges) > 0 {
-		clone.WorkspaceChanges = append([]WorkspaceChange(nil), r.WorkspaceChanges...)
 	}
 
 	return &clone
@@ -125,12 +121,6 @@ func (r *Run) CompleteWithResult(now time.Time, summary string) error {
 	r.FailureReason = ""
 
 	return nil
-}
-
-// RecordWorkspaceChanges stores workspace file changes detected during the run.
-func (r *Run) RecordWorkspaceChanges(now time.Time, changes []WorkspaceChange) {
-	r.WorkspaceChanges = append([]WorkspaceChange(nil), changes...)
-	r.UpdatedAt = now
 }
 
 // Fail marks the run as failed.

@@ -48,9 +48,6 @@ func TestCreateRunCreatesQueuedRun(t *testing.T) {
 	if stored.Status != run.StatusQueued {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusQueued)
 	}
-	if stored.Task.Workspace.EffectiveType() != run.WorkspaceSourceNone {
-		t.Fatalf("stored workspace = %q, want none", stored.Task.Workspace.EffectiveType())
-	}
 
 	queuedID, err := queue.Dequeue(ctx)
 	if err != nil {
@@ -63,86 +60,7 @@ func TestCreateRunCreatesQueuedRun(t *testing.T) {
 	assertEvent(t, publisher.events, outbound.EventRunCreated, run.RunID(created.ID))
 }
 
-func TestCreateRunStoresExplicitNoneWorkspace(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeRunRepository()
-	queue := &fakeRunQueue{}
-	publisher := &recordingPublisher{}
-	now := time.Unix(100, 0).UTC()
-
-	handler := NewCreateRunHandler(
-		repo,
-		queue,
-		publisher,
-		fixedIDGenerator{id: "run_test"},
-		WithCreateRunClock(func() time.Time { return now }),
-	)
-
-	created, err := handler.CreateRun(ctx, inbound.CreateRunCommand{
-		Prompt:    "do work",
-		Workspace: inbound.WorkspaceSourceInput{Type: string(run.WorkspaceSourceNone)},
-	})
-	if err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-
-	stored, err := repo.FindByID(ctx, run.RunID(created.ID))
-	if err != nil {
-		t.Fatalf("find stored run: %v", err)
-	}
-	if stored.Task.Workspace.Type != run.WorkspaceSourceNone {
-		t.Fatalf("stored workspace = %q, want none", stored.Task.Workspace.Type)
-	}
-	if created.Task.Workspace.Type != string(run.WorkspaceSourceNone) {
-		t.Fatalf("view workspace = %q, want none", created.Task.Workspace.Type)
-	}
-}
-
-func TestCreateRunStoresSnapshotWorkspace(t *testing.T) {
-	ctx := context.Background()
-	repo := newFakeRunRepository()
-	queue := &fakeRunQueue{}
-	publisher := &recordingPublisher{}
-	now := time.Unix(100, 0).UTC()
-
-	handler := NewCreateRunHandler(
-		repo,
-		queue,
-		publisher,
-		fixedIDGenerator{id: "run_test"},
-		WithCreateRunClock(func() time.Time { return now }),
-	)
-
-	created, err := handler.CreateRun(ctx, inbound.CreateRunCommand{
-		Prompt: "do work",
-		Workspace: inbound.WorkspaceSourceInput{
-			Type:       string(run.WorkspaceSourceSnapshot),
-			SnapshotID: "wsnap_test",
-		},
-	})
-	if err != nil {
-		t.Fatalf("create run: %v", err)
-	}
-
-	stored, err := repo.FindByID(ctx, run.RunID(created.ID))
-	if err != nil {
-		t.Fatalf("find stored run: %v", err)
-	}
-	if stored.Task.Workspace.Type != run.WorkspaceSourceSnapshot {
-		t.Fatalf("stored workspace = %q, want snapshot", stored.Task.Workspace.Type)
-	}
-	if stored.Task.Workspace.SnapshotID != "wsnap_test" {
-		t.Fatalf("stored snapshot id = %q, want wsnap_test", stored.Task.Workspace.SnapshotID)
-	}
-	if created.Task.Workspace.Type != string(run.WorkspaceSourceSnapshot) {
-		t.Fatalf("view workspace = %q, want snapshot", created.Task.Workspace.Type)
-	}
-	if created.Task.Workspace.SnapshotID != "wsnap_test" {
-		t.Fatalf("view snapshot id = %q, want wsnap_test", created.Task.Workspace.SnapshotID)
-	}
-}
-
-func TestCreateRunRejectsSnapshotWorkspaceWithoutSnapshotID(t *testing.T) {
+func TestCreateRunRejectsEmptyPrompt(t *testing.T) {
 	ctx := context.Background()
 	handler := NewCreateRunHandler(
 		newFakeRunRepository(),
@@ -151,46 +69,7 @@ func TestCreateRunRejectsSnapshotWorkspaceWithoutSnapshotID(t *testing.T) {
 		fixedIDGenerator{id: "run_test"},
 	)
 
-	_, err := handler.CreateRun(ctx, inbound.CreateRunCommand{
-		Prompt:    "do work",
-		Workspace: inbound.WorkspaceSourceInput{Type: string(run.WorkspaceSourceSnapshot)},
-	})
-	if !errors.Is(err, inbound.ErrInvalidInput) {
-		t.Fatalf("CreateRun() error = %v, want invalid input", err)
-	}
-}
-
-func TestCreateRunRejectsConfiguredWorkspace(t *testing.T) {
-	ctx := context.Background()
-	handler := NewCreateRunHandler(
-		newFakeRunRepository(),
-		&fakeRunQueue{},
-		&recordingPublisher{},
-		fixedIDGenerator{id: "run_test"},
-	)
-
-	_, err := handler.CreateRun(ctx, inbound.CreateRunCommand{
-		Prompt:    "do work",
-		Workspace: inbound.WorkspaceSourceInput{Type: "configured"},
-	})
-	if !errors.Is(err, inbound.ErrInvalidInput) {
-		t.Fatalf("CreateRun() error = %v, want invalid input", err)
-	}
-}
-
-func TestCreateRunRejectsUnknownWorkspace(t *testing.T) {
-	ctx := context.Background()
-	handler := NewCreateRunHandler(
-		newFakeRunRepository(),
-		&fakeRunQueue{},
-		&recordingPublisher{},
-		fixedIDGenerator{id: "run_test"},
-	)
-
-	_, err := handler.CreateRun(ctx, inbound.CreateRunCommand{
-		Prompt:    "do work",
-		Workspace: inbound.WorkspaceSourceInput{Type: "mounted"},
-	})
+	_, err := handler.CreateRun(ctx, inbound.CreateRunCommand{Prompt: " "})
 	if !errors.Is(err, inbound.ErrInvalidInput) {
 		t.Fatalf("CreateRun() error = %v, want invalid input", err)
 	}

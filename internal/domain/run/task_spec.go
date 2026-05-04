@@ -8,29 +8,12 @@ import (
 // MaxPromptLength is the maximum accepted task prompt length in characters.
 const MaxPromptLength = 8000
 
-// WorkspaceSourceType identifies how a run should receive workspace access.
-type WorkspaceSourceType string
-
-const (
-	// WorkspaceSourceNone means the run should not receive workspace access.
-	WorkspaceSourceNone WorkspaceSourceType = "none"
-	// WorkspaceSourceSnapshot means the run should use a stored workspace snapshot.
-	WorkspaceSourceSnapshot WorkspaceSourceType = "snapshot"
-)
-
-// WorkspaceSource describes the workspace capability requested by a run.
-type WorkspaceSource struct {
-	Type       WorkspaceSourceType
-	SnapshotID string
-}
-
 // TaskSpec describes the work requested by a run submitter.
 type TaskSpec struct {
 	ProjectID     string
 	Prompt        string
 	RepositoryURL string
 	Branch        string
-	Workspace     WorkspaceSource
 }
 
 // Validate checks the minimal task fields required to queue a run.
@@ -41,31 +24,6 @@ func (s TaskSpec) Validate() error {
 	if utf8.RuneCountInString(s.Prompt) > MaxPromptLength {
 		return ErrPromptTooLong
 	}
-	if !s.Workspace.IsValid() {
-		return ErrUnknownWorkspaceSource
-	}
-	if s.Workspace.EffectiveType() == WorkspaceSourceSnapshot && strings.TrimSpace(s.Workspace.SnapshotID) == "" {
-		return ErrMissingWorkspaceSnapshotID
-	}
 
 	return nil
-}
-
-// EffectiveType returns the workspace source type after applying defaults.
-func (s WorkspaceSource) EffectiveType() WorkspaceSourceType {
-	if s.Type == "" {
-		return WorkspaceSourceNone
-	}
-
-	return s.Type
-}
-
-// IsValid reports whether the workspace source is supported.
-func (s WorkspaceSource) IsValid() bool {
-	switch s.EffectiveType() {
-	case WorkspaceSourceNone, WorkspaceSourceSnapshot:
-		return true
-	default:
-		return false
-	}
 }

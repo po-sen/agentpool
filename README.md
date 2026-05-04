@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol, snapshot workspace plumbing, and a sandbox-backed `run_shell` tool contract. The default noop sandbox does not execute commands and does not expose `run_shell`.
+- Agent loop v1 supports a minimal JSON action protocol and a sandbox-backed shell tool contract. The default runtime has no workspace, no command-capable sandbox, and does not expose `run_shell`.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -186,14 +186,14 @@ Create-run request:
 }
 ```
 
-`repository_url` and `branch` are accepted as run task metadata only. They are not used to clone code in the current MVP. Actual workspace input currently uses `workspace.type = snapshot`.
+`repository_url` and `branch` are accepted as run task metadata only. They are not used to clone code in the current MVP.
 
 Metadata example:
 
 ```json
 {
   "project_id": "demo",
-  "prompt": "Review the provided workspace",
+  "prompt": "Review the submitted task",
   "repository_url": "https://github.com/example/repo",
   "branch": "main"
 }
@@ -216,14 +216,6 @@ Agent loop turn limit defaults to `4` and can be overridden with:
 ```sh
 AGENTPOOL_AGENT_MAX_TURNS=6 go run ./cmd/agentpool dev
 ```
-
-Snapshot workspaces are loaded from a file-backed dev store only when configured:
-
-```sh
-AGENTPOOL_SNAPSHOT_DIR=/path/to/snapshots go run ./cmd/agentpool dev
-```
-
-Without `AGENTPOOL_SNAPSHOT_DIR`, the default noop snapshot store reports every snapshot as not found.
 
 ## Model Providers
 
@@ -287,13 +279,13 @@ go run ./cmd/agentpool dev
 
 Use `openai_compatible` with a local or internal endpoint for air-gapped environments. Do not configure external providers when outbound internet is disabled.
 
-## Workspace Sources
+## Workspace And Files
 
-Workspace is a run-level concept for sources such as snapshot upload, future git clone, or future mounted workspace. Core AgentPool currently supports `none` and `snapshot` only. Snapshot materialization is implemented, and local/dev verification can use a file-backed snapshot store configured with `AGENTPOOL_SNAPSHOT_DIR`.
+The current MVP supports prompt-only runs. AgentPool does not currently accept uploaded files, zip snapshots, mounted directories, or git checkout as workspace input. `repository_url` and `branch` are metadata only.
 
-`repository_url` and `branch` remain metadata only in this MVP. Git workspace source support is future work.
+Product applications own file authorization, file selection, and product ACLs. A future workspace handoff should be an intentionally designed product-authorized input source. AgentPool should enforce runtime safety boundaries for prepared execution, not product file permission rules.
 
-Without a workspace request, no workspace is prepared:
+No workspace is prepared for a normal run:
 
 ```json
 {
@@ -301,91 +293,7 @@ Without a workspace request, no workspace is prepared:
 }
 ```
 
-The explicit no-workspace form is also accepted:
-
-```json
-{
-  "prompt": "Explain DDD repository",
-  "workspace": {
-    "type": "none"
-  }
-}
-```
-
-Snapshot workspace requests use a snapshot ID:
-
-```json
-{
-  "prompt": "Inspect the uploaded workspace and run the tests.",
-  "workspace": {
-    "type": "snapshot",
-    "snapshot_id": "wsnap_example"
-  }
-}
-```
-
-Any other workspace source type, including `configured`, is rejected until an explicit source provider is implemented.
-
-## Verify Snapshot Workspace Locally
-
-Create a temporary snapshot directory and zip a tiny workspace into `wsnap_demo.zip`:
-
-```sh
-SNAPSHOT_DIR="$(mktemp -d)"
-WORKSPACE_DIR="$(mktemp -d)"
-printf '# Demo workspace\n\nThis file came from a snapshot.\n' > "$WORKSPACE_DIR/README.md"
-(cd "$WORKSPACE_DIR" && zip -qr "$SNAPSHOT_DIR/wsnap_demo.zip" .)
-```
-
-Start dev mode with the file-backed snapshot store:
-
-```sh
-AGENTPOOL_SNAPSHOT_DIR="$SNAPSHOT_DIR" go run ./cmd/agentpool dev
-```
-
-Submit a snapshot-backed run from another terminal:
-
-```sh
-curl -sS -X POST http://localhost:8080/v1/runs \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt": "Inspect the uploaded snapshot workspace and summarize what is available.",
-    "workspace": {
-      "type": "snapshot",
-      "snapshot_id": "wsnap_demo"
-    }
-  }'
-```
-
-Expected behavior:
-
-- The snapshot zip materializes into a per-run workspace and baseline directory.
-- The default noop model returns the placeholder summary `noop model response`.
-- The default noop sandbox does not expose `run_shell` because command execution is not available.
-- `workspace_changes` may be empty unless future write-capable tools and sandbox execution are implemented.
-
-Missing snapshot files fail during preparation with a public failure reason:
-
-```sh
-curl -sS -X POST http://localhost:8080/v1/runs \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt": "Inspect a missing snapshot.",
-    "workspace": {
-      "type": "snapshot",
-      "snapshot_id": "wsnap_missing"
-    }
-  }'
-```
-
-After the worker processes the run, `GET /v1/runs/{id}` includes:
-
-```json
-{
-  "status": "failed",
-  "failure_reason": "workspace snapshot not found"
-}
-```
+Workspace and file handoff are future work.
 
 ## Tools
 
@@ -393,17 +301,16 @@ AgentPool has an application-owned tool loop. Models can respond with a JSON `to
 
 The agent protocol accepts only `tool_call` and `final` JSON actions. Unknown JSON action types, malformed JSON, or multiple JSON objects are rejected as protocol errors and the model is asked to correct itself. Plain natural-language output is still accepted as a final summary for compatibility with local models.
 
-The `run_shell` tool is sandbox-backed and is advertised only when a run has workspace context and a command-capable sandbox. In the default noop runtime the shell tool contract is wired, but `run_shell` is not advertised because command execution is not available.
+The `run_shell` tool is sandbox-backed and is advertised only when a run has workspace context and a command-capable sandbox. In the default runtime there is no workspace and no command-capable sandbox, so `run_shell` is not available.
 
-Tool calls use:
+Tool calls use this provider-neutral shape when a tool is available:
 
 ```json
 {
   "type": "tool_call",
-  "tool": "run_shell",
+  "tool": "tool_name",
   "arguments": {
-    "command": "go test ./...",
-    "timeout_seconds": "30"
+    "key": "value"
   }
 }
 ```
@@ -422,12 +329,10 @@ Tools are dynamically advertised. Runs without the required context do not expos
 Example prompt:
 
 ```text
-Inspect the workspace, run the test command if available, and summarize the result.
+Summarize the task and explain the next implementation step.
 ```
 
 There is still no concrete shell execution backend, write access, Docker execution, Git mutation, network fetch, package install, or arbitrary host command execution.
-
-After a workspace-backed run, AgentPool compares the materialized workspace with its snapshot baseline and records file-level `workspace_changes` with `added`, `modified`, or `deleted` status. This is a change summary only; patch contents, artifacts, and logs are future features.
 
 ## Run Lifecycle
 

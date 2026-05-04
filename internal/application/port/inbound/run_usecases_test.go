@@ -14,8 +14,7 @@ func TestRunUseCaseContractsAcceptApplicationDTOs(t *testing.T) {
 
 	ctx := context.Background()
 	if _, err := create.CreateRun(ctx, CreateRunCommand{
-		Prompt:    "do work",
-		Workspace: WorkspaceSourceInput{Type: "snapshot", SnapshotID: "wsnap_test"},
+		Prompt: "do work",
 	}); err != nil {
 		t.Fatalf("CreateRun() error = %v", err)
 	}

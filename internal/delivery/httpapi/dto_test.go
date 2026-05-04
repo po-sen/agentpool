@@ -19,15 +19,11 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 			Prompt:        "do work",
 			RepositoryURL: "https://example.com/repo.git",
 			Branch:        "main",
-			Workspace:     inbound.WorkspaceSourceView{Type: "none"},
 		},
 		Result: inbound.RunResultView{
 			Summary: "model output",
 		},
 		FailureReason: "model failed",
-		WorkspaceChanges: []inbound.WorkspaceChangeView{
-			{Path: "README.md", Status: "modified"},
-		},
 		Steps: []inbound.StepView{
 			{
 				Name:      "execute",
@@ -49,20 +45,11 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	if response.Task.RepositoryURL != view.Task.RepositoryURL {
 		t.Fatalf("repository URL = %s, want %s", response.Task.RepositoryURL, view.Task.RepositoryURL)
 	}
-	if response.Task.Workspace != nil {
-		t.Fatalf("Workspace = %#v, want nil", response.Task.Workspace)
-	}
 	if response.Result == nil || response.Result.Summary != view.Result.Summary {
 		t.Fatalf("Result = %#v, want summary %q", response.Result, view.Result.Summary)
 	}
 	if response.FailureReason != view.FailureReason {
 		t.Fatalf("FailureReason = %q, want %q", response.FailureReason, view.FailureReason)
-	}
-	if len(response.WorkspaceChanges) != 1 {
-		t.Fatalf("len(WorkspaceChanges) = %d, want 1", len(response.WorkspaceChanges))
-	}
-	if response.WorkspaceChanges[0].Path != "README.md" {
-		t.Fatalf("WorkspaceChanges[0].Path = %q, want README.md", response.WorkspaceChanges[0].Path)
 	}
 	if len(response.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(response.Steps))
@@ -152,27 +139,6 @@ func TestRunResponseJSONIncludesCompletedSteps(t *testing.T) {
 	}
 }
 
-func TestRunResponseJSONIncludesWorkspaceChanges(t *testing.T) {
-	payload, err := json.Marshal(toRunResponse(inbound.RunView{
-		ID:     "run_test",
-		Status: "completed",
-		WorkspaceChanges: []inbound.WorkspaceChangeView{
-			{Path: "README.md", Status: "modified"},
-		},
-		Steps:     []inbound.StepView{},
-		CreatedAt: time.Unix(100, 0).UTC(),
-		UpdatedAt: time.Unix(101, 0).UTC(),
-	}))
-	if err != nil {
-		t.Fatalf("marshal response: %v", err)
-	}
-
-	got := string(payload)
-	if !strings.Contains(got, `"workspace_changes":[{"path":"README.md","status":"modified"}]`) {
-		t.Fatalf("response does not contain workspace changes: %s", got)
-	}
-}
-
 func TestRunResponseJSONIncludesFailureReason(t *testing.T) {
 	payload, err := json.Marshal(toRunResponse(inbound.RunView{
 		ID:            "run_test",
@@ -226,10 +192,11 @@ func TestRunResponseJSONIncludesFailedStep(t *testing.T) {
 	}
 }
 
-func TestRunResponseJSONOmitsEmptyResultAndFailureReason(t *testing.T) {
+func TestRunResponseJSONOmitsEmptyResultFailureReasonAndWorkspace(t *testing.T) {
 	payload, err := json.Marshal(toRunResponse(inbound.RunView{
 		ID:        "run_test",
 		Status:    "queued",
+		Task:      inbound.TaskView{Prompt: "do work"},
 		Steps:     []inbound.StepView{},
 		CreatedAt: time.Unix(100, 0).UTC(),
 		UpdatedAt: time.Unix(101, 0).UTC(),
@@ -245,54 +212,7 @@ func TestRunResponseJSONOmitsEmptyResultAndFailureReason(t *testing.T) {
 	if strings.Contains(got, `"failure_reason"`) {
 		t.Fatalf("response contains empty failure reason: %s", got)
 	}
-	if strings.Contains(got, `"workspace_changes"`) {
-		t.Fatalf("response contains empty workspace changes: %s", got)
-	}
-}
-
-func TestRunResponseJSONOmitsNoneWorkspace(t *testing.T) {
-	payload, err := json.Marshal(toRunResponse(inbound.RunView{
-		ID:     "run_test",
-		Status: "queued",
-		Task: inbound.TaskView{
-			Prompt:    "do work",
-			Workspace: inbound.WorkspaceSourceView{Type: "none"},
-		},
-		Steps:     []inbound.StepView{},
-		CreatedAt: time.Unix(100, 0).UTC(),
-		UpdatedAt: time.Unix(101, 0).UTC(),
-	}))
-	if err != nil {
-		t.Fatalf("marshal response: %v", err)
-	}
-
-	got := string(payload)
 	if strings.Contains(got, `"workspace"`) {
-		t.Fatalf("response contains none workspace: %s", got)
-	}
-}
-
-func TestRunResponseJSONIncludesSnapshotWorkspace(t *testing.T) {
-	payload, err := json.Marshal(toRunResponse(inbound.RunView{
-		ID:     "run_test",
-		Status: "queued",
-		Task: inbound.TaskView{
-			Prompt: "do work",
-			Workspace: inbound.WorkspaceSourceView{
-				Type:       "snapshot",
-				SnapshotID: "wsnap_test",
-			},
-		},
-		Steps:     []inbound.StepView{},
-		CreatedAt: time.Unix(100, 0).UTC(),
-		UpdatedAt: time.Unix(101, 0).UTC(),
-	}))
-	if err != nil {
-		t.Fatalf("marshal response: %v", err)
-	}
-
-	got := string(payload)
-	if !strings.Contains(got, `"workspace":{"type":"snapshot","snapshot_id":"wsnap_test"}`) {
-		t.Fatalf("response does not contain snapshot workspace: %s", got)
+		t.Fatalf("response contains workspace: %s", got)
 	}
 }

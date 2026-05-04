@@ -68,10 +68,6 @@ func (h *CreateRunHandler) CreateRun(ctx context.Context, command inbound.Create
 		Prompt:        command.Prompt,
 		RepositoryURL: command.RepositoryURL,
 		Branch:        command.Branch,
-		Workspace: run.WorkspaceSource{
-			Type:       run.WorkspaceSourceType(command.Workspace.Type),
-			SnapshotID: command.Workspace.SnapshotID,
-		},
 	}, now)
 	if err != nil {
 		return inbound.RunView{}, inbound.NewInvalidInputError(err)

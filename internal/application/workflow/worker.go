@@ -12,8 +12,6 @@ import (
 )
 
 const defaultPollInterval = 200 * time.Millisecond
-const workspaceCleanupTimeout = 30 * time.Second
-const sandboxCleanupTimeout = 30 * time.Second
 const publicFailureReason = "run failed"
 
 const (
@@ -36,9 +34,6 @@ type Worker struct {
 	stateStore   outbound.RunStateStore
 	events       outbound.EventPublisher
 	agent        *agent.Runner
-	sandbox      outbound.SandboxProvider
-	workspace    outbound.WorkspaceProvider
-	changes      outbound.WorkspaceChangeCollector
 	policy       outbound.PolicyDecisionPort
 	secrets      outbound.SecretBroker
 	clock        func() time.Time
@@ -54,10 +49,7 @@ type WorkerDependencies struct {
 	Repo       run.Repository
 	StateStore outbound.RunStateStore
 	Events     outbound.EventPublisher
-	Sandbox    outbound.SandboxProvider
 	Agent      *agent.Runner
-	Workspace  outbound.WorkspaceProvider
-	Changes    outbound.WorkspaceChangeCollector
 	Policy     outbound.PolicyDecisionPort
 	Secrets    outbound.SecretBroker
 }
@@ -87,9 +79,6 @@ func NewWorker(
 		stateStore:   deps.StateStore,
 		events:       deps.Events,
 		agent:        deps.Agent,
-		sandbox:      deps.Sandbox,
-		workspace:    deps.Workspace,
-		changes:      deps.Changes,
 		policy:       deps.Policy,
 		secrets:      deps.Secrets,
 		pollInterval: defaultPollInterval,
@@ -151,7 +140,15 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 		return nil
 	}
 
-	workspace, err := w.prepareRun(ctx, item)
+	if err := w.prepareRun(ctx, item); err != nil {
+		if errors.Is(err, errRunStateChanged) {
+			return nil
+		}
+
+		return w.failRun(ctx, item, err)
+	}
+
+	result, err := w.startRun(ctx, item)
 	if err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
@@ -159,17 +156,7 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 
 		return w.failRun(ctx, item, err)
 	}
-	defer w.cleanupWorkspace(ctx, workspace)
-
-	result, changes, err := w.startRun(ctx, item, workspace)
-	if err != nil {
-		if errors.Is(err, errRunStateChanged) {
-			return nil
-		}
-
-		return w.failRun(ctx, item, err)
-	}
-	if err := w.completeRun(ctx, item, result, changes); err != nil {
+	if err := w.completeRun(ctx, item, result); err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
 		}
@@ -180,20 +167,20 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 	return nil
 }
 
-func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (outbound.Workspace, error) {
+func (w *Worker) prepareRun(ctx context.Context, item *run.Run) error {
 	now := w.clock()
 	expectedStatus := item.Status
 	if err := item.StartStep(prepareStepName, prepareStepRunningMessage, now); err != nil {
-		return outbound.Workspace{}, err
+		return err
 	}
 	if err := item.StartPreparing(now); err != nil {
-		return outbound.Workspace{}, err
+		return err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return outbound.Workspace{}, err
+		return err
 	}
 	if err := w.publish(ctx, outbound.EventRunPreparing, item.ID, now); err != nil {
-		return outbound.Workspace{}, err
+		return err
 	}
 
 	decision, err := w.policy.Decide(ctx, outbound.PolicyDecisionRequest{
@@ -201,154 +188,88 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (outbound.Worksp
 		Task:  item.Task,
 	})
 	if err != nil {
-		return outbound.Workspace{}, err
+		return err
 	}
 	if !decision.Allowed {
 		if decision.Reason == "" {
-			return outbound.Workspace{}, errors.New("policy denied run")
+			return errors.New("policy denied run")
 		}
 
-		return outbound.Workspace{}, errors.New(decision.Reason)
+		return errors.New(decision.Reason)
 	}
 
 	if _, err := w.secrets.Resolve(ctx, outbound.SecretRequest{
 		ProjectID: item.Task.ProjectID,
 	}); err != nil {
-		return outbound.Workspace{}, err
-	}
-
-	workspace, err := w.workspace.ResolveWorkspace(ctx, outbound.WorkspaceResolveRequest{
-		RunID:  item.ID,
-		Task:   item.Task,
-		Source: item.Task.Workspace,
-	})
-	if err != nil {
-		return outbound.Workspace{}, err
+		return err
 	}
 
 	now = w.clock()
 	expectedStatus = item.Status
 	if err := item.CompleteStep(prepareStepName, prepareStepCompletedMessage, now); err != nil {
-		return outbound.Workspace{}, err
+		return err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return outbound.Workspace{}, err
+		return err
 	}
 
-	return workspace, nil
+	return nil
 }
 
 func (w *Worker) startRun(
 	ctx context.Context,
 	item *run.Run,
-	workspace outbound.Workspace,
-) (agent.RunResult, []run.WorkspaceChange, error) {
+) (agent.RunResult, error) {
 	now := w.clock()
 	expectedStatus := item.Status
 	if err := item.StartStep(agentStepName, agentStepRunningMessage, now); err != nil {
-		return agent.RunResult{}, nil, err
+		return agent.RunResult{}, err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return agent.RunResult{}, nil, err
+		return agent.RunResult{}, err
 	}
-
-	sandbox, cleanupSandbox, err := w.prepareSandboxIfNeeded(ctx, item, workspace.Path)
-	if err != nil {
-		return agent.RunResult{}, nil, err
-	}
-	defer cleanupSandbox()
 
 	now = w.clock()
 	expectedStatus = item.Status
 	if err := item.StartRunning(now); err != nil {
-		return agent.RunResult{}, nil, err
+		return agent.RunResult{}, err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return agent.RunResult{}, nil, err
+		return agent.RunResult{}, err
 	}
 	if err := w.publish(ctx, outbound.EventRunStarted, item.ID, now); err != nil {
-		return agent.RunResult{}, nil, err
+		return agent.RunResult{}, err
 	}
 
 	result, err := w.agent.Run(ctx, agent.RunRequest{
-		RunID: item.ID,
-		Task:  item.Task,
-		Context: outbound.ToolContext{
-			WorkspacePath: workspace.Path,
-			Sandbox:       sandbox,
-		},
+		RunID:   item.ID,
+		Task:    item.Task,
+		Context: outbound.ToolContext{},
 	})
 
 	if err != nil {
-		return agent.RunResult{}, nil, err
-	}
-
-	changes, err := w.collectWorkspaceChanges(ctx, workspace)
-	if err != nil {
-		return agent.RunResult{}, nil, err
+		return agent.RunResult{}, err
 	}
 
 	now = w.clock()
 	expectedStatus = item.Status
 	if err := item.CompleteStep(agentStepName, agentCompletedMessage(result.ToolCallCount), now); err != nil {
-		return agent.RunResult{}, nil, err
+		return agent.RunResult{}, err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return agent.RunResult{}, nil, err
+		return agent.RunResult{}, err
 	}
 
-	return result, changes, nil
-}
-
-func (w *Worker) prepareSandboxIfNeeded(
-	ctx context.Context,
-	item *run.Run,
-	workspacePath string,
-) (outbound.Sandbox, func(), error) {
-	if workspacePath == "" {
-		return outbound.Sandbox{}, func() {}, nil
-	}
-	if !sandboxSupportsCommands(w.sandbox) {
-		return outbound.Sandbox{}, func() {}, nil
-	}
-
-	sandbox, err := w.sandbox.Prepare(ctx, outbound.SandboxRequest{
-		RunID:         item.ID,
-		Task:          item.Task,
-		WorkspacePath: workspacePath,
-	})
-	if err != nil {
-		return outbound.Sandbox{}, func() {}, err
-	}
-	if !sandbox.SupportsCommands {
-		w.cleanupSandbox(ctx, sandbox)
-
-		return outbound.Sandbox{}, func() {}, nil
-	}
-
-	cleanup := func() {
-		w.cleanupSandbox(ctx, sandbox)
-	}
-
-	return sandbox, cleanup, nil
-}
-
-func (w *Worker) cleanupSandbox(ctx context.Context, sandbox outbound.Sandbox) {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sandboxCleanupTimeout)
-	defer cancel()
-
-	_ = w.sandbox.Cleanup(cleanupCtx, sandbox)
+	return result, nil
 }
 
 func (w *Worker) completeRun(
 	ctx context.Context,
 	item *run.Run,
 	result agent.RunResult,
-	changes []run.WorkspaceChange,
 ) error {
 	now := w.clock()
 	expectedStatus := item.Status
-	item.RecordWorkspaceChanges(now, changes)
 	if err := item.CompleteWithResult(now, result.Summary); err != nil {
 		return err
 	}
@@ -359,45 +280,6 @@ func (w *Worker) completeRun(
 	return w.publish(ctx, outbound.EventRunCompleted, item.ID, now)
 }
 
-func (w *Worker) collectWorkspaceChanges(
-	ctx context.Context,
-	workspace outbound.Workspace,
-) ([]run.WorkspaceChange, error) {
-	if w.changes == nil || workspace.Path == "" || workspace.BasePath == "" {
-		return nil, nil
-	}
-
-	changes, err := w.changes.CollectWorkspaceChanges(ctx, workspace)
-	if err != nil {
-		return nil, err
-	}
-
-	return toDomainWorkspaceChanges(changes), nil
-}
-
-func toDomainWorkspaceChanges(changes []outbound.WorkspaceChange) []run.WorkspaceChange {
-	if len(changes) == 0 {
-		return nil
-	}
-
-	result := make([]run.WorkspaceChange, 0, len(changes))
-	for _, change := range changes {
-		result = append(result, run.WorkspaceChange{
-			Path:   change.Path,
-			Status: run.WorkspaceChangeStatus(change.Status),
-		})
-	}
-
-	return result
-}
-
-func (w *Worker) cleanupWorkspace(ctx context.Context, workspace outbound.Workspace) {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceCleanupTimeout)
-	defer cancel()
-
-	_ = w.workspace.CleanupWorkspace(cleanupCtx, workspace)
-}
-
 func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error {
 	now := w.clock()
 	expectedStatus := item.Status
@@ -406,7 +288,7 @@ func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error 
 			return errors.Join(cause, err)
 		}
 	}
-	if err := item.FailWithReason(now, publicFailureReasonFor(cause)); err != nil {
+	if err := item.FailWithReason(now, publicFailureReason); err != nil {
 		return errors.Join(cause, err)
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
@@ -421,31 +303,6 @@ func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error 
 	}
 
 	return nil
-}
-
-func publicFailureReasonFor(cause error) string {
-	switch {
-	case errors.Is(cause, outbound.ErrSnapshotNotFound):
-		return "workspace snapshot not found"
-	case errors.Is(cause, outbound.ErrInvalidSnapshotID):
-		return "invalid workspace snapshot id"
-	case errors.Is(cause, run.ErrUnknownWorkspaceSource):
-		return "unknown workspace source"
-	default:
-		return publicFailureReason
-	}
-}
-
-func sandboxSupportsCommands(provider outbound.SandboxProvider) bool {
-	if provider == nil {
-		return false
-	}
-	capabilityProvider, ok := provider.(outbound.SandboxCapabilityProvider)
-	if !ok {
-		return false
-	}
-
-	return capabilityProvider.Capabilities().SupportsCommands
 }
 
 func (w *Worker) publish(ctx context.Context, eventType string, id run.RunID, occurredAt time.Time) error {

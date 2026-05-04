@@ -14,10 +14,6 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 		Prompt:        "do work",
 		RepositoryURL: "https://example.com/repo.git",
 		Branch:        "main",
-		Workspace: run.WorkspaceSource{
-			Type:       run.WorkspaceSourceSnapshot,
-			SnapshotID: "wsnap_test",
-		},
 	}, time.Unix(100, 0).UTC())
 	if err != nil {
 		t.Fatalf("new run: %v", err)
@@ -25,9 +21,6 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	item.Status = run.StatusRunning
 	item.ResultSummary = "model output"
 	item.FailureReason = "model failed"
-	item.WorkspaceChanges = []run.WorkspaceChange{
-		{Path: "README.md", Status: run.WorkspaceChangeModified},
-	}
 	item.Steps = []run.Step{
 		{
 			Name:      "execute",
@@ -46,23 +39,11 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	if view.Task.RepositoryURL != item.Task.RepositoryURL {
 		t.Fatalf("RepositoryURL = %s, want %s", view.Task.RepositoryURL, item.Task.RepositoryURL)
 	}
-	if view.Task.Workspace.Type != string(run.WorkspaceSourceSnapshot) {
-		t.Fatalf("Workspace.Type = %s, want snapshot", view.Task.Workspace.Type)
-	}
-	if view.Task.Workspace.SnapshotID != "wsnap_test" {
-		t.Fatalf("Workspace.SnapshotID = %s, want wsnap_test", view.Task.Workspace.SnapshotID)
-	}
 	if view.Result.Summary != item.ResultSummary {
 		t.Fatalf("Result.Summary = %q, want %q", view.Result.Summary, item.ResultSummary)
 	}
 	if view.FailureReason != item.FailureReason {
 		t.Fatalf("FailureReason = %q, want %q", view.FailureReason, item.FailureReason)
-	}
-	if len(view.WorkspaceChanges) != 1 {
-		t.Fatalf("len(WorkspaceChanges) = %d, want 1", len(view.WorkspaceChanges))
-	}
-	if view.WorkspaceChanges[0].Status != string(run.WorkspaceChangeModified) {
-		t.Fatalf("WorkspaceChanges[0].Status = %q, want modified", view.WorkspaceChanges[0].Status)
 	}
 	if len(view.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(view.Steps))

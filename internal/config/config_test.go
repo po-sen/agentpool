@@ -8,7 +8,6 @@ import (
 func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("AGENTPOOL_HTTP_ADDR", "")
 	t.Setenv("AGENTPOOL_AGENT_MAX_TURNS", "")
-	t.Setenv("AGENTPOOL_SNAPSHOT_DIR", "")
 	clearModelEnv(t)
 
 	cfg := Load("")
@@ -29,9 +28,6 @@ func TestLoadUsesDefaults(t *testing.T) {
 	}
 	if cfg.Agent.MaxTurns != 4 {
 		t.Fatalf("Agent.MaxTurns = %d, want 4", cfg.Agent.MaxTurns)
-	}
-	if cfg.Workspace.SnapshotDir != "" {
-		t.Fatalf("Workspace.SnapshotDir = %q, want empty", cfg.Workspace.SnapshotDir)
 	}
 }
 
@@ -78,15 +74,6 @@ func TestLoadUsesEnvironmentAgentConfig(t *testing.T) {
 	cfg := Load("dev")
 	if cfg.Agent.MaxTurns != 7 {
 		t.Fatalf("Agent.MaxTurns = %d, want 7", cfg.Agent.MaxTurns)
-	}
-}
-
-func TestLoadUsesEnvironmentWorkspaceConfig(t *testing.T) {
-	t.Setenv("AGENTPOOL_SNAPSHOT_DIR", "/tmp/agentpool-snapshots")
-
-	cfg := Load("dev")
-	if cfg.Workspace.SnapshotDir != "/tmp/agentpool-snapshots" {
-		t.Fatalf("Workspace.SnapshotDir = %q, want /tmp/agentpool-snapshots", cfg.Workspace.SnapshotDir)
 	}
 }
 

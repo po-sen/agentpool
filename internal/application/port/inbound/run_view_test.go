@@ -16,15 +16,11 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 			Prompt:        "do work",
 			RepositoryURL: "https://example.com/repo.git",
 			Branch:        "main",
-			Workspace:     WorkspaceSourceView{Type: "snapshot", SnapshotID: "wsnap_test"},
 		},
 		Result: RunResultView{
 			Summary: "model output",
 		},
 		FailureReason: "model failed",
-		WorkspaceChanges: []WorkspaceChangeView{
-			{Path: "README.md", Status: "modified"},
-		},
 		Steps: []StepView{
 			{
 				Name:      "execute",
@@ -44,20 +40,11 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	if view.Task.Branch != "main" {
 		t.Fatalf("Branch = %s, want main", view.Task.Branch)
 	}
-	if view.Task.Workspace.Type != "snapshot" {
-		t.Fatalf("Workspace.Type = %s, want snapshot", view.Task.Workspace.Type)
-	}
-	if view.Task.Workspace.SnapshotID != "wsnap_test" {
-		t.Fatalf("Workspace.SnapshotID = %s, want wsnap_test", view.Task.Workspace.SnapshotID)
-	}
 	if view.Result.Summary != "model output" {
 		t.Fatalf("Result.Summary = %q, want model output", view.Result.Summary)
 	}
 	if view.FailureReason != "model failed" {
 		t.Fatalf("FailureReason = %q, want model failed", view.FailureReason)
-	}
-	if view.WorkspaceChanges[0].Path != "README.md" {
-		t.Fatalf("WorkspaceChanges[0].Path = %q, want README.md", view.WorkspaceChanges[0].Path)
 	}
 	if view.Steps[0].EndedAt == nil || !view.Steps[0].EndedAt.Equal(endedAt) {
 		t.Fatalf("EndedAt = %v, want %v", view.Steps[0].EndedAt, endedAt)
