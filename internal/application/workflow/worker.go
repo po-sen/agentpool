@@ -12,6 +12,7 @@ import (
 )
 
 const defaultPollInterval = 200 * time.Millisecond
+const workspaceCleanupTimeout = 30 * time.Second
 const publicFailureReason = "run failed"
 
 const (
@@ -144,7 +145,7 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 		return nil
 	}
 
-	workspacePath, err := w.prepareRun(ctx, item)
+	workspace, err := w.prepareRun(ctx, item)
 	if err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
@@ -152,7 +153,9 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 
 		return w.failRun(ctx, item, err)
 	}
-	result, err := w.startRun(ctx, item, workspacePath)
+	defer w.cleanupWorkspace(ctx, workspace)
+
+	result, err := w.startRun(ctx, item, workspace.Path)
 	if err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
@@ -171,20 +174,20 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 	return nil
 }
 
-func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (string, error) {
+func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (outbound.Workspace, error) {
 	now := w.clock()
 	expectedStatus := item.Status
 	if err := item.StartStep(prepareStepName, prepareStepRunningMessage, now); err != nil {
-		return "", err
+		return outbound.Workspace{}, err
 	}
 	if err := item.StartPreparing(now); err != nil {
-		return "", err
+		return outbound.Workspace{}, err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return "", err
+		return outbound.Workspace{}, err
 	}
 	if err := w.publish(ctx, outbound.EventRunPreparing, item.ID, now); err != nil {
-		return "", err
+		return outbound.Workspace{}, err
 	}
 
 	decision, err := w.policy.Decide(ctx, outbound.PolicyDecisionRequest{
@@ -192,20 +195,20 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (string, error) 
 		Task:  item.Task,
 	})
 	if err != nil {
-		return "", err
+		return outbound.Workspace{}, err
 	}
 	if !decision.Allowed {
 		if decision.Reason == "" {
-			return "", errors.New("policy denied run")
+			return outbound.Workspace{}, errors.New("policy denied run")
 		}
 
-		return "", errors.New(decision.Reason)
+		return outbound.Workspace{}, errors.New(decision.Reason)
 	}
 
 	if _, err := w.secrets.Resolve(ctx, outbound.SecretRequest{
 		ProjectID: item.Task.ProjectID,
 	}); err != nil {
-		return "", err
+		return outbound.Workspace{}, err
 	}
 
 	workspace, err := w.workspace.ResolveWorkspace(ctx, outbound.WorkspaceResolveRequest{
@@ -214,19 +217,19 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (string, error) 
 		Source: item.Task.Workspace,
 	})
 	if err != nil {
-		return "", err
+		return outbound.Workspace{}, err
 	}
 
 	now = w.clock()
 	expectedStatus = item.Status
 	if err := item.CompleteStep(prepareStepName, prepareStepCompletedMessage, now); err != nil {
-		return "", err
+		return outbound.Workspace{}, err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return "", err
+		return outbound.Workspace{}, err
 	}
 
-	return workspace.Path, nil
+	return workspace, nil
 }
 
 func (w *Worker) startRun(ctx context.Context, item *run.Run, workspacePath string) (agent.RunResult, error) {
@@ -287,6 +290,13 @@ func (w *Worker) completeRun(ctx context.Context, item *run.Run, result agent.Ru
 	}
 
 	return w.publish(ctx, outbound.EventRunCompleted, item.ID, now)
+}
+
+func (w *Worker) cleanupWorkspace(ctx context.Context, workspace outbound.Workspace) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceCleanupTimeout)
+	defer cancel()
+
+	_ = w.workspace.CleanupWorkspace(cleanupCtx, workspace)
 }
 
 func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error {

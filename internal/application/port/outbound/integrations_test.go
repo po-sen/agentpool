@@ -32,6 +32,9 @@ func TestIntegrationPortContracts(t *testing.T) {
 	if _, err := workspace.ResolveWorkspace(ctx, WorkspaceResolveRequest{RunID: "run_test"}); err != nil {
 		t.Fatalf("ResolveWorkspace() error = %v", err)
 	}
+	if err := workspace.CleanupWorkspace(ctx, Workspace{Path: "/tmp/repo"}); err != nil {
+		t.Fatalf("CleanupWorkspace() error = %v", err)
+	}
 	if _, err := policy.Decide(ctx, PolicyDecisionRequest{RunID: "run_test"}); err != nil {
 		t.Fatalf("Decide() error = %v", err)
 	}
@@ -72,6 +75,10 @@ type fakeWorkspaceProvider struct{}
 
 func (fakeWorkspaceProvider) ResolveWorkspace(context.Context, WorkspaceResolveRequest) (Workspace, error) {
 	return Workspace{Path: "/tmp/repo"}, nil
+}
+
+func (fakeWorkspaceProvider) CleanupWorkspace(context.Context, Workspace) error {
+	return nil
 }
 
 type fakePolicyDecision struct{}

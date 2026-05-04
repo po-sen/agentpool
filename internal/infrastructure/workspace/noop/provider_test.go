@@ -25,6 +25,9 @@ func TestResolveWorkspaceReturnsEmptyForNone(t *testing.T) {
 	if workspace.Path != "" {
 		t.Fatalf("workspace path = %q, want empty", workspace.Path)
 	}
+	if err := provider.CleanupWorkspace(context.Background(), workspace); err != nil {
+		t.Fatalf("CleanupWorkspace() error = %v", err)
+	}
 }
 
 func TestResolveWorkspaceTreatsEmptySourceAsNone(t *testing.T) {

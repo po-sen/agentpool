@@ -21,4 +21,5 @@ type Workspace struct {
 // WorkspaceProvider resolves workspace sources requested by runs.
 type WorkspaceProvider interface {
 	ResolveWorkspace(context.Context, WorkspaceResolveRequest) (Workspace, error)
+	CleanupWorkspace(context.Context, Workspace) error
 }

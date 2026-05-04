@@ -270,6 +270,12 @@ func TestWorkerResolvesNoWorkspaceToEmptyPath(t *testing.T) {
 	if workspace.source != run.WorkspaceSourceNone {
 		t.Fatalf("workspace source = %q, want none", workspace.source)
 	}
+	if !workspace.cleanupCalled {
+		t.Fatal("workspace cleanup was not called")
+	}
+	if workspace.cleanupContextErr != nil {
+		t.Fatalf("workspace cleanup context error = %v, want nil", workspace.cleanupContextErr)
+	}
 }
 
 func TestWorkerProcessOneEmptyQueue(t *testing.T) {
@@ -899,9 +905,15 @@ func (p fakeWorkspaceProvider) ResolveWorkspace(context.Context, outbound.Worksp
 	return outbound.Workspace{}, nil
 }
 
+func (p fakeWorkspaceProvider) CleanupWorkspace(context.Context, outbound.Workspace) error {
+	return nil
+}
+
 type recordingWorkspaceProvider struct {
-	called bool
-	source run.WorkspaceSourceType
+	called            bool
+	cleanupCalled     bool
+	cleanupContextErr error
+	source            run.WorkspaceSourceType
 }
 
 func (p *recordingWorkspaceProvider) ResolveWorkspace(_ context.Context, request outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
@@ -911,12 +923,23 @@ func (p *recordingWorkspaceProvider) ResolveWorkspace(_ context.Context, request
 	return outbound.Workspace{}, nil
 }
 
+func (p *recordingWorkspaceProvider) CleanupWorkspace(ctx context.Context, _ outbound.Workspace) error {
+	p.cleanupCalled = true
+	p.cleanupContextErr = ctx.Err()
+
+	return nil
+}
+
 var errWorkspaceResolveFailed = errors.New("workspace resolve failed")
 
 type failingWorkspaceProvider struct{}
 
 func (p failingWorkspaceProvider) ResolveWorkspace(context.Context, outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
 	return outbound.Workspace{}, errWorkspaceResolveFailed
+}
+
+func (p failingWorkspaceProvider) CleanupWorkspace(context.Context, outbound.Workspace) error {
+	return nil
 }
 
 type fakePolicyDecision struct{}

@@ -26,3 +26,8 @@ func (p *Provider) ResolveWorkspace(_ context.Context, request outbound.Workspac
 		return outbound.Workspace{}, run.ErrUnknownWorkspaceSource
 	}
 }
+
+// CleanupWorkspace records no side effects.
+func (p *Provider) CleanupWorkspace(context.Context, outbound.Workspace) error {
+	return nil
+}

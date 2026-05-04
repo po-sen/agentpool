@@ -23,8 +23,9 @@ import (
 	"github.com/po-sen/agentpool/internal/infrastructure/policy/allowall"
 	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
 	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
+	storagenoop "github.com/po-sen/agentpool/internal/infrastructure/storage/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
-	workspacenoop "github.com/po-sen/agentpool/internal/infrastructure/workspace/noop"
+	workspacesnapshot "github.com/po-sen/agentpool/internal/infrastructure/workspace/snapshot"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
 )
@@ -138,7 +139,10 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		toolRunner,
 		applicationagent.WithMaxTurns(a.config.Agent.MaxTurns),
 	)
-	workspaceProvider := workspacenoop.NewProvider()
+	workspaceProvider, err := workspacesnapshot.NewProvider(storagenoop.NewSnapshotStore(), workspacesnapshot.Config{})
+	if err != nil {
+		return nil, err
+	}
 	policyDecision := allowall.NewDecision()
 	secretBroker := secretnoop.NewBroker()
 
