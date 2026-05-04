@@ -175,6 +175,36 @@ func TestWorkerDoesNotPrepareWorkspaceWithoutAttachments(t *testing.T) {
 	}
 }
 
+func TestWorkerDoesNotPrepareSandboxForPromptOnlyRun(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	sandbox := &recordingSandboxProvider{supportsCommands: true}
+	now := time.Unix(100, 0).UTC()
+
+	queueRun(ctx, t, repo, queue, now)
+
+	worker := newWorkerWithWorkspaceAndSandbox(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
+		&recordingWorkspaceProvider{path: "/tmp/workspace"},
+		sandbox,
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+	if sandbox.prepareCalled {
+		t.Fatal("sandbox prepare was called")
+	}
+	if sandbox.cleanupCalled {
+		t.Fatal("sandbox cleanup was called")
+	}
+}
+
 func TestWorkerPreparesWorkspaceForAttachmentsAndPassesPathToAgentTools(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
@@ -237,6 +267,98 @@ func TestWorkerPreparesWorkspaceForAttachmentsAndPassesPathToAgentTools(t *testi
 	}
 	if tools.calls[0].Context.Sandbox.ID != "" {
 		t.Fatalf("tool sandbox id = %q, want empty", tools.calls[0].Context.Sandbox.ID)
+	}
+}
+
+func TestWorkerDoesNotPrepareNoopSandboxForAttachments(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	workspace := &recordingWorkspaceProvider{path: "/tmp/workspace"}
+	sandbox := &recordingSandboxProvider{supportsCommands: false}
+	now := time.Unix(100, 0).UTC()
+
+	queueRunWithTask(ctx, t, repo, queue, textAttachmentTask(), now)
+
+	tools := &recordingWorkflowToolRunner{}
+	worker := newWorkerWithWorkspaceAndSandbox(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(&toolCallingModelClient{}, tools),
+		workspace,
+		sandbox,
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+	if sandbox.prepareCalled {
+		t.Fatal("sandbox prepare was called")
+	}
+	if sandbox.cleanupCalled {
+		t.Fatal("sandbox cleanup was called")
+	}
+	if tools.calls[0].Context.Sandbox.ID != "" {
+		t.Fatalf("tool sandbox id = %q, want empty", tools.calls[0].Context.Sandbox.ID)
+	}
+}
+
+func TestWorkerPreparesCommandSandboxForAttachments(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	workspace := &recordingWorkspaceProvider{path: "/tmp/workspace"}
+	sandbox := &recordingSandboxProvider{
+		supportsCommands: true,
+		sandbox:          outbound.Sandbox{ID: "sandbox_test", SupportsCommands: true},
+	}
+	now := time.Unix(100, 0).UTC()
+
+	item := queueRunWithTask(ctx, t, repo, queue, textAttachmentTask(), now)
+
+	tools := &recordingWorkflowToolRunner{}
+	worker := newWorkerWithWorkspaceAndSandbox(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(&toolCallingModelClient{}, tools),
+		workspace,
+		sandbox,
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	if !sandbox.prepareCalled {
+		t.Fatal("sandbox prepare was not called")
+	}
+	if sandbox.runID != item.ID {
+		t.Fatalf("sandbox run ID = %s, want %s", sandbox.runID, item.ID)
+	}
+	if sandbox.workspacePath != workspace.path {
+		t.Fatalf("sandbox workspace path = %q, want %q", sandbox.workspacePath, workspace.path)
+	}
+	if !sandbox.cleanupCalled {
+		t.Fatal("sandbox cleanup was not called")
+	}
+	if sandbox.cleanupContextErr != nil {
+		t.Fatalf("sandbox cleanup context error = %v, want nil", sandbox.cleanupContextErr)
+	}
+	if tools.listRequests[0].Context.Sandbox.ID != "sandbox_test" {
+		t.Fatalf("list sandbox id = %q, want sandbox_test", tools.listRequests[0].Context.Sandbox.ID)
+	}
+	if !tools.listRequests[0].Context.Sandbox.SupportsCommands {
+		t.Fatal("list sandbox supports commands = false, want true")
+	}
+	if tools.calls[0].Context.Sandbox.ID != "sandbox_test" {
+		t.Fatalf("tool sandbox id = %q, want sandbox_test", tools.calls[0].Context.Sandbox.ID)
+	}
+	if !tools.calls[0].Context.Sandbox.SupportsCommands {
+		t.Fatal("tool sandbox supports commands = false, want true")
 	}
 }
 
@@ -561,6 +683,20 @@ func queueRunWithTask(
 	return item
 }
 
+func textAttachmentTask() run.TaskSpec {
+	return run.TaskSpec{
+		Prompt: "do work",
+		Attachments: []run.TaskAttachment{
+			{
+				Filename:  "README.md",
+				MediaType: "text/markdown",
+				Content:   []byte("# Demo\n"),
+				SizeBytes: 7,
+			},
+		},
+	}
+}
+
 func findRun(ctx context.Context, t *testing.T, repo *fakeRunRepository, id run.RunID) *run.Run {
 	t.Helper()
 
@@ -640,6 +776,31 @@ func newWorkerWithWorkspace(
 			Events:     publisher,
 			Agent:      agentRunner,
 			Workspace:  workspace,
+			Policy:     fakePolicyDecision{},
+			Secrets:    fakeSecretBroker{},
+		},
+		WithClock(func() time.Time { return now }),
+	)
+}
+
+func newWorkerWithWorkspaceAndSandbox(
+	queue outbound.RunQueue,
+	repo *fakeRunRepository,
+	publisher outbound.EventPublisher,
+	now time.Time,
+	agentRunner *applicationagent.Runner,
+	workspace outbound.WorkspaceProvider,
+	sandbox outbound.SandboxProvider,
+) *Worker {
+	return NewWorker(
+		WorkerDependencies{
+			Queue:      queue,
+			Repo:       repo,
+			StateStore: repo,
+			Events:     publisher,
+			Agent:      agentRunner,
+			Workspace:  workspace,
+			Sandbox:    sandbox,
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
@@ -840,6 +1001,42 @@ func (p *recordingWorkspaceProvider) PrepareWorkspace(
 }
 
 func (p *recordingWorkspaceProvider) CleanupWorkspace(ctx context.Context, _ outbound.Workspace) error {
+	p.cleanupCalled = true
+	p.cleanupContextErr = ctx.Err()
+
+	return nil
+}
+
+type recordingSandboxProvider struct {
+	prepareCalled     bool
+	cleanupCalled     bool
+	cleanupContextErr error
+	supportsCommands  bool
+	sandbox           outbound.Sandbox
+	runID             run.RunID
+	workspacePath     string
+}
+
+func (p *recordingSandboxProvider) Capabilities() outbound.SandboxCapabilities {
+	return outbound.SandboxCapabilities{SupportsCommands: p.supportsCommands}
+}
+
+func (p *recordingSandboxProvider) Prepare(
+	_ context.Context,
+	request outbound.SandboxRequest,
+) (outbound.Sandbox, error) {
+	p.prepareCalled = true
+	p.runID = request.RunID
+	p.workspacePath = request.WorkspacePath
+
+	if p.sandbox.ID != "" {
+		return p.sandbox, nil
+	}
+
+	return outbound.Sandbox{ID: "sandbox_test", SupportsCommands: p.supportsCommands}, nil
+}
+
+func (p *recordingSandboxProvider) Cleanup(ctx context.Context, _ outbound.Sandbox) error {
 	p.cleanupCalled = true
 	p.cleanupContextErr = ctx.Err()
 

@@ -10,7 +10,7 @@ AgentPool is currently an early MVP scaffold.
 
 - Storage and queue are in-memory only.
 - Runs complete through noop infrastructure implementations.
-- There is no real Docker sandbox yet.
+- The default sandbox provider is noop. A dev-only Docker sandbox can be enabled explicitly to verify sandbox-backed shell commands.
 - The default model client is noop.
 - Agent loop v1 supports a minimal JSON action protocol and read-only uploaded-file tools. The default runtime has no command-capable sandbox and does not expose `run_shell`.
 - There is no real GitHub PR creation yet.
@@ -217,6 +217,14 @@ Agent loop turn limit defaults to `4` and can be overridden with:
 AGENTPOOL_AGENT_MAX_TURNS=6 go run ./cmd/agentpool dev
 ```
 
+Sandbox provider defaults to `noop`. Local command sandbox verification can be enabled with:
+
+```sh
+AGENTPOOL_SANDBOX_PROVIDER=docker \
+AGENTPOOL_SANDBOX_IMAGE=alpine:3.20 \
+go run ./cmd/agentpool dev
+```
+
 ## Model Providers
 
 AgentPool currently supports these model providers:
@@ -236,6 +244,8 @@ AGENTPOOL_MODEL_NAME
 AGENTPOOL_MODEL_API_KEY
 AGENTPOOL_MODEL_TIMEOUT
 AGENTPOOL_AGENT_MAX_TURNS
+AGENTPOOL_SANDBOX_PROVIDER
+AGENTPOOL_SANDBOX_IMAGE
 ```
 
 Local Ollama example:
@@ -314,7 +324,7 @@ The agent protocol accepts only `tool_call` and `final` JSON actions. Unknown JS
 
 When uploaded files are present, the agent can discover them with `list_files` and read selected text files with `read_file`. File contents are not injected into the initial prompt by default.
 
-The `run_shell` tool is sandbox-backed and is advertised only when a run has workspace context and a command-capable sandbox. In the default runtime there is no command-capable sandbox, so `run_shell` is not available.
+The `run_shell` tool is sandbox-backed and is advertised only when a run has workspace context and a command-capable sandbox. In the default runtime the sandbox provider is `noop`, so `run_shell` is not available.
 
 Tool calls use this provider-neutral shape when a tool is available:
 
@@ -345,7 +355,33 @@ Example prompt:
 Summarize the task and explain the next implementation step.
 ```
 
-There is still no concrete shell execution backend, write access, Docker execution, Git mutation, network fetch, package install, or arbitrary host command execution.
+There is still no write access, Git mutation, network fetch, package install, or arbitrary host command execution. Shell commands are available only when the dev Docker sandbox is explicitly enabled.
+
+## Dev Docker Sandbox
+
+Docker-backed shell execution is available only for local sandbox verification. It is opt-in:
+
+```sh
+AGENTPOOL_SANDBOX_PROVIDER=docker \
+AGENTPOOL_SANDBOX_IMAGE=alpine:3.20 \
+go run ./cmd/agentpool dev
+```
+
+Submit an uploaded-file run that asks the agent to use both file tools and shell when available:
+
+```sh
+curl -sS -X POST http://localhost:8080/v1/runs \
+  -F 'prompt=List files, read README.md, then run pwd and ls -la if run_shell is available.' \
+  -F 'files=@README.md'
+```
+
+With the default `noop` sandbox, `list_files` and `read_file` are available when files are uploaded, but `run_shell` is unavailable. With `AGENTPOOL_SANDBOX_PROVIDER=docker`, the worker prepares a command-capable sandbox for uploaded-file runs, and `run_shell` runs through:
+
+```text
+docker run --rm --network none -v <workspace>:/workspace:ro -w /workspace <image> /bin/sh -lc <command>
+```
+
+Docker must be installed and running. The uploaded workspace is mounted read-only at `/workspace`, networking is disabled with `--network none`, and no secrets are passed into the container. This provider is dev-only and does not provide write-back, persistent storage, or production sandbox hardening.
 
 ## Run Lifecycle
 

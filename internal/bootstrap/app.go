@@ -21,6 +21,7 @@ import (
 	openaicompatible "github.com/po-sen/agentpool/internal/infrastructure/llm/openai_compatible"
 	"github.com/po-sen/agentpool/internal/infrastructure/persistence/memory"
 	"github.com/po-sen/agentpool/internal/infrastructure/policy/allowall"
+	sandboxdocker "github.com/po-sen/agentpool/internal/infrastructure/sandbox/docker"
 	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
 	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
@@ -126,7 +127,10 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		return a.worker, nil
 	}
 
-	sandboxProvider := sandboxnoop.NewProvider()
+	sandboxProvider, err := newSandboxRuntime(a.config.Sandbox)
+	if err != nil {
+		return nil, err
+	}
 	modelClient, err := newModelClient(a.config.LLM)
 	if err != nil {
 		return nil, err
@@ -156,11 +160,28 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		Events:     a.eventPublisher,
 		Agent:      agentRunner,
 		Workspace:  workspaceProvider,
+		Sandbox:    sandboxProvider,
 		Policy:     policyDecision,
 		Secrets:    secretBroker,
 	})
 
 	return a.worker, nil
+}
+
+type sandboxRuntime interface {
+	outbound.SandboxProvider
+	outbound.SandboxCommandRunner
+}
+
+func newSandboxRuntime(cfg config.SandboxConfig) (sandboxRuntime, error) {
+	switch cfg.Provider {
+	case config.SandboxProviderNoop:
+		return sandboxnoop.NewProvider(), nil
+	case config.SandboxProviderDocker:
+		return sandboxdocker.NewProvider(sandboxdocker.Config{Image: cfg.Image}), nil
+	default:
+		return nil, fmt.Errorf("unsupported sandbox provider %q", cfg.Provider)
+	}
 }
 
 func newModelClient(cfg config.LLMConfig) (outbound.ModelClient, error) {

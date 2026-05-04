@@ -29,6 +29,7 @@ func TestInternalPackageTopologyIsExplicitlyAllowlisted(t *testing.T) {
 		modulePath + "/internal/infrastructure/llm/openai_compatible": {},
 		modulePath + "/internal/infrastructure/persistence/memory":    {},
 		modulePath + "/internal/infrastructure/policy/allowall":       {},
+		modulePath + "/internal/infrastructure/sandbox/docker":        {},
 		modulePath + "/internal/infrastructure/sandbox/noop":          {},
 		modulePath + "/internal/infrastructure/secret/noop":           {},
 		modulePath + "/internal/infrastructure/tool/composite":        {},

@@ -9,6 +9,7 @@ func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("AGENTPOOL_HTTP_ADDR", "")
 	t.Setenv("AGENTPOOL_AGENT_MAX_TURNS", "")
 	clearModelEnv(t)
+	clearSandboxEnv(t)
 
 	cfg := Load("")
 	if cfg.Version != "dev" {
@@ -28,6 +29,12 @@ func TestLoadUsesDefaults(t *testing.T) {
 	}
 	if cfg.Agent.MaxTurns != 4 {
 		t.Fatalf("Agent.MaxTurns = %d, want 4", cfg.Agent.MaxTurns)
+	}
+	if cfg.Sandbox.Provider != SandboxProviderNoop {
+		t.Fatalf("Sandbox.Provider = %q, want %q", cfg.Sandbox.Provider, SandboxProviderNoop)
+	}
+	if cfg.Sandbox.Image != "alpine:3.20" {
+		t.Fatalf("Sandbox.Image = %q, want alpine:3.20", cfg.Sandbox.Image)
 	}
 }
 
@@ -74,6 +81,19 @@ func TestLoadUsesEnvironmentAgentConfig(t *testing.T) {
 	cfg := Load("dev")
 	if cfg.Agent.MaxTurns != 7 {
 		t.Fatalf("Agent.MaxTurns = %d, want 7", cfg.Agent.MaxTurns)
+	}
+}
+
+func TestLoadUsesEnvironmentSandboxConfig(t *testing.T) {
+	t.Setenv("AGENTPOOL_SANDBOX_PROVIDER", "docker")
+	t.Setenv("AGENTPOOL_SANDBOX_IMAGE", "busybox:1.36")
+
+	cfg := Load("dev")
+	if cfg.Sandbox.Provider != SandboxProviderDocker {
+		t.Fatalf("Sandbox.Provider = %q, want %q", cfg.Sandbox.Provider, SandboxProviderDocker)
+	}
+	if cfg.Sandbox.Image != "busybox:1.36" {
+		t.Fatalf("Sandbox.Image = %q, want busybox:1.36", cfg.Sandbox.Image)
 	}
 }
 
@@ -136,6 +156,17 @@ func clearModelEnv(t *testing.T) {
 		"AGENTPOOL_MODEL_NAME",
 		"AGENTPOOL_MODEL_API_KEY",
 		"AGENTPOOL_MODEL_TIMEOUT",
+	} {
+		t.Setenv(name, "")
+	}
+}
+
+func clearSandboxEnv(t *testing.T) {
+	t.Helper()
+
+	for _, name := range []string{
+		"AGENTPOOL_SANDBOX_PROVIDER",
+		"AGENTPOOL_SANDBOX_IMAGE",
 	} {
 		t.Setenv(name, "")
 	}

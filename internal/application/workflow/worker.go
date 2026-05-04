@@ -13,6 +13,7 @@ import (
 
 const defaultPollInterval = 200 * time.Millisecond
 const workspaceCleanupTimeout = 30 * time.Second
+const sandboxCleanupTimeout = 30 * time.Second
 const publicFailureReason = "run failed"
 
 const (
@@ -36,6 +37,7 @@ type Worker struct {
 	events       outbound.EventPublisher
 	agent        *agent.Runner
 	workspace    outbound.WorkspaceProvider
+	sandbox      outbound.SandboxProvider
 	policy       outbound.PolicyDecisionPort
 	secrets      outbound.SecretBroker
 	clock        func() time.Time
@@ -53,6 +55,7 @@ type WorkerDependencies struct {
 	Events     outbound.EventPublisher
 	Agent      *agent.Runner
 	Workspace  outbound.WorkspaceProvider
+	Sandbox    outbound.SandboxProvider
 	Policy     outbound.PolicyDecisionPort
 	Secrets    outbound.SecretBroker
 }
@@ -83,6 +86,7 @@ func NewWorker(
 		events:       deps.Events,
 		agent:        deps.Agent,
 		workspace:    deps.Workspace,
+		sandbox:      deps.Sandbox,
 		policy:       deps.Policy,
 		secrets:      deps.Secrets,
 		pollInterval: defaultPollInterval,
@@ -144,33 +148,47 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 		return nil
 	}
 
+	return w.processRun(ctx, item)
+}
+
+func (w *Worker) processRun(ctx context.Context, item *run.Run) error {
 	workspace, err := w.prepareRun(ctx, item)
 	if err != nil {
-		if errors.Is(err, errRunStateChanged) {
-			return nil
-		}
-
-		return w.failRun(ctx, item, err)
+		return w.failUnlessStateChanged(ctx, item, err)
 	}
 	defer w.cleanupWorkspace(ctx, workspace)
 
-	result, err := w.startRun(ctx, item, workspace)
+	sandbox, err := w.prepareSandbox(ctx, item, workspace)
 	if err != nil {
-		if errors.Is(err, errRunStateChanged) {
-			return nil
-		}
+		return w.failUnlessStateChanged(ctx, item, err)
+	}
+	defer w.cleanupSandbox(ctx, sandbox)
 
-		return w.failRun(ctx, item, err)
+	result, err := w.startRun(ctx, item, workspace, sandbox)
+	if err != nil {
+		return w.failUnlessStateChanged(ctx, item, err)
 	}
 	if err := w.completeRun(ctx, item, result); err != nil {
-		if errors.Is(err, errRunStateChanged) {
-			return nil
-		}
-
-		return err
+		return ignoreRunStateChanged(err)
 	}
 
 	return nil
+}
+
+func (w *Worker) failUnlessStateChanged(ctx context.Context, item *run.Run, err error) error {
+	if errors.Is(err, errRunStateChanged) {
+		return nil
+	}
+
+	return w.failRun(ctx, item, err)
+}
+
+func ignoreRunStateChanged(err error) error {
+	if errors.Is(err, errRunStateChanged) {
+		return nil
+	}
+
+	return err
 }
 
 func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (outbound.Workspace, error) {
@@ -235,6 +253,7 @@ func (w *Worker) startRun(
 	ctx context.Context,
 	item *run.Run,
 	workspace outbound.Workspace,
+	sandbox outbound.Sandbox,
 ) (agent.RunResult, error) {
 	now := w.clock()
 	expectedStatus := item.Status
@@ -258,9 +277,12 @@ func (w *Worker) startRun(
 	}
 
 	result, err := w.agent.Run(ctx, agent.RunRequest{
-		RunID:   item.ID,
-		Task:    item.Task,
-		Context: outbound.ToolContext{WorkspacePath: workspace.Path},
+		RunID: item.ID,
+		Task:  item.Task,
+		Context: outbound.ToolContext{
+			WorkspacePath: workspace.Path,
+			Sandbox:       sandbox,
+		},
 	})
 
 	if err != nil {
@@ -302,6 +324,42 @@ func (w *Worker) cleanupWorkspace(ctx context.Context, workspace outbound.Worksp
 	defer cancel()
 
 	_ = w.workspace.CleanupWorkspace(cleanupCtx, workspace)
+}
+
+func (w *Worker) prepareSandbox(
+	ctx context.Context,
+	item *run.Run,
+	workspace outbound.Workspace,
+) (outbound.Sandbox, error) {
+	if workspace.Path == "" || !sandboxSupportsCommands(w.sandbox) {
+		return outbound.Sandbox{}, nil
+	}
+
+	return w.sandbox.Prepare(ctx, outbound.SandboxRequest{
+		RunID:         item.ID,
+		Task:          item.Task,
+		WorkspacePath: workspace.Path,
+	})
+}
+
+func (w *Worker) cleanupSandbox(ctx context.Context, sandbox outbound.Sandbox) {
+	if w.sandbox == nil || sandbox.ID == "" {
+		return
+	}
+
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sandboxCleanupTimeout)
+	defer cancel()
+
+	_ = w.sandbox.Cleanup(cleanupCtx, sandbox)
+}
+
+func sandboxSupportsCommands(provider outbound.SandboxProvider) bool {
+	capabilities, ok := provider.(outbound.SandboxCapabilityProvider)
+	if !ok {
+		return false
+	}
+
+	return capabilities.Capabilities().SupportsCommands
 }
 
 func (w *Worker) completeRun(

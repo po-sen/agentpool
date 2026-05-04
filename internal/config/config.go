@@ -9,6 +9,7 @@ import (
 const defaultHTTPAddr = ":8080"
 const defaultModelTimeout = 30 * time.Second
 const defaultAgentMaxTurns = 4
+const defaultSandboxImage = "alpine:3.20"
 
 // ModelProvider identifies the configured model provider.
 type ModelProvider string
@@ -40,12 +41,29 @@ type AgentConfig struct {
 	MaxTurns int
 }
 
+// SandboxProvider identifies the configured sandbox provider.
+type SandboxProvider string
+
+const (
+	// SandboxProviderNoop keeps command execution disabled.
+	SandboxProviderNoop SandboxProvider = "noop"
+	// SandboxProviderDocker uses Docker CLI for local dev command execution.
+	SandboxProviderDocker SandboxProvider = "docker"
+)
+
+// SandboxConfig contains runtime sandbox configuration.
+type SandboxConfig struct {
+	Provider SandboxProvider
+	Image    string
+}
+
 // Config contains runtime configuration.
 type Config struct {
 	HTTPAddr string
 	Version  string
 	LLM      LLMConfig
 	Agent    AgentConfig
+	Sandbox  SandboxConfig
 }
 
 // Load reads runtime configuration from the environment.
@@ -64,6 +82,7 @@ func Load(version string) Config {
 		Version:  version,
 		LLM:      loadLLMConfig(),
 		Agent:    loadAgentConfig(),
+		Sandbox:  loadSandboxConfig(),
 	}
 }
 
@@ -82,6 +101,13 @@ func loadLLMConfig() LLMConfig {
 func loadAgentConfig() AgentConfig {
 	return AgentConfig{
 		MaxTurns: intEnvOrDefault("AGENTPOOL_AGENT_MAX_TURNS", defaultAgentMaxTurns),
+	}
+}
+
+func loadSandboxConfig() SandboxConfig {
+	return SandboxConfig{
+		Provider: SandboxProvider(envOrDefault("AGENTPOOL_SANDBOX_PROVIDER", string(SandboxProviderNoop))),
+		Image:    envOrDefault("AGENTPOOL_SANDBOX_IMAGE", defaultSandboxImage),
 	}
 }
 
