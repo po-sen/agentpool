@@ -25,10 +25,17 @@ type listedPackage struct {
 	XTestImports []string
 }
 
-type importRule struct {
-	name             string
-	packagePrefix    string
-	forbiddenImports []string
+type internalImportRule struct {
+	name                  string
+	importerPrefix        string
+	allowedImportPrefixes []string
+}
+
+type externalImportRule struct {
+	name                             string
+	importerPrefix                   string
+	allowThirdParty                  bool
+	forbiddenStandardLibraryPackages []string
 }
 
 func listPackages(t *testing.T) []listedPackage {
@@ -65,6 +72,31 @@ func listPackages(t *testing.T) []listedPackage {
 
 	if len(packages) == 0 {
 		t.Fatal("go list returned no packages")
+	}
+
+	return packages
+}
+
+func listStandardLibraryPackages(t *testing.T) map[string]struct{} {
+	t.Helper()
+
+	command := exec.Command("go", "list", "std")
+	command.Dir = moduleRoot(t)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("go list std: %v\n%s", err, stderr.String())
+	}
+
+	packages := make(map[string]struct{})
+	for _, packagePath := range strings.Fields(string(output)) {
+		packages[packagePath] = struct{}{}
+	}
+
+	if len(packages) == 0 {
+		t.Fatal("go list std returned no packages")
 	}
 
 	return packages
