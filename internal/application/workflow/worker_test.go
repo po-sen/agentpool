@@ -871,23 +871,29 @@ func assertSteps(t *testing.T, got []run.Step, want []wantStep) {
 		t.Fatalf("len(Steps) = %d, want %d; got %#v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i].Name != want[i].name {
-			t.Fatalf("Steps[%d].Name = %q, want %q", i, got[i].Name, want[i].name)
-		}
-		if got[i].Status != want[i].status {
-			t.Fatalf("Steps[%d].Status = %s, want %s", i, got[i].Status, want[i].status)
-		}
-		if got[i].Message != want[i].message {
-			t.Fatalf("Steps[%d].Message = %q, want %q", i, got[i].Message, want[i].message)
-		}
-		if got[i].StartedAt.IsZero() {
-			t.Fatalf("Steps[%d].StartedAt is zero", i)
-		}
-		if want[i].ended && got[i].EndedAt.IsZero() {
-			t.Fatalf("Steps[%d].EndedAt is zero", i)
-		}
-		if !want[i].ended && !got[i].EndedAt.IsZero() {
-			t.Fatalf("Steps[%d].EndedAt = %v, want zero", i, got[i].EndedAt)
-		}
+		assertStep(t, i, got[i], want[i])
+	}
+}
+
+func assertStep(t *testing.T, index int, got run.Step, want wantStep) {
+	t.Helper()
+
+	if got.Name != want.name {
+		t.Fatalf("Steps[%d].Name = %q, want %q", index, got.Name, want.name)
+	}
+	if got.Status != want.status {
+		t.Fatalf("Steps[%d].Status = %s, want %s", index, got.Status, want.status)
+	}
+	if got.Message != want.message {
+		t.Fatalf("Steps[%d].Message = %q, want %q", index, got.Message, want.message)
+	}
+	if got.StartedAt.IsZero() {
+		t.Fatalf("Steps[%d].StartedAt is zero", index)
+	}
+	if want.ended && got.EndedAt.IsZero() {
+		t.Fatalf("Steps[%d].EndedAt is zero", index)
+	}
+	if !want.ended && !got.EndedAt.IsZero() {
+		t.Fatalf("Steps[%d].EndedAt = %v, want zero", index, got.EndedAt)
 	}
 }

@@ -10,10 +10,14 @@ linters:
     - bodyclose
     - errcheck
     - errorlint
+    - gocognit
     - gosec
     - misspell
     - nilerr
     - revive
+  settings:
+    gocognit:
+      min-complexity: 15
   exclusions:
     generated: strict
     presets:

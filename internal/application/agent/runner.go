@@ -35,6 +35,12 @@ type RunResult struct {
 	ToolCallCount int
 }
 
+type runSession struct {
+	request       RunRequest
+	messages      []outbound.ModelMessage
+	toolCallCount int
+}
+
 // NewRunner creates an application agent runner.
 func NewRunner(model outbound.ModelClient, tools outbound.ToolRunner, options ...RunnerOption) *Runner {
 	runner := &Runner{
@@ -65,72 +71,105 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (RunResult, error)
 		return RunResult{}, errors.New("tool runner is required")
 	}
 
+	session, err := r.newRunSession(ctx, request)
+	if err != nil {
+		return RunResult{}, err
+	}
+
+	for range r.maxTurns {
+		result, done, err := r.runTurn(ctx, session)
+		if err != nil {
+			return RunResult{}, err
+		}
+		if done {
+			return result, nil
+		}
+	}
+
+	return RunResult{}, errors.New("agent reached max turns")
+}
+
+func (r *Runner) newRunSession(ctx context.Context, request RunRequest) (*runSession, error) {
 	tools, err := r.tools.ListTools(ctx, outbound.ToolListRequest{
 		RunID:   request.RunID,
 		Sandbox: request.Sandbox,
 	})
 	if err != nil {
-		return RunResult{}, err
+		return nil, err
 	}
 
-	messages := []outbound.ModelMessage{
-		{Role: "system", Content: buildSystemPrompt(tools)},
-		{Role: "user", Content: request.Task.Prompt},
-	}
-	toolCallCount := 0
+	return &runSession{
+		request: request,
+		messages: []outbound.ModelMessage{
+			{Role: "system", Content: buildSystemPrompt(tools)},
+			{Role: "user", Content: request.Task.Prompt},
+		},
+	}, nil
+}
 
-	for range r.maxTurns {
-		response, err := r.model.Generate(ctx, outbound.ModelRequest{
-			RunID:    request.RunID,
-			Messages: messages,
+func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, bool, error) {
+	response, err := r.model.Generate(ctx, outbound.ModelRequest{
+		RunID:    session.request.RunID,
+		Messages: session.messages,
+	})
+	if err != nil {
+		return RunResult{}, false, err
+	}
+
+	parsed, ok := parseAction(response.Content)
+	if !ok {
+		return RunResult{Summary: response.Content, ToolCallCount: session.toolCallCount}, true, nil
+	}
+
+	return r.handleAction(ctx, session, response.Content, parsed)
+}
+
+func (r *Runner) handleAction(ctx context.Context, session *runSession, content string, parsed action) (RunResult, bool, error) {
+	switch parsed.Type {
+	case actionTypeFinal:
+		return finalResult(parsed.Summary, session.toolCallCount)
+	case actionTypeToolCall:
+		return r.handleToolCall(ctx, session, content, parsed)
+	default:
+		return RunResult{}, false, errors.New("unknown agent action type")
+	}
+}
+
+func finalResult(summary string, toolCallCount int) (RunResult, bool, error) {
+	if strings.TrimSpace(summary) == "" {
+		return RunResult{}, false, errors.New("agent final summary is required")
+	}
+
+	return RunResult{Summary: summary, ToolCallCount: toolCallCount}, true, nil
+}
+
+func (r *Runner) handleToolCall(ctx context.Context, session *runSession, content string, parsed action) (RunResult, bool, error) {
+	session.messages = append(session.messages, outbound.ModelMessage{Role: "assistant", Content: content})
+	if strings.TrimSpace(parsed.Tool) == "" {
+		session.messages = append(session.messages, outbound.ModelMessage{
+			Role:    "user",
+			Content: "Tool error:\nmissing tool name",
 		})
-		if err != nil {
-			return RunResult{}, err
-		}
-
-		parsed, ok := parseAction(response.Content)
-		if !ok {
-			return RunResult{Summary: response.Content, ToolCallCount: toolCallCount}, nil
-		}
-
-		switch parsed.Type {
-		case actionTypeFinal:
-			if strings.TrimSpace(parsed.Summary) == "" {
-				return RunResult{}, errors.New("agent final summary is required")
-			}
-
-			return RunResult{Summary: parsed.Summary, ToolCallCount: toolCallCount}, nil
-		case actionTypeToolCall:
-			messages = append(messages, outbound.ModelMessage{Role: "assistant", Content: response.Content})
-			if strings.TrimSpace(parsed.Tool) == "" {
-				messages = append(messages, outbound.ModelMessage{
-					Role:    "user",
-					Content: "Tool error:\nmissing tool name",
-				})
-				continue
-			}
-
-			result, err := r.tools.RunTool(ctx, outbound.ToolCall{
-				RunID:     request.RunID,
-				Sandbox:   request.Sandbox,
-				Name:      parsed.Tool,
-				Arguments: parsed.Arguments,
-			})
-			if err != nil {
-				return RunResult{}, err
-			}
-			toolCallCount++
-
-			messages = append(messages, outbound.ModelMessage{
-				Role:    "user",
-				Content: toolObservation(parsed.Tool, result),
-			})
-		default:
-			return RunResult{}, errors.New("unknown agent action type")
-		}
+		return RunResult{}, false, nil
 	}
 
-	return RunResult{}, errors.New("agent reached max turns")
+	result, err := r.tools.RunTool(ctx, outbound.ToolCall{
+		RunID:     session.request.RunID,
+		Sandbox:   session.request.Sandbox,
+		Name:      parsed.Tool,
+		Arguments: parsed.Arguments,
+	})
+	if err != nil {
+		return RunResult{}, false, err
+	}
+	session.toolCallCount++
+
+	session.messages = append(session.messages, outbound.ModelMessage{
+		Role:    "user",
+		Content: toolObservation(parsed.Tool, result),
+	})
+
+	return RunResult{}, false, nil
 }
 
 func toolObservation(tool string, result outbound.ToolResult) string {
