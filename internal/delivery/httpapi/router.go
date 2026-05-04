@@ -66,6 +66,9 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		Prompt:        request.Prompt,
 		RepositoryURL: request.RepositoryURL,
 		Branch:        request.Branch,
+		Workspace: inbound.WorkspaceSourceInput{
+			Type: request.Workspace.Type,
+		},
 	})
 	if err != nil {
 		writeApplicationError(w, err)

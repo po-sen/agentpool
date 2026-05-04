@@ -61,13 +61,33 @@ func TestRunnerDispatchesToCorrectRunner(t *testing.T) {
 	}
 }
 
-func TestRunnerRejectsDuplicateToolNames(t *testing.T) {
-	_, err := NewRunner(
+func TestRunnerListToolsRejectsDuplicateToolNames(t *testing.T) {
+	runner, err := NewRunner(
 		fakeToolRunner{name: "echo"},
 		fakeToolRunner{name: "echo"},
 	)
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	_, err = runner.ListTools(context.Background(), outbound.ToolListRequest{})
 	if err == nil {
-		t.Fatal("NewRunner() error = nil, want duplicate error")
+		t.Fatal("ListTools() error = nil, want duplicate error")
+	}
+}
+
+func TestRunnerRunToolRejectsDuplicateToolNames(t *testing.T) {
+	runner, err := NewRunner(
+		fakeToolRunner{name: "echo"},
+		fakeToolRunner{name: "echo"},
+	)
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	_, err = runner.RunTool(context.Background(), outbound.ToolCall{Name: "echo"})
+	if err == nil {
+		t.Fatal("RunTool() error = nil, want duplicate error")
 	}
 }
 
@@ -92,9 +112,41 @@ func TestRunnerReturnsToolErrorForUnknownTool(t *testing.T) {
 func TestRunnerPropagatesListToolsErrorsDuringConstruction(t *testing.T) {
 	errListTools := errors.New("list tools failed")
 
-	_, err := NewRunner(errorToolRunner{err: errListTools})
+	runner, err := NewRunner(errorToolRunner{err: errListTools})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	_, err = runner.ListTools(context.Background(), outbound.ToolListRequest{})
 	if !errors.Is(err, errListTools) {
-		t.Fatalf("NewRunner() error = %v, want %v", err, errListTools)
+		t.Fatalf("ListTools() error = %v, want %v", err, errListTools)
+	}
+}
+
+func TestRunnerUsesRequestContextForDynamicTools(t *testing.T) {
+	runner, err := NewRunner(
+		fakeToolRunner{name: "echo"},
+		dynamicToolRunner{name: "read_file"},
+	)
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{})
+	if err != nil {
+		t.Fatalf("ListTools() without workspace error = %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "echo" {
+		t.Fatalf("tools without workspace = %#v, want echo only", tools)
+	}
+
+	tools, err = runner.ListTools(context.Background(), outbound.ToolListRequest{
+		Sandbox: outbound.Sandbox{WorkspacePath: "/tmp/repo"},
+	})
+	if err != nil {
+		t.Fatalf("ListTools() with workspace error = %v", err)
+	}
+	if len(tools) != 2 || tools[0].Name != "echo" || tools[1].Name != "read_file" {
+		t.Fatalf("tools with workspace = %#v, want echo and read_file", tools)
 	}
 }
 
@@ -136,4 +188,20 @@ func (r errorToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([
 
 func (r errorToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound.ToolResult, error) {
 	return outbound.ToolResult{}, nil
+}
+
+type dynamicToolRunner struct {
+	name string
+}
+
+func (r dynamicToolRunner) ListTools(_ context.Context, request outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
+	if request.Sandbox.WorkspacePath == "" {
+		return nil, nil
+	}
+
+	return []outbound.ToolDefinition{{Name: r.name, Description: "dynamic tool"}}, nil
+}
+
+func (r dynamicToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound.ToolResult, error) {
+	return outbound.ToolResult{Content: r.name}, nil
 }

@@ -102,7 +102,7 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 		now,
 		fakeSandboxProvider{},
 		&toolCallingModelClient{},
-		fakeGitProvider{},
+		fakeWorkspaceProvider{},
 	)
 
 	if err := worker.ProcessOne(ctx); err != nil {
@@ -132,14 +132,19 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 	})
 }
 
-func TestWorkerPassesGitCheckoutPathToAgentTools(t *testing.T) {
+func TestWorkerPassesConfiguredWorkspacePathToAgentTools(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	queue := &fakeRunQueue{}
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "inspect workspace"}, now)
+	item, err := run.New("run_test", run.TaskSpec{
+		Prompt: "inspect workspace",
+		Workspace: run.WorkspaceSource{
+			Type: run.WorkspaceSourceConfigured,
+		},
+	}, now)
 	if err != nil {
 		t.Fatalf("new run: %v", err)
 	}
@@ -159,7 +164,7 @@ func TestWorkerPassesGitCheckoutPathToAgentTools(t *testing.T) {
 			Events:     publisher,
 			Sandbox:    fakeSandboxProvider{},
 			Agent:      applicationagent.NewRunner(&toolCallingModelClient{}, tools),
-			Git:        fakeGitProvider{},
+			Workspace:  fakeWorkspaceProvider{},
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
@@ -174,6 +179,47 @@ func TestWorkerPassesGitCheckoutPathToAgentTools(t *testing.T) {
 	}
 	if tools.calls[0].Sandbox.WorkspacePath != "/tmp/repo" {
 		t.Fatalf("workspace path = %q, want /tmp/repo", tools.calls[0].Sandbox.WorkspacePath)
+	}
+}
+
+func TestWorkerSkipsWorkspaceResolutionForNoWorkspace(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	if err := queue.Enqueue(ctx, item.ID); err != nil {
+		t.Fatalf("enqueue run: %v", err)
+	}
+
+	worker := newWorkerWithPorts(
+		queue,
+		repo,
+		publisher,
+		now,
+		fakeSandboxProvider{},
+		fakeModelClient{},
+		failingWorkspaceProvider{},
+	)
+
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored, err := repo.FindByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("find run: %v", err)
+	}
+	if stored.Status != run.StatusCompleted {
+		t.Fatalf("stored status = %s, want completed", stored.Status)
 	}
 }
 
@@ -242,7 +288,12 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
+	item, err := run.New("run_test", run.TaskSpec{
+		Prompt: "do work",
+		Workspace: run.WorkspaceSource{
+			Type: run.WorkspaceSourceConfigured,
+		},
+	}, now)
 	if err != nil {
 		t.Fatalf("new run: %v", err)
 	}
@@ -260,7 +311,7 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 		now,
 		fakeSandboxProvider{},
 		failingModelClient{},
-		fakeGitProvider{},
+		fakeWorkspaceProvider{},
 	)
 
 	if err := worker.ProcessOne(ctx); err != nil {
@@ -309,7 +360,12 @@ func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
 
-	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
+	item, err := run.New("run_test", run.TaskSpec{
+		Prompt: "do work",
+		Workspace: run.WorkspaceSource{
+			Type: run.WorkspaceSourceConfigured,
+		},
+	}, now)
 	if err != nil {
 		t.Fatalf("new run: %v", err)
 	}
@@ -327,7 +383,7 @@ func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
 		now,
 		fakeSandboxProvider{},
 		fakeModelClient{},
-		failingGitProvider{},
+		failingWorkspaceProvider{},
 	)
 
 	if err := worker.ProcessOne(ctx); err != nil {
@@ -387,7 +443,7 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationDuringExecution(t *testing.
 			id:   item.ID,
 			now:  now.Add(time.Second),
 		},
-		fakeGitProvider{},
+		fakeWorkspaceProvider{},
 	)
 
 	if err := worker.ProcessOne(ctx); err != nil {
@@ -446,7 +502,7 @@ func TestWorkerProcessOneDoesNotLeavePrepareStepRunningWhenCancelledDuringPrepar
 			Events:     publisher,
 			Sandbox:    fakeSandboxProvider{},
 			Agent:      applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
-			Git:        fakeGitProvider{},
+			Workspace:  fakeWorkspaceProvider{},
 			Policy: cancellingPolicyDecision{
 				repo: repo,
 				id:   item.ID,
@@ -511,7 +567,7 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationWhenExecutionFails(t *testi
 			id:   item.ID,
 			now:  now.Add(time.Second),
 		},
-		fakeGitProvider{},
+		fakeWorkspaceProvider{},
 	)
 
 	if err := worker.ProcessOne(ctx); err != nil {
@@ -572,7 +628,7 @@ func TestWorkerProcessOneCleansSandboxWithNonCancelledContext(t *testing.T) {
 		now,
 		sandbox,
 		cancellingContextModelClient{cancel: cancel},
-		fakeGitProvider{},
+		fakeWorkspaceProvider{},
 	)
 
 	if err := worker.ProcessOne(ctx); err != nil {
@@ -599,7 +655,7 @@ func newWorker(
 		now,
 		fakeSandboxProvider{},
 		fakeModelClient{},
-		fakeGitProvider{},
+		fakeWorkspaceProvider{},
 	)
 }
 
@@ -610,7 +666,7 @@ func newWorkerWithPorts(
 	now time.Time,
 	sandbox outbound.SandboxProvider,
 	model outbound.ModelClient,
-	git outbound.GitProvider,
+	workspace outbound.WorkspaceProvider,
 ) *Worker {
 	return NewWorker(
 		WorkerDependencies{
@@ -620,7 +676,7 @@ func newWorkerWithPorts(
 			Events:     publisher,
 			Sandbox:    sandbox,
 			Agent:      applicationagent.NewRunner(model, fakeToolRunner{}),
-			Git:        git,
+			Workspace:  workspace,
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
@@ -795,18 +851,22 @@ func (c cancellingContextModelClient) Generate(context.Context, outbound.ModelRe
 	return outbound.ModelResponse{Content: "done"}, nil
 }
 
-type fakeGitProvider struct{}
+type fakeWorkspaceProvider struct{}
 
-func (p fakeGitProvider) Fetch(context.Context, outbound.GitFetchRequest) (outbound.GitCheckout, error) {
-	return outbound.GitCheckout{Path: "/tmp/repo"}, nil
+func (p fakeWorkspaceProvider) ResolveWorkspace(_ context.Context, request outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
+	if request.Source.EffectiveType() != run.WorkspaceSourceConfigured {
+		return outbound.Workspace{}, nil
+	}
+
+	return outbound.Workspace{Path: "/tmp/repo"}, nil
 }
 
-var errGitFetchFailed = errors.New("git fetch failed")
+var errWorkspaceResolveFailed = errors.New("workspace resolve failed")
 
-type failingGitProvider struct{}
+type failingWorkspaceProvider struct{}
 
-func (p failingGitProvider) Fetch(context.Context, outbound.GitFetchRequest) (outbound.GitCheckout, error) {
-	return outbound.GitCheckout{}, errGitFetchFailed
+func (p failingWorkspaceProvider) ResolveWorkspace(context.Context, outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
+	return outbound.Workspace{}, errWorkspaceResolveFailed
 }
 
 type fakePolicyDecision struct{}

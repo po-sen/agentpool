@@ -33,6 +33,9 @@ func toRunView(item *run.Run) inbound.RunView {
 			Prompt:        item.Task.Prompt,
 			RepositoryURL: item.Task.RepositoryURL,
 			Branch:        item.Task.Branch,
+			Workspace: inbound.WorkspaceSourceView{
+				Type: string(item.Task.Workspace.EffectiveType()),
+			},
 		},
 		Result: inbound.RunResultView{
 			Summary: item.ResultSummary,

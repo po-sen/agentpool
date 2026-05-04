@@ -35,6 +35,7 @@ func TestInternalPackageTopologyIsExplicitlyAllowlisted(t *testing.T) {
 		modulePath + "/internal/infrastructure/tool/builtin":          {},
 		modulePath + "/internal/infrastructure/tool/composite":        {},
 		modulePath + "/internal/infrastructure/tool/workspace":        {},
+		modulePath + "/internal/infrastructure/workspace/local":       {},
 		modulePath + "/internal/runtime/httpserver":                   {},
 		modulePath + "/internal/runtime/logger":                       {},
 		modulePath + "/internal/test":                                 {},

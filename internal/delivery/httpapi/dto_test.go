@@ -19,6 +19,7 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 			Prompt:        "do work",
 			RepositoryURL: "https://example.com/repo.git",
 			Branch:        "main",
+			Workspace:     inbound.WorkspaceSourceView{Type: "configured"},
 		},
 		Result: inbound.RunResultView{
 			Summary: "model output",
@@ -44,6 +45,9 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	}
 	if response.Task.RepositoryURL != view.Task.RepositoryURL {
 		t.Fatalf("repository URL = %s, want %s", response.Task.RepositoryURL, view.Task.RepositoryURL)
+	}
+	if response.Task.Workspace == nil || response.Task.Workspace.Type != "configured" {
+		t.Fatalf("Workspace = %#v, want configured", response.Task.Workspace)
 	}
 	if response.Result == nil || response.Result.Summary != view.Result.Summary {
 		t.Fatalf("Result = %#v, want summary %q", response.Result, view.Result.Summary)
@@ -210,5 +214,49 @@ func TestRunResponseJSONOmitsEmptyResultAndFailureReason(t *testing.T) {
 	}
 	if strings.Contains(got, `"failure_reason"`) {
 		t.Fatalf("response contains empty failure reason: %s", got)
+	}
+}
+
+func TestRunResponseJSONOmitsNoneWorkspace(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:     "run_test",
+		Status: "queued",
+		Task: inbound.TaskView{
+			Prompt:    "do work",
+			Workspace: inbound.WorkspaceSourceView{Type: "none"},
+		},
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if strings.Contains(got, `"workspace"`) {
+		t.Fatalf("response contains none workspace: %s", got)
+	}
+}
+
+func TestRunResponseJSONIncludesConfiguredWorkspace(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:     "run_test",
+		Status: "queued",
+		Task: inbound.TaskView{
+			Prompt:    "do work",
+			Workspace: inbound.WorkspaceSourceView{Type: "configured"},
+		},
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"workspace":{"type":"configured"}`) {
+		t.Fatalf("response does not contain configured workspace: %s", got)
 	}
 }

@@ -36,7 +36,7 @@ type Worker struct {
 	events       outbound.EventPublisher
 	sandbox      outbound.SandboxProvider
 	agent        *agent.Runner
-	git          outbound.GitProvider
+	workspace    outbound.WorkspaceProvider
 	policy       outbound.PolicyDecisionPort
 	secrets      outbound.SecretBroker
 	clock        func() time.Time
@@ -54,7 +54,7 @@ type WorkerDependencies struct {
 	Events     outbound.EventPublisher
 	Sandbox    outbound.SandboxProvider
 	Agent      *agent.Runner
-	Git        outbound.GitProvider
+	Workspace  outbound.WorkspaceProvider
 	Policy     outbound.PolicyDecisionPort
 	Secrets    outbound.SecretBroker
 }
@@ -85,7 +85,7 @@ func NewWorker(
 		events:       deps.Events,
 		sandbox:      deps.Sandbox,
 		agent:        deps.Agent,
-		git:          deps.Git,
+		workspace:    deps.Workspace,
 		policy:       deps.Policy,
 		secrets:      deps.Secrets,
 		pollInterval: defaultPollInterval,
@@ -211,12 +211,17 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (string, error) 
 		return "", err
 	}
 
-	checkout, err := w.git.Fetch(ctx, outbound.GitFetchRequest{
-		RepositoryURL: item.Task.RepositoryURL,
-		Branch:        item.Task.Branch,
-	})
-	if err != nil {
-		return "", err
+	workspacePath := ""
+	if item.Task.Workspace.EffectiveType() == run.WorkspaceSourceConfigured {
+		workspace, err := w.workspace.ResolveWorkspace(ctx, outbound.WorkspaceResolveRequest{
+			RunID:  item.ID,
+			Task:   item.Task,
+			Source: item.Task.Workspace,
+		})
+		if err != nil {
+			return "", err
+		}
+		workspacePath = workspace.Path
 	}
 
 	now = w.clock()
@@ -228,7 +233,7 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (string, error) 
 		return "", err
 	}
 
-	return checkout.Path, nil
+	return workspacePath, nil
 }
 
 func (w *Worker) startRun(ctx context.Context, item *run.Run, workspacePath string) (agent.RunResult, error) {

@@ -27,6 +27,12 @@ type TaskView struct {
 	Prompt        string
 	RepositoryURL string
 	Branch        string
+	Workspace     WorkspaceSourceView
+}
+
+// WorkspaceSourceView is the application-level representation of run workspace intent.
+type WorkspaceSourceView struct {
+	Type string
 }
 
 // StepView is the application-level representation of a run step.

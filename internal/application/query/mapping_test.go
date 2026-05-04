@@ -14,6 +14,9 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 		Prompt:        "do work",
 		RepositoryURL: "https://example.com/repo.git",
 		Branch:        "main",
+		Workspace: run.WorkspaceSource{
+			Type: run.WorkspaceSourceConfigured,
+		},
 	}, time.Unix(100, 0).UTC())
 	if err != nil {
 		t.Fatalf("new run: %v", err)
@@ -38,6 +41,9 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	}
 	if view.Task.RepositoryURL != item.Task.RepositoryURL {
 		t.Fatalf("RepositoryURL = %s, want %s", view.Task.RepositoryURL, item.Task.RepositoryURL)
+	}
+	if view.Task.Workspace.Type != string(run.WorkspaceSourceConfigured) {
+		t.Fatalf("Workspace.Type = %s, want configured", view.Task.Workspace.Type)
 	}
 	if view.Result.Summary != item.ResultSummary {
 		t.Fatalf("Result.Summary = %q, want %q", view.Result.Summary, item.ResultSummary)

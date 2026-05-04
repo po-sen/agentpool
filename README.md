@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol, builtin `echo`, read-only workspace inspection tools, and an optional local workspace provider for dev runs; shell, writes, real git clone, and real sandboxed execution are not implemented yet.
+- Agent loop v1 supports a minimal JSON action protocol, builtin `echo`, run-requested read-only workspace inspection tools, and an optional configured local workspace source for dev runs; shell, writes, real git clone, and real sandboxed execution are not implemented yet.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -220,7 +220,7 @@ Configure a local workspace for read-only workspace tools with:
 AGENTPOOL_WORKSPACE_PATH="$(pwd)" go run ./cmd/agentpool dev
 ```
 
-`AGENTPOOL_WORKSPACE_PATH` must point to an existing local directory. It is used as the workspace root for `list_files` and `read_file`. AgentPool resolves symlinks in the configured root, but this is not real git clone behavior yet.
+`AGENTPOOL_WORKSPACE_PATH` must point to an existing local directory when a run requests the configured workspace source. Setting it does not force every run to use workspace tools.
 
 ## Model Providers
 
@@ -297,17 +297,39 @@ AGENTPOOL_MODEL_NAME=qwen2.5-coder:7b \
 go run ./cmd/agentpool dev
 ```
 
-Then submit a run that asks the agent to inspect the workspace:
+Then submit a run that explicitly requests the configured workspace:
 
 ```sh
 curl -sS -X POST http://localhost:8080/v1/runs \
   -H 'Content-Type: application/json' \
   -d '{
-    "prompt": "Use tools to list files in the workspace root, then read README.md if it exists, then summarize what this project does."
+    "prompt": "Use tools to list files in the workspace root, then read README.md if it exists, then summarize what this project does.",
+    "workspace": {
+      "type": "configured"
+    }
   }'
 ```
 
-The local workspace provider returns the configured directory as `GitCheckout.Path`; the worker copies that path into `Sandbox.WorkspacePath`, and the read-only workspace tools use it as their root. Tools cannot escape the workspace. `read_file` only supports UTF-8 text files and size-limited content. This is not a git clone provider yet, and it does not run git commands or mutate files.
+Without a workspace request, workspace tools are not advertised to the model:
+
+```json
+{
+  "prompt": "Explain DDD repository"
+}
+```
+
+The explicit no-workspace form is also accepted:
+
+```json
+{
+  "prompt": "Explain DDD repository",
+  "workspace": {
+    "type": "none"
+  }
+}
+```
+
+The local workspace provider resolves the configured directory only for runs that request `workspace.type=configured`; the worker copies that path into `Sandbox.WorkspacePath`, and the read-only workspace tools use it as their root. Tools cannot escape the workspace. `read_file` only supports UTF-8 text files and size-limited content. This is not a git clone provider yet, and it does not run git commands or mutate files. Future workspace source types may include snapshot, git, or mounted workspaces.
 
 ## Tools
 
@@ -318,8 +340,8 @@ The agent protocol accepts only `tool_call` and `final` JSON actions. Unknown JS
 Available tools:
 
 - `echo`: returns the provided `text` argument and exists to validate tool plumbing.
-- `list_files`: lists files and directories under the run workspace.
-- `read_file`: reads UTF-8 text files under the run workspace.
+- `list_files`: lists files and directories under the run workspace. Only available when the run requested a workspace.
+- `read_file`: reads UTF-8 text files under the run workspace. Only available when the run requested a workspace.
 
 Example `echo` call:
 
@@ -366,7 +388,7 @@ Final answers use:
 }
 ```
 
-Workspace tools are read-only. `read_file` is text-only, rejects files larger than 64 KiB by default, rejects path traversal and absolute paths, and rejects symlink escapes outside the workspace. If no workspace path is configured or prepared, workspace tools return a tool error.
+Workspace tools are read-only and dynamically advertised. Runs without workspace access do not expose `list_files` or `read_file` to the model. `read_file` is text-only, rejects files larger than 64 KiB by default, rejects path traversal and absolute paths, and rejects symlink escapes outside the workspace. If a workspace tool is called without a workspace path, it returns a tool error.
 
 Example prompt:
 

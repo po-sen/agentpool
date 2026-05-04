@@ -14,10 +14,24 @@ func TestRunnerImplementsToolRunner(_ *testing.T) {
 	var _ outbound.ToolRunner = NewRunner(Config{})
 }
 
-func TestRunnerListsWorkspaceTools(t *testing.T) {
+func TestRunnerListToolsReturnsEmptyWithoutWorkspacePath(t *testing.T) {
 	runner := NewRunner(Config{})
 
 	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("len(tools) = %d, want 0", len(tools))
+	}
+}
+
+func TestRunnerListToolsReturnsWorkspaceToolsWithWorkspacePath(t *testing.T) {
+	runner := NewRunner(Config{})
+
+	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{
+		Sandbox: outbound.Sandbox{WorkspacePath: t.TempDir()},
+	})
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}

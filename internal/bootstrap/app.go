@@ -13,8 +13,6 @@ import (
 	"github.com/po-sen/agentpool/internal/config"
 	"github.com/po-sen/agentpool/internal/delivery/httpapi"
 	eventnoop "github.com/po-sen/agentpool/internal/infrastructure/event/noop"
-	gitlocal "github.com/po-sen/agentpool/internal/infrastructure/git/local"
-	gitnoop "github.com/po-sen/agentpool/internal/infrastructure/git/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/id/crypto"
 	"github.com/po-sen/agentpool/internal/infrastructure/llm/anthropic"
 	"github.com/po-sen/agentpool/internal/infrastructure/llm/gemini"
@@ -28,6 +26,7 @@ import (
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/builtin"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/workspace"
+	workspacelocal "github.com/po-sen/agentpool/internal/infrastructure/workspace/local"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
 )
@@ -143,7 +142,7 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		toolRunner,
 		applicationagent.WithMaxTurns(a.config.Agent.MaxTurns),
 	)
-	gitProvider, err := newGitProvider(a.config.Workspace)
+	workspaceProvider, err := newWorkspaceProvider(a.config.Workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +156,7 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		Events:     a.eventPublisher,
 		Sandbox:    sandboxProvider,
 		Agent:      agentRunner,
-		Git:        gitProvider,
+		Workspace:  workspaceProvider,
 		Policy:     policyDecision,
 		Secrets:    secretBroker,
 	})
@@ -165,12 +164,8 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	return a.worker, nil
 }
 
-func newGitProvider(cfg config.WorkspaceConfig) (outbound.GitProvider, error) {
-	if cfg.Path == "" {
-		return gitnoop.NewProvider(), nil
-	}
-
-	return gitlocal.NewProvider(gitlocal.Config{WorkspacePath: cfg.Path})
+func newWorkspaceProvider(cfg config.WorkspaceConfig) (outbound.WorkspaceProvider, error) {
+	return workspacelocal.NewProvider(workspacelocal.Config{ConfiguredPath: cfg.Path})
 }
 
 func newModelClient(cfg config.LLMConfig) (outbound.ModelClient, error) {

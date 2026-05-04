@@ -13,7 +13,10 @@ func TestRunUseCaseContractsAcceptApplicationDTOs(t *testing.T) {
 	var cancel CancelRunUseCase = fakeCancelRunUseCase{}
 
 	ctx := context.Background()
-	if _, err := create.CreateRun(ctx, CreateRunCommand{Prompt: "do work"}); err != nil {
+	if _, err := create.CreateRun(ctx, CreateRunCommand{
+		Prompt:    "do work",
+		Workspace: WorkspaceSourceInput{Type: "configured"},
+	}); err != nil {
 		t.Fatalf("CreateRun() error = %v", err)
 	}
 	if _, err := get.GetRun(ctx, GetRunQuery{RunID: "run_test"}); err != nil {

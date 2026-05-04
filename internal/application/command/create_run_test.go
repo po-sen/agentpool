@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -47,6 +48,9 @@ func TestCreateRunCreatesQueuedRun(t *testing.T) {
 	if stored.Status != run.StatusQueued {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusQueued)
 	}
+	if stored.Task.Workspace.EffectiveType() != run.WorkspaceSourceNone {
+		t.Fatalf("stored workspace = %q, want none", stored.Task.Workspace.EffectiveType())
+	}
 
 	queuedID, err := queue.Dequeue(ctx)
 	if err != nil {
@@ -57,6 +61,59 @@ func TestCreateRunCreatesQueuedRun(t *testing.T) {
 	}
 
 	assertEvent(t, publisher.events, outbound.EventRunCreated, run.RunID(created.ID))
+}
+
+func TestCreateRunStoresConfiguredWorkspace(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	handler := NewCreateRunHandler(
+		repo,
+		queue,
+		publisher,
+		fixedIDGenerator{id: "run_test"},
+		WithCreateRunClock(func() time.Time { return now }),
+	)
+
+	created, err := handler.CreateRun(ctx, inbound.CreateRunCommand{
+		Prompt:    "do work",
+		Workspace: inbound.WorkspaceSourceInput{Type: string(run.WorkspaceSourceConfigured)},
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	stored, err := repo.FindByID(ctx, run.RunID(created.ID))
+	if err != nil {
+		t.Fatalf("find stored run: %v", err)
+	}
+	if stored.Task.Workspace.Type != run.WorkspaceSourceConfigured {
+		t.Fatalf("stored workspace = %q, want configured", stored.Task.Workspace.Type)
+	}
+	if created.Task.Workspace.Type != string(run.WorkspaceSourceConfigured) {
+		t.Fatalf("view workspace = %q, want configured", created.Task.Workspace.Type)
+	}
+}
+
+func TestCreateRunRejectsUnknownWorkspace(t *testing.T) {
+	ctx := context.Background()
+	handler := NewCreateRunHandler(
+		newFakeRunRepository(),
+		&fakeRunQueue{},
+		&recordingPublisher{},
+		fixedIDGenerator{id: "run_test"},
+	)
+
+	_, err := handler.CreateRun(ctx, inbound.CreateRunCommand{
+		Prompt:    "do work",
+		Workspace: inbound.WorkspaceSourceInput{Type: "snapshot"},
+	})
+	if !errors.Is(err, inbound.ErrInvalidInput) {
+		t.Fatalf("CreateRun() error = %v, want invalid input", err)
+	}
 }
 
 type fixedIDGenerator struct {

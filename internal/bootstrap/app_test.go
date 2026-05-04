@@ -77,7 +77,7 @@ func TestRunWorkerReturnsErrorForInvalidModelProvider(t *testing.T) {
 	}
 }
 
-func TestRunWorkerReturnsErrorForInvalidWorkspacePath(t *testing.T) {
+func TestRunWorkerDoesNotValidateUnusedWorkspacePath(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
 	t.Setenv("AGENTPOOL_WORKSPACE_PATH", filepath.Join(t.TempDir(), "missing"))
 
@@ -86,22 +86,10 @@ func TestRunWorkerReturnsErrorForInvalidWorkspacePath(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	if err := app.RunWorker(context.Background()); err == nil {
-		t.Fatal("RunWorker() error = nil, want error")
-	}
-}
-
-func TestRunDevReturnsErrorForInvalidWorkspacePath(t *testing.T) {
-	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
-	t.Setenv("AGENTPOOL_WORKSPACE_PATH", filepath.Join(t.TempDir(), "missing"))
-
-	app, err := New("test-version", io.Discard)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	if err := app.RunDev(context.Background()); err == nil {
-		t.Fatal("RunDev() error = nil, want error")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := app.RunWorker(ctx); err != nil {
+		t.Fatalf("RunWorker() error = %v", err)
 	}
 }
 

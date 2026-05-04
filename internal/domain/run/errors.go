@@ -11,6 +11,9 @@ var ErrEmptyPrompt = errors.New("task prompt is required")
 // ErrPromptTooLong is returned when the requested prompt exceeds the limit.
 var ErrPromptTooLong = errors.New("task prompt is too long")
 
+// ErrUnknownWorkspaceSource is returned when a task requests an unsupported workspace source.
+var ErrUnknownWorkspaceSource = errors.New("unknown workspace source")
+
 // ErrInvalidTransition is returned when a lifecycle transition is not allowed.
 var ErrInvalidTransition = errors.New("invalid run status transition")
 

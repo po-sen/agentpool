@@ -7,10 +7,15 @@ import (
 )
 
 type createRunRequest struct {
-	ProjectID     string `json:"project_id,omitempty"`
-	Prompt        string `json:"prompt"`
-	RepositoryURL string `json:"repository_url,omitempty"`
-	Branch        string `json:"branch,omitempty"`
+	ProjectID     string           `json:"project_id,omitempty"`
+	Prompt        string           `json:"prompt"`
+	RepositoryURL string           `json:"repository_url,omitempty"`
+	Branch        string           `json:"branch,omitempty"`
+	Workspace     workspaceRequest `json:"workspace,omitempty"`
+}
+
+type workspaceRequest struct {
+	Type string `json:"type,omitempty"`
 }
 
 type runResponse struct {
@@ -29,10 +34,15 @@ type runResultResponse struct {
 }
 
 type taskResponse struct {
-	ProjectID     string `json:"project_id,omitempty"`
-	Prompt        string `json:"prompt"`
-	RepositoryURL string `json:"repository_url,omitempty"`
-	Branch        string `json:"branch,omitempty"`
+	ProjectID     string             `json:"project_id,omitempty"`
+	Prompt        string             `json:"prompt"`
+	RepositoryURL string             `json:"repository_url,omitempty"`
+	Branch        string             `json:"branch,omitempty"`
+	Workspace     *workspaceResponse `json:"workspace,omitempty"`
+}
+
+type workspaceResponse struct {
+	Type string `json:"type,omitempty"`
 }
 
 type stepResponse struct {
@@ -75,6 +85,9 @@ func toRunResponse(item inbound.RunView) runResponse {
 	}
 	if item.Result.Summary != "" {
 		response.Result = &runResultResponse{Summary: item.Result.Summary}
+	}
+	if item.Task.Workspace.Type == "configured" {
+		response.Task.Workspace = &workspaceResponse{Type: item.Task.Workspace.Type}
 	}
 
 	return response

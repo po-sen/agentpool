@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,101 @@ import (
 
 	"github.com/po-sen/agentpool/internal/application/port/inbound"
 )
+
+var errCreateRunInvalid = errors.New("invalid create run")
+
+func TestCreateRunWithoutWorkspace(t *testing.T) {
+	create := &createRunStub{
+		view: inbound.RunView{
+			ID:     "run_test",
+			Status: "queued",
+			Task:   inbound.TaskView{Prompt: "do work"},
+			Steps:  []inbound.StepView{},
+		},
+	}
+	router := NewRouter(Dependencies{
+		CreateRun: create,
+		ListRuns:  &listRunsStub{},
+		GetRun:    &getRunStub{},
+		CancelRun: &cancelRunStub{},
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/runs", strings.NewReader(`{"prompt":"do work"}`))
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusCreated)
+	}
+	if create.command.Workspace.Type != "" {
+		t.Fatalf("workspace type = %q, want empty", create.command.Workspace.Type)
+	}
+}
+
+func TestCreateRunWithConfiguredWorkspace(t *testing.T) {
+	create := &createRunStub{
+		view: inbound.RunView{
+			ID:     "run_test",
+			Status: "queued",
+			Task: inbound.TaskView{
+				Prompt:    "do work",
+				Workspace: inbound.WorkspaceSourceView{Type: "configured"},
+			},
+			Steps: []inbound.StepView{},
+		},
+	}
+	router := NewRouter(Dependencies{
+		CreateRun: create,
+		ListRuns:  &listRunsStub{},
+		GetRun:    &getRunStub{},
+		CancelRun: &cancelRunStub{},
+	})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/runs",
+		strings.NewReader(`{"prompt":"do work","workspace":{"type":"configured"}}`),
+	)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusCreated)
+	}
+	if create.command.Workspace.Type != "configured" {
+		t.Fatalf("workspace type = %q, want configured", create.command.Workspace.Type)
+	}
+	if !strings.Contains(response.Body.String(), `"workspace":{"type":"configured"}`) {
+		t.Fatalf("response does not contain workspace: %s", response.Body.String())
+	}
+}
+
+func TestCreateRunUnknownWorkspaceReturnsBadRequest(t *testing.T) {
+	create := &createRunStub{
+		err: inbound.NewInvalidInputError(errCreateRunInvalid),
+	}
+	router := NewRouter(Dependencies{
+		CreateRun: create,
+		ListRuns:  &listRunsStub{},
+		GetRun:    &getRunStub{},
+		CancelRun: &cancelRunStub{},
+	})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/runs",
+		strings.NewReader(`{"prompt":"do work","workspace":{"type":"snapshot"}}`),
+	)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
 
 func TestCreateRejectsTrailingJSON(t *testing.T) {
 	create := &createRunStub{}
@@ -59,13 +155,20 @@ func TestRunResponseOmitsZeroEndedAt(t *testing.T) {
 }
 
 type createRunStub struct {
-	called bool
+	called  bool
+	command inbound.CreateRunCommand
+	view    inbound.RunView
+	err     error
 }
 
-func (s *createRunStub) CreateRun(context.Context, inbound.CreateRunCommand) (inbound.RunView, error) {
+func (s *createRunStub) CreateRun(_ context.Context, command inbound.CreateRunCommand) (inbound.RunView, error) {
 	s.called = true
+	s.command = command
+	if s.err != nil {
+		return inbound.RunView{}, s.err
+	}
 
-	return inbound.RunView{}, nil
+	return s.view, nil
 }
 
 type listRunsStub struct{}

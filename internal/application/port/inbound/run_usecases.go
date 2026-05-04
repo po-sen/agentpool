@@ -10,6 +10,12 @@ type CreateRunCommand struct {
 	Prompt        string
 	RepositoryURL string
 	Branch        string
+	Workspace     WorkspaceSourceInput
+}
+
+// WorkspaceSourceInput contains application-level workspace source input.
+type WorkspaceSourceInput struct {
+	Type string
 }
 
 // CancelRunCommand contains application-level input for cancelling a run.

@@ -11,6 +11,7 @@ func TestIntegrationPortContracts(t *testing.T) {
 	var ids IDGenerator = fakeIDGenerator{}
 	var sandbox SandboxProvider = fakeSandboxProvider{}
 	var git GitProvider = fakeGitProvider{}
+	var workspace WorkspaceProvider = fakeWorkspaceProvider{}
 	var policy PolicyDecisionPort = fakePolicyDecision{}
 	var secrets SecretBroker = fakeSecretBroker{}
 	var tools ToolRunner = fakeToolRunner{}
@@ -27,6 +28,9 @@ func TestIntegrationPortContracts(t *testing.T) {
 	}
 	if _, err := git.Fetch(ctx, GitFetchRequest{RepositoryURL: "https://example.com/repo.git"}); err != nil {
 		t.Fatalf("Fetch() error = %v", err)
+	}
+	if _, err := workspace.ResolveWorkspace(ctx, WorkspaceResolveRequest{RunID: "run_test"}); err != nil {
+		t.Fatalf("ResolveWorkspace() error = %v", err)
 	}
 	if _, err := policy.Decide(ctx, PolicyDecisionRequest{RunID: "run_test"}); err != nil {
 		t.Fatalf("Decide() error = %v", err)
@@ -62,6 +66,12 @@ type fakeGitProvider struct{}
 
 func (fakeGitProvider) Fetch(context.Context, GitFetchRequest) (GitCheckout, error) {
 	return GitCheckout{Path: "/tmp/repo"}, nil
+}
+
+type fakeWorkspaceProvider struct{}
+
+func (fakeWorkspaceProvider) ResolveWorkspace(context.Context, WorkspaceResolveRequest) (Workspace, error) {
+	return Workspace{Path: "/tmp/repo"}, nil
 }
 
 type fakePolicyDecision struct{}

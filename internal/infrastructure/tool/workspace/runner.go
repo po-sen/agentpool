@@ -52,8 +52,12 @@ func NewRunner(cfg Config) *Runner {
 	}
 }
 
-// ListTools returns read-only workspace tool definitions.
-func (r *Runner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
+// ListTools returns read-only workspace tool definitions when a workspace is available.
+func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
+	if strings.TrimSpace(request.Sandbox.WorkspacePath) == "" {
+		return nil, nil
+	}
+
 	return []outbound.ToolDefinition{
 		{
 			Name:        listFilesToolName,
