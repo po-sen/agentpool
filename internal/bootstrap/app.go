@@ -25,6 +25,7 @@ import (
 	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
 	storagenoop "github.com/po-sen/agentpool/internal/infrastructure/storage/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
+	"github.com/po-sen/agentpool/internal/infrastructure/tool/shell"
 	workspacesnapshot "github.com/po-sen/agentpool/internal/infrastructure/workspace/snapshot"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
@@ -130,7 +131,11 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	toolRunner, err := composite.NewRunner()
+	shellTools, err := shell.NewRunner(sandboxProvider, shell.Config{})
+	if err != nil {
+		return nil, err
+	}
+	toolRunner, err := composite.NewRunner(shellTools)
 	if err != nil {
 		return nil, err
 	}

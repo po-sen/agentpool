@@ -23,3 +23,21 @@ func TestProviderPrepareAndCleanup(t *testing.T) {
 		t.Fatalf("cleanup: %v", err)
 	}
 }
+
+func TestProviderRunCommandReportsUnavailable(t *testing.T) {
+	provider := NewProvider()
+
+	result, err := provider.RunCommand(context.Background(), outbound.SandboxCommandRequest{
+		Sandbox: outbound.Sandbox{ID: "noop"},
+		Command: "echo hello",
+	})
+	if err != nil {
+		t.Fatalf("RunCommand() error = %v", err)
+	}
+	if result.ExitCode == 0 {
+		t.Fatalf("ExitCode = %d, want non-zero", result.ExitCode)
+	}
+	if result.Stderr != "sandbox command execution is not available" {
+		t.Fatalf("Stderr = %q, want unavailable message", result.Stderr)
+	}
+}

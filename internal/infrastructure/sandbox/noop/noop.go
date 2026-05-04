@@ -10,6 +10,7 @@ import (
 type Provider struct{}
 
 var _ outbound.SandboxProvider = (*Provider)(nil)
+var _ outbound.SandboxCommandRunner = (*Provider)(nil)
 
 // NewProvider creates a no-op sandbox provider.
 func NewProvider() *Provider {
@@ -24,4 +25,12 @@ func (p *Provider) Prepare(context.Context, outbound.SandboxRequest) (outbound.S
 // Cleanup records no side effects.
 func (p *Provider) Cleanup(context.Context, outbound.Sandbox) error {
 	return nil
+}
+
+// RunCommand reports that the no-op sandbox cannot execute commands.
+func (p *Provider) RunCommand(context.Context, outbound.SandboxCommandRequest) (outbound.SandboxCommandResult, error) {
+	return outbound.SandboxCommandResult{
+		Stderr:   "sandbox command execution is not available",
+		ExitCode: 1,
+	}, nil
 }

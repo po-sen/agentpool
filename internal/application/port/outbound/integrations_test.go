@@ -10,6 +10,7 @@ import (
 func TestIntegrationPortContracts(t *testing.T) {
 	var ids IDGenerator = fakeIDGenerator{}
 	var sandbox SandboxProvider = fakeSandboxProvider{}
+	var sandboxCommands SandboxCommandRunner = fakeSandboxCommandRunner{}
 	var git GitProvider = fakeGitProvider{}
 	var workspace WorkspaceProvider = fakeWorkspaceProvider{}
 	var policy PolicyDecisionPort = fakePolicyDecision{}
@@ -25,6 +26,12 @@ func TestIntegrationPortContracts(t *testing.T) {
 	}
 	if err := sandbox.Cleanup(ctx, Sandbox{ID: "sandbox_test"}); err != nil {
 		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if _, err := sandboxCommands.RunCommand(ctx, SandboxCommandRequest{
+		Sandbox: Sandbox{ID: "sandbox_test"},
+		Command: "true",
+	}); err != nil {
+		t.Fatalf("RunCommand() error = %v", err)
 	}
 	if _, err := git.Fetch(ctx, GitFetchRequest{RepositoryURL: "https://example.com/repo.git"}); err != nil {
 		t.Fatalf("Fetch() error = %v", err)
@@ -63,6 +70,12 @@ func (fakeSandboxProvider) Prepare(context.Context, SandboxRequest) (Sandbox, er
 
 func (fakeSandboxProvider) Cleanup(context.Context, Sandbox) error {
 	return nil
+}
+
+type fakeSandboxCommandRunner struct{}
+
+func (fakeSandboxCommandRunner) RunCommand(context.Context, SandboxCommandRequest) (SandboxCommandResult, error) {
+	return SandboxCommandResult{Stdout: "ok"}, nil
 }
 
 type fakeGitProvider struct{}

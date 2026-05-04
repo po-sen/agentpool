@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol; workspace is a run-level concept reserved for future sources, and shell, writes, real git clone, and real sandboxed execution are not implemented yet.
+- Agent loop v1 supports a minimal JSON action protocol, snapshot workspace plumbing, and a sandbox-backed `run_shell` tool contract. The default noop sandbox does not execute commands yet.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -278,7 +278,7 @@ Use `openai_compatible` with a local or internal endpoint for air-gapped environ
 
 ## Workspace Sources
 
-Workspace is a run-level concept for future sources such as snapshot upload, git clone, or mounted workspace. Core AgentPool currently supports only no workspace access.
+Workspace is a run-level concept for sources such as snapshot upload, git clone, or mounted workspace. Core AgentPool currently supports no workspace access and the snapshot source model/materializer. A real snapshot upload or storage backend is not implemented yet, so the default noop snapshot store returns "not found".
 
 Without a workspace request, no workspace is prepared:
 
@@ -299,6 +299,18 @@ The explicit no-workspace form is also accepted:
 }
 ```
 
+Snapshot workspace requests use a future snapshot ID:
+
+```json
+{
+  "prompt": "Inspect the uploaded workspace and run the tests.",
+  "workspace": {
+    "type": "snapshot",
+    "snapshot_id": "wsnap_example"
+  }
+}
+```
+
 Any other workspace source type, including `configured`, is rejected until an explicit source provider is implemented.
 
 ## Tools
@@ -307,7 +319,20 @@ AgentPool has an application-owned tool loop. Models can respond with a JSON `to
 
 The agent protocol accepts only `tool_call` and `final` JSON actions. Unknown JSON action types, malformed JSON, or multiple JSON objects are rejected as protocol errors and the model is asked to correct itself. Plain natural-language output is still accepted as a final summary for compatibility with local models.
 
-No tools are exposed in the current default runtime. Future sandbox-backed tools, such as `run_shell`, will be exposed only when a run has the required workspace and sandbox context.
+The `run_shell` tool is sandbox-backed and is advertised only when a run has both workspace and sandbox context. In the default noop runtime the tool contract is wired, but command execution reports unavailable until a real sandbox command runner is implemented.
+
+Tool calls use:
+
+```json
+{
+  "type": "tool_call",
+  "tool": "run_shell",
+  "arguments": {
+    "command": "go test ./...",
+    "timeout_seconds": "30"
+  }
+}
+```
 
 Final answers use:
 
@@ -323,10 +348,10 @@ Tools are dynamically advertised. Runs without the required context do not expos
 Example prompt:
 
 ```text
-When workspace and sandbox tools are implemented, inspect the workspace, run scripts, and summarize what the project does.
+Inspect the workspace, run the test command if available, and summarize the result.
 ```
 
-There is still no shell, write access, Docker execution, Git mutation, network fetch, package install, or arbitrary command execution. Sandbox execution is reserved for future shell, write, and test tools that intentionally require it.
+There is still no concrete shell execution backend, write access, Docker execution, Git mutation, network fetch, package install, or arbitrary host command execution.
 
 ## Run Lifecycle
 
