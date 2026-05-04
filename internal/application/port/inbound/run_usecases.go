@@ -15,7 +15,8 @@ type CreateRunCommand struct {
 
 // WorkspaceSourceInput contains application-level workspace source input.
 type WorkspaceSourceInput struct {
-	Type string
+	Type       string
+	SnapshotID string
 }
 
 // CancelRunCommand contains application-level input for cancelling a run.

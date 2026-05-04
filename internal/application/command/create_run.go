@@ -69,7 +69,8 @@ func (h *CreateRunHandler) CreateRun(ctx context.Context, command inbound.Create
 		RepositoryURL: command.RepositoryURL,
 		Branch:        command.Branch,
 		Workspace: run.WorkspaceSource{
-			Type: run.WorkspaceSourceType(command.Workspace.Type),
+			Type:       run.WorkspaceSourceType(command.Workspace.Type),
+			SnapshotID: command.Workspace.SnapshotID,
 		},
 	}, now)
 	if err != nil {

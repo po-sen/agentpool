@@ -36,6 +36,32 @@ func TestTaskSpecValidateAcceptsExplicitNoneWorkspace(t *testing.T) {
 	}
 }
 
+func TestTaskSpecValidateAcceptsSnapshotWorkspace(t *testing.T) {
+	task := TaskSpec{
+		Prompt: "do work",
+		Workspace: WorkspaceSource{
+			Type:       WorkspaceSourceSnapshot,
+			SnapshotID: "wsnap_test",
+		},
+	}
+
+	if err := task.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestTaskSpecValidateRejectsSnapshotWorkspaceWithoutSnapshotID(t *testing.T) {
+	task := TaskSpec{
+		Prompt:    "do work",
+		Workspace: WorkspaceSource{Type: WorkspaceSourceSnapshot},
+	}
+
+	err := task.Validate()
+	if !errors.Is(err, ErrMissingWorkspaceSnapshotID) {
+		t.Fatalf("Validate() error = %v, want %v", err, ErrMissingWorkspaceSnapshotID)
+	}
+}
+
 func TestTaskSpecValidateRejectsConfiguredWorkspace(t *testing.T) {
 	task := TaskSpec{
 		Prompt:    "do work",
@@ -51,7 +77,7 @@ func TestTaskSpecValidateRejectsConfiguredWorkspace(t *testing.T) {
 func TestTaskSpecValidateRejectsUnknownWorkspace(t *testing.T) {
 	task := TaskSpec{
 		Prompt:    "do work",
-		Workspace: WorkspaceSource{Type: "snapshot"},
+		Workspace: WorkspaceSource{Type: "mounted"},
 	}
 
 	err := task.Validate()

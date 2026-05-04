@@ -15,7 +15,8 @@ type createRunRequest struct {
 }
 
 type workspaceRequest struct {
-	Type string `json:"type,omitempty"`
+	Type       string `json:"type,omitempty"`
+	SnapshotID string `json:"snapshot_id,omitempty"`
 }
 
 type runResponse struct {
@@ -42,7 +43,8 @@ type taskResponse struct {
 }
 
 type workspaceResponse struct {
-	Type string `json:"type,omitempty"`
+	Type       string `json:"type,omitempty"`
+	SnapshotID string `json:"snapshot_id,omitempty"`
 }
 
 type stepResponse struct {
@@ -87,7 +89,10 @@ func toRunResponse(item inbound.RunView) runResponse {
 		response.Result = &runResultResponse{Summary: item.Result.Summary}
 	}
 	if item.Task.Workspace.Type != "" && item.Task.Workspace.Type != "none" {
-		response.Task.Workspace = &workspaceResponse{Type: item.Task.Workspace.Type}
+		response.Task.Workspace = &workspaceResponse{
+			Type:       item.Task.Workspace.Type,
+			SnapshotID: item.Task.Workspace.SnapshotID,
+		}
 	}
 
 	return response

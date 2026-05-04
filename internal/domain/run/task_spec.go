@@ -14,11 +14,14 @@ type WorkspaceSourceType string
 const (
 	// WorkspaceSourceNone means the run should not receive workspace access.
 	WorkspaceSourceNone WorkspaceSourceType = "none"
+	// WorkspaceSourceSnapshot means the run should use a stored workspace snapshot.
+	WorkspaceSourceSnapshot WorkspaceSourceType = "snapshot"
 )
 
 // WorkspaceSource describes the workspace capability requested by a run.
 type WorkspaceSource struct {
-	Type WorkspaceSourceType
+	Type       WorkspaceSourceType
+	SnapshotID string
 }
 
 // TaskSpec describes the work requested by a run submitter.
@@ -41,6 +44,9 @@ func (s TaskSpec) Validate() error {
 	if !s.Workspace.IsValid() {
 		return ErrUnknownWorkspaceSource
 	}
+	if s.Workspace.EffectiveType() == WorkspaceSourceSnapshot && strings.TrimSpace(s.Workspace.SnapshotID) == "" {
+		return ErrMissingWorkspaceSnapshotID
+	}
 
 	return nil
 }
@@ -57,7 +63,7 @@ func (s WorkspaceSource) EffectiveType() WorkspaceSourceType {
 // IsValid reports whether the workspace source is supported.
 func (s WorkspaceSource) IsValid() bool {
 	switch s.EffectiveType() {
-	case WorkspaceSourceNone:
+	case WorkspaceSourceNone, WorkspaceSourceSnapshot:
 		return true
 	default:
 		return false

@@ -67,7 +67,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		RepositoryURL: request.RepositoryURL,
 		Branch:        request.Branch,
 		Workspace: inbound.WorkspaceSourceInput{
-			Type: request.Workspace.Type,
+			Type:       request.Workspace.Type,
+			SnapshotID: request.Workspace.SnapshotID,
 		},
 	})
 	if err != nil {

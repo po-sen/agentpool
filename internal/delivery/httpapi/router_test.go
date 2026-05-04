@@ -108,7 +108,52 @@ func TestCreateRunConfiguredWorkspaceReturnsBadRequest(t *testing.T) {
 	}
 }
 
-func TestCreateRunUnknownWorkspaceReturnsBadRequest(t *testing.T) {
+func TestCreateRunWithSnapshotWorkspace(t *testing.T) {
+	create := &createRunStub{
+		view: inbound.RunView{
+			ID:     "run_test",
+			Status: "queued",
+			Task: inbound.TaskView{
+				Prompt: "do work",
+				Workspace: inbound.WorkspaceSourceView{
+					Type:       "snapshot",
+					SnapshotID: "wsnap_test",
+				},
+			},
+			Steps: []inbound.StepView{},
+		},
+	}
+	router := NewRouter(Dependencies{
+		CreateRun: create,
+		ListRuns:  &listRunsStub{},
+		GetRun:    &getRunStub{},
+		CancelRun: &cancelRunStub{},
+	})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/runs",
+		strings.NewReader(`{"prompt":"do work","workspace":{"type":"snapshot","snapshot_id":"wsnap_test"}}`),
+	)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusCreated)
+	}
+	if create.command.Workspace.Type != "snapshot" {
+		t.Fatalf("workspace type = %q, want snapshot", create.command.Workspace.Type)
+	}
+	if create.command.Workspace.SnapshotID != "wsnap_test" {
+		t.Fatalf("snapshot id = %q, want wsnap_test", create.command.Workspace.SnapshotID)
+	}
+	if !strings.Contains(response.Body.String(), `"workspace":{"type":"snapshot","snapshot_id":"wsnap_test"}`) {
+		t.Fatalf("response does not contain workspace: %s", response.Body.String())
+	}
+}
+
+func TestCreateRunSnapshotWorkspaceWithoutSnapshotIDReturnsBadRequest(t *testing.T) {
 	create := &createRunStub{
 		err: inbound.NewInvalidInputError(errCreateRunInvalid),
 	}
@@ -123,6 +168,31 @@ func TestCreateRunUnknownWorkspaceReturnsBadRequest(t *testing.T) {
 		http.MethodPost,
 		"/v1/runs",
 		strings.NewReader(`{"prompt":"do work","workspace":{"type":"snapshot"}}`),
+	)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCreateRunUnknownWorkspaceReturnsBadRequest(t *testing.T) {
+	create := &createRunStub{
+		err: inbound.NewInvalidInputError(errCreateRunInvalid),
+	}
+	router := NewRouter(Dependencies{
+		CreateRun: create,
+		ListRuns:  &listRunsStub{},
+		GetRun:    &getRunStub{},
+		CancelRun: &cancelRunStub{},
+	})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/runs",
+		strings.NewReader(`{"prompt":"do work","workspace":{"type":"mounted"}}`),
 	)
 	response := httptest.NewRecorder()
 

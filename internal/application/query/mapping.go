@@ -34,7 +34,8 @@ func toRunView(item *run.Run) inbound.RunView {
 			RepositoryURL: item.Task.RepositoryURL,
 			Branch:        item.Task.Branch,
 			Workspace: inbound.WorkspaceSourceView{
-				Type: string(item.Task.Workspace.EffectiveType()),
+				Type:       string(item.Task.Workspace.EffectiveType()),
+				SnapshotID: item.Task.Workspace.SnapshotID,
 			},
 		},
 		Result: inbound.RunResultView{

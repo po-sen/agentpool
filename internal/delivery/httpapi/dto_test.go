@@ -238,3 +238,28 @@ func TestRunResponseJSONOmitsNoneWorkspace(t *testing.T) {
 		t.Fatalf("response contains none workspace: %s", got)
 	}
 }
+
+func TestRunResponseJSONIncludesSnapshotWorkspace(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:     "run_test",
+		Status: "queued",
+		Task: inbound.TaskView{
+			Prompt: "do work",
+			Workspace: inbound.WorkspaceSourceView{
+				Type:       "snapshot",
+				SnapshotID: "wsnap_test",
+			},
+		},
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"workspace":{"type":"snapshot","snapshot_id":"wsnap_test"}`) {
+		t.Fatalf("response does not contain snapshot workspace: %s", got)
+	}
+}
