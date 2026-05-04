@@ -14,11 +14,16 @@ import (
 )
 
 const (
-	listFilesToolName = "list_files"
-	readFileToolName  = "read_file"
-	defaultMaxBytes   = int64(65536)
-	defaultMaxEntries = 200
-	maxSymlinkDepth   = 32
+	listFilesToolName       = "list_files"
+	readFileToolName        = "read_file"
+	toolPathArgumentName    = "path"
+	defaultMaxBytes         = int64(65536)
+	defaultMaxEntries       = 200
+	maxSymlinkDepth         = 32
+	errWorkspaceUnavailable = "workspace path is not available"
+	errPathMustBeRelative   = "path must be relative"
+	errPathEscapesWorkspace = "path escapes workspace"
+	errPathNotFound         = "path not found"
 )
 
 // Config controls workspace tool limits.
@@ -74,9 +79,9 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 func (r *Runner) RunTool(_ context.Context, call outbound.ToolCall) (outbound.ToolResult, error) {
 	switch call.Name {
 	case listFilesToolName:
-		return r.listFiles(call.Context.WorkspacePath, call.Arguments["path"]), nil
+		return r.listFiles(call.Context.WorkspacePath, call.Arguments[toolPathArgumentName]), nil
 	case readFileToolName:
-		return r.readFile(call.Context.WorkspacePath, call.Arguments["path"]), nil
+		return r.readFile(call.Context.WorkspacePath, call.Arguments[toolPathArgumentName]), nil
 	default:
 		return toolError(fmt.Sprintf("unknown tool: %s", call.Name)), nil
 	}
@@ -94,7 +99,7 @@ func (r *Runner) listFiles(root string, requestedPath string) outbound.ToolResul
 
 	info, err := os.Stat(dirPath)
 	if err != nil {
-		return toolError("path not found")
+		return toolError(errPathNotFound)
 	}
 	if !info.IsDir() {
 		return toolError("path is not a directory")
@@ -139,7 +144,7 @@ func (r *Runner) readFile(root string, requestedPath string) outbound.ToolResult
 
 	info, err := os.Stat(filePath)
 	if err != nil {
-		return toolError("path not found")
+		return toolError(errPathNotFound)
 	}
 	if info.IsDir() {
 		return toolError("path is a directory")
@@ -167,24 +172,24 @@ func (r *Runner) readFile(root string, requestedPath string) outbound.ToolResult
 
 func resolveWorkspacePath(root string, requestedPath string) (string, string) {
 	if strings.TrimSpace(root) == "" {
-		return "", "workspace path is not available"
+		return "", errWorkspaceUnavailable
 	}
 	if filepath.IsAbs(requestedPath) {
-		return "", "path must be relative"
+		return "", errPathMustBeRelative
 	}
 
 	workspaceRoot, err := filepath.Abs(root)
 	if err != nil {
-		return "", "workspace path is not available"
+		return "", errWorkspaceUnavailable
 	}
 	workspaceRoot, err = filepath.EvalSymlinks(workspaceRoot)
 	if err != nil {
-		return "", "workspace path is not available"
+		return "", errWorkspaceUnavailable
 	}
 
 	cleanedPath := filepath.Clean(filepath.FromSlash(requestedPath))
 	if cleanedPath == ".." || strings.HasPrefix(cleanedPath, ".."+string(os.PathSeparator)) {
-		return "", "path escapes workspace"
+		return "", errPathEscapesWorkspace
 	}
 
 	return resolveRelativePath(workspaceRoot, cleanedPath, 0)
@@ -205,12 +210,12 @@ func resolveRelativePath(root string, relativePath string, depth int) (string, s
 
 func resolveExistingPath(root string, targetPath string, depth int) (string, string) {
 	if !isWithinRoot(root, targetPath) {
-		return "", "path escapes workspace"
+		return "", errPathEscapesWorkspace
 	}
 
 	info, err := os.Lstat(targetPath)
 	if err != nil {
-		return "", "path not found"
+		return "", errPathNotFound
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
 		return targetPath, ""
@@ -221,12 +226,12 @@ func resolveExistingPath(root string, targetPath string, depth int) (string, str
 
 func resolveSymlink(root string, linkPath string, depth int) (string, string) {
 	if depth > maxSymlinkDepth {
-		return "", "path not found"
+		return "", errPathNotFound
 	}
 
 	target, err := os.Readlink(linkPath)
 	if err != nil {
-		return "", "path not found"
+		return "", errPathNotFound
 	}
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(filepath.Dir(linkPath), target)
@@ -234,16 +239,16 @@ func resolveSymlink(root string, linkPath string, depth int) (string, string) {
 
 	targetPath, err := filepath.Abs(target)
 	if err != nil {
-		return "", "path not found"
+		return "", errPathNotFound
 	}
 	targetPath = filepath.Clean(targetPath)
 	if !isWithinRoot(root, targetPath) {
-		return "", "path escapes workspace"
+		return "", errPathEscapesWorkspace
 	}
 
 	relativePath, err := filepath.Rel(root, targetPath)
 	if err != nil {
-		return "", "path escapes workspace"
+		return "", errPathEscapesWorkspace
 	}
 
 	return resolveRelativePath(root, relativePath, depth)

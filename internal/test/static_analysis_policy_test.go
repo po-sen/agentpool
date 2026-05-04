@@ -5,10 +5,17 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 )
 
-const maxFunctionParameters = 7
+const (
+	maxFunctionParameters                = 7
+	maxAllowedStringLiteralOccurrences   = 2
+	minDuplicatedStringLiteralValueBytes = 5
+)
 
 func TestGoFunctionsDoNotExceedParameterLimit(t *testing.T) {
 	for _, pkg := range listPackages(t) {
@@ -29,6 +36,30 @@ func TestGoFunctionsDoNotExceedParameterLimit(t *testing.T) {
 
 				position := parsed.FileSet.Position(fn.Pos())
 				t.Errorf("%s has %d parameters, max allowed is %d", position, count, maxFunctionParameters)
+			}
+		}
+	}
+}
+
+func TestProductionGoFilesDoNotDuplicateStringLiterals(t *testing.T) {
+	for _, pkg := range listPackages(t) {
+		for _, file := range pkg.GoFiles {
+			path := filepath.Join(pkg.Dir, file)
+			parsed := parseGoFile(t, path)
+
+			occurrencesByLiteral := stringLiteralOccurrences(parsed)
+			for _, literal := range sortedStringLiterals(occurrencesByLiteral) {
+				occurrences := occurrencesByLiteral[literal]
+				if len(occurrences) <= maxAllowedStringLiteralOccurrences {
+					continue
+				}
+
+				t.Errorf("%s duplicates string literal %q %d times; define a constant and reuse it: %s",
+					path,
+					literal,
+					len(occurrences),
+					strings.Join(occurrences, ", "),
+				)
 			}
 		}
 	}
@@ -61,6 +92,64 @@ func packageGoFiles(pkg listedPackage) []string {
 	files = append(files, pkg.XTestGoFiles...)
 
 	return files
+}
+
+func stringLiteralOccurrences(parsed parsedGoFile) map[string][]string {
+	ignoredPositions := ignoredStringLiteralPositions(parsed.File)
+	occurrences := make(map[string][]string)
+
+	ast.Inspect(parsed.File, func(node ast.Node) bool {
+		lit, ok := node.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		if _, ignored := ignoredPositions[lit.Pos()]; ignored {
+			return true
+		}
+
+		value, err := strconv.Unquote(lit.Value)
+		if err != nil || len(value) < minDuplicatedStringLiteralValueBytes {
+			return true
+		}
+
+		position := parsed.FileSet.Position(lit.Pos()).String()
+		occurrences[value] = append(occurrences[value], position)
+
+		return true
+	})
+
+	return occurrences
+}
+
+func sortedStringLiterals(occurrences map[string][]string) []string {
+	literals := make([]string, 0, len(occurrences))
+	for literal := range occurrences {
+		literals = append(literals, literal)
+	}
+	sort.Strings(literals)
+
+	return literals
+}
+
+func ignoredStringLiteralPositions(file *ast.File) map[token.Pos]struct{} {
+	positions := make(map[token.Pos]struct{})
+	for _, imported := range file.Imports {
+		positions[imported.Path.Pos()] = struct{}{}
+	}
+
+	// Struct tags are syntax metadata and cannot use constants.
+	ast.Inspect(file, func(node ast.Node) bool {
+		field, ok := node.(*ast.Field)
+		if !ok || field.Tag == nil {
+			return true
+		}
+
+		positions[field.Tag.Pos()] = struct{}{}
+
+		return true
+	})
+
+	return positions
 }
 
 func parameterCount(fields *ast.FieldList) int {
