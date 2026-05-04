@@ -14,7 +14,13 @@ type IDGenerator interface {
 
 // Sandbox describes a prepared execution environment.
 type Sandbox struct {
-	ID string
+	ID               string
+	SupportsCommands bool
+}
+
+// SandboxCapabilities describes execution capabilities available from a sandbox provider.
+type SandboxCapabilities struct {
+	SupportsCommands bool
 }
 
 // SandboxRequest contains information needed to prepare a sandbox.
@@ -28,6 +34,11 @@ type SandboxRequest struct {
 type SandboxProvider interface {
 	Prepare(context.Context, SandboxRequest) (Sandbox, error)
 	Cleanup(context.Context, Sandbox) error
+}
+
+// SandboxCapabilityProvider reports capabilities a sandbox provider can prepare.
+type SandboxCapabilityProvider interface {
+	Capabilities() SandboxCapabilities
 }
 
 // SandboxCommandRequest describes a command execution request inside a prepared sandbox.

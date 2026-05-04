@@ -19,8 +19,20 @@ func TestProviderPrepareAndCleanup(t *testing.T) {
 	if prepared.ID == "" {
 		t.Fatal("prepared sandbox ID is empty")
 	}
+	if prepared.SupportsCommands {
+		t.Fatal("prepared sandbox supports commands")
+	}
 	if err := provider.Cleanup(context.Background(), prepared); err != nil {
 		t.Fatalf("cleanup: %v", err)
+	}
+}
+
+func TestProviderReportsNoCommandCapability(t *testing.T) {
+	provider := NewProvider()
+
+	capabilities := provider.Capabilities()
+	if capabilities.SupportsCommands {
+		t.Fatal("SupportsCommands = true, want false")
 	}
 }
 

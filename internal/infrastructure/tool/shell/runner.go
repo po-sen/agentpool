@@ -61,9 +61,11 @@ func NewRunner(commands outbound.SandboxCommandRunner, cfg Config) (*Runner, err
 	}, nil
 }
 
-// ListTools exposes run_shell only when sandbox and workspace context exists.
+// ListTools exposes run_shell only when command-capable sandbox and workspace context exists.
 func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
-	if request.Context.Sandbox.ID == "" || request.Context.WorkspacePath == "" {
+	if request.Context.Sandbox.ID == "" ||
+		!request.Context.Sandbox.SupportsCommands ||
+		request.Context.WorkspacePath == "" {
 		return nil, nil
 	}
 
@@ -80,7 +82,7 @@ func (r *Runner) RunTool(ctx context.Context, call outbound.ToolCall) (outbound.
 	if call.Name != toolNameRunShell {
 		return outbound.ToolResult{Content: fmt.Sprintf("unknown tool: %s", call.Name), IsError: true}, nil
 	}
-	if call.Context.Sandbox.ID == "" {
+	if call.Context.Sandbox.ID == "" || !call.Context.Sandbox.SupportsCommands {
 		return outbound.ToolResult{Content: "sandbox is not available", IsError: true}, nil
 	}
 	if call.Context.WorkspacePath == "" {

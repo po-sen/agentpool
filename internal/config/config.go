@@ -40,12 +40,18 @@ type AgentConfig struct {
 	MaxTurns int
 }
 
+// WorkspaceConfig contains workspace source configuration.
+type WorkspaceConfig struct {
+	SnapshotDir string
+}
+
 // Config contains runtime configuration.
 type Config struct {
-	HTTPAddr string
-	Version  string
-	LLM      LLMConfig
-	Agent    AgentConfig
+	HTTPAddr  string
+	Version   string
+	LLM       LLMConfig
+	Agent     AgentConfig
+	Workspace WorkspaceConfig
 }
 
 // Load reads runtime configuration from the environment.
@@ -64,6 +70,9 @@ func Load(version string) Config {
 		Version:  version,
 		LLM:      loadLLMConfig(),
 		Agent:    loadAgentConfig(),
+		Workspace: WorkspaceConfig{
+			SnapshotDir: os.Getenv("AGENTPOOL_SNAPSHOT_DIR"),
+		},
 	}
 }
 

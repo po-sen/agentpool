@@ -23,6 +23,7 @@ import (
 	"github.com/po-sen/agentpool/internal/infrastructure/policy/allowall"
 	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
 	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
+	storagefile "github.com/po-sen/agentpool/internal/infrastructure/storage/file"
 	storagenoop "github.com/po-sen/agentpool/internal/infrastructure/storage/noop"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/shell"
@@ -145,7 +146,11 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		toolRunner,
 		applicationagent.WithMaxTurns(a.config.Agent.MaxTurns),
 	)
-	workspaceProvider, err := workspacesnapshot.NewProvider(storagenoop.NewSnapshotStore(), workspacesnapshot.Config{})
+	snapshotStore, err := newSnapshotStore(a.config.Workspace)
+	if err != nil {
+		return nil, err
+	}
+	workspaceProvider, err := workspacesnapshot.NewProvider(snapshotStore, workspacesnapshot.Config{})
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +172,14 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	})
 
 	return a.worker, nil
+}
+
+func newSnapshotStore(cfg config.WorkspaceConfig) (outbound.SnapshotStore, error) {
+	if cfg.SnapshotDir == "" {
+		return storagenoop.NewSnapshotStore(), nil
+	}
+
+	return storagefile.NewSnapshotStore(cfg.SnapshotDir)
 }
 
 func newModelClient(cfg config.LLMConfig) (outbound.ModelClient, error) {

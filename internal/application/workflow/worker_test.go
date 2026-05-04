@@ -225,7 +225,7 @@ func TestWorkerPassesEmptyWorkspaceContextToAgentTools(t *testing.T) {
 	}
 }
 
-func TestWorkerPreparesSandboxWithWorkspaceMount(t *testing.T) {
+func TestWorkerDoesNotPrepareSandboxForWorkspaceWhenCommandsUnsupported(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	queue := &fakeRunQueue{}
@@ -271,6 +271,69 @@ func TestWorkerPreparesSandboxWithWorkspaceMount(t *testing.T) {
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
+	if sandbox.prepareCalled {
+		t.Fatal("sandbox prepare was called")
+	}
+	if sandbox.cleanupCalled {
+		t.Fatal("sandbox cleanup was called")
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	}
+	if tools.calls[0].Context.WorkspacePath != workspace.path {
+		t.Fatalf("tool workspace path = %q, want %q", tools.calls[0].Context.WorkspacePath, workspace.path)
+	}
+	if tools.calls[0].Context.Sandbox.ID != "" {
+		t.Fatalf("tool sandbox id = %q, want empty", tools.calls[0].Context.Sandbox.ID)
+	}
+}
+
+func TestWorkerPreparesCommandCapableSandboxWithWorkspaceMount(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{
+		Prompt: "do work",
+		Workspace: run.WorkspaceSource{
+			Type:       run.WorkspaceSourceSnapshot,
+			SnapshotID: "wsnap_test",
+		},
+	}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	if err := queue.Enqueue(ctx, item.ID); err != nil {
+		t.Fatalf("enqueue run: %v", err)
+	}
+
+	sandbox := &recordingSandboxProvider{supportsCommands: true}
+	workspace := &workspacePathProvider{path: "/tmp/agentpool-workspace-test"}
+	tools := &recordingWorkflowToolRunner{}
+	worker := NewWorker(
+		WorkerDependencies{
+			Queue:      queue,
+			Repo:       repo,
+			StateStore: repo,
+			Events:     publisher,
+			Sandbox:    sandbox,
+			Agent:      applicationagent.NewRunner(&toolCallingModelClient{}, tools),
+			Workspace:  workspace,
+			Changes:    fakeWorkspaceChangeCollector{},
+			Policy:     fakePolicyDecision{},
+			Secrets:    fakeSecretBroker{},
+		},
+		WithClock(func() time.Time { return now }),
+	)
+
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
 	if !sandbox.prepareCalled {
 		t.Fatal("sandbox prepare was not called")
 	}
@@ -294,6 +357,9 @@ func TestWorkerPreparesSandboxWithWorkspaceMount(t *testing.T) {
 	}
 	if tools.calls[0].Context.Sandbox.ID != "sandbox_test" {
 		t.Fatalf("tool sandbox id = %q, want sandbox_test", tools.calls[0].Context.Sandbox.ID)
+	}
+	if !tools.calls[0].Context.Sandbox.SupportsCommands {
+		t.Fatal("tool sandbox command support = false, want true")
 	}
 }
 
@@ -548,6 +614,72 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 
 	assertEventNotPublished(t, publisher.events, outbound.EventRunCompleted)
 	assertEventPublished(t, publisher.events, outbound.EventRunFailed)
+}
+
+func TestWorkerProcessOneStoresSnapshotNotFoundFailureReason(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{
+		Prompt: "do work",
+		Workspace: run.WorkspaceSource{
+			Type:       run.WorkspaceSourceSnapshot,
+			SnapshotID: "wsnap_missing",
+		},
+	}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	if err := queue.Enqueue(ctx, item.ID); err != nil {
+		t.Fatalf("enqueue run: %v", err)
+	}
+
+	worker := newWorkerWithPorts(
+		queue,
+		repo,
+		publisher,
+		now,
+		fakeSandboxProvider{},
+		fakeModelClient{},
+		workspaceErrorProvider{err: outbound.ErrSnapshotNotFound},
+	)
+
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored, err := repo.FindByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("find run: %v", err)
+	}
+	if stored.Status != run.StatusFailed {
+		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusFailed)
+	}
+	if stored.FailureReason != "workspace snapshot not found" {
+		t.Fatalf("stored failure reason = %q, want workspace snapshot not found", stored.FailureReason)
+	}
+}
+
+func TestPublicFailureReasonForKnownWorkspaceFailures(t *testing.T) {
+	tests := map[error]string{
+		outbound.ErrSnapshotNotFound:          "workspace snapshot not found",
+		outbound.ErrInvalidSnapshotID:         "invalid workspace snapshot id",
+		run.ErrUnknownWorkspaceSource:         "unknown workspace source",
+		errModelGenerationFailed:              "run failed",
+		errors.New("provider api_key=secret"): "run failed",
+	}
+
+	for cause, want := range tests {
+		if got := publicFailureReasonFor(cause); got != want {
+			t.Fatalf("publicFailureReasonFor(%v) = %q, want %q", cause, got, want)
+		}
+	}
 }
 
 func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
@@ -952,6 +1084,7 @@ type recordingSandboxProvider struct {
 	prepareCalled     bool
 	cleanupCalled     bool
 	cleanupContextErr error
+	supportsCommands  bool
 	request           outbound.SandboxRequest
 }
 
@@ -959,7 +1092,7 @@ func (p *recordingSandboxProvider) Prepare(_ context.Context, request outbound.S
 	p.prepareCalled = true
 	p.request = request
 
-	return outbound.Sandbox{ID: "sandbox_test"}, nil
+	return outbound.Sandbox{ID: "sandbox_test", SupportsCommands: p.supportsCommands}, nil
 }
 
 func (p *recordingSandboxProvider) Cleanup(ctx context.Context, _ outbound.Sandbox) error {
@@ -967,6 +1100,10 @@ func (p *recordingSandboxProvider) Cleanup(ctx context.Context, _ outbound.Sandb
 	p.cleanupContextErr = ctx.Err()
 
 	return nil
+}
+
+func (p *recordingSandboxProvider) Capabilities() outbound.SandboxCapabilities {
+	return outbound.SandboxCapabilities{SupportsCommands: p.supportsCommands}
 }
 
 type fakeModelClient struct{}
@@ -1128,6 +1265,18 @@ func (p failingWorkspaceProvider) ResolveWorkspace(context.Context, outbound.Wor
 }
 
 func (p failingWorkspaceProvider) CleanupWorkspace(context.Context, outbound.Workspace) error {
+	return nil
+}
+
+type workspaceErrorProvider struct {
+	err error
+}
+
+func (p workspaceErrorProvider) ResolveWorkspace(context.Context, outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
+	return outbound.Workspace{}, p.err
+}
+
+func (p workspaceErrorProvider) CleanupWorkspace(context.Context, outbound.Workspace) error {
 	return nil
 }
 

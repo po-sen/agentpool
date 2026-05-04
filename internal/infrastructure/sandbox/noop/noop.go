@@ -10,6 +10,7 @@ import (
 type Provider struct{}
 
 var _ outbound.SandboxProvider = (*Provider)(nil)
+var _ outbound.SandboxCapabilityProvider = (*Provider)(nil)
 var _ outbound.SandboxCommandRunner = (*Provider)(nil)
 
 // NewProvider creates a no-op sandbox provider.
@@ -20,6 +21,11 @@ func NewProvider() *Provider {
 // Prepare returns a placeholder sandbox.
 func (p *Provider) Prepare(context.Context, outbound.SandboxRequest) (outbound.Sandbox, error) {
 	return outbound.Sandbox{ID: "noop"}, nil
+}
+
+// Capabilities reports that the no-op sandbox cannot execute commands.
+func (p *Provider) Capabilities() outbound.SandboxCapabilities {
+	return outbound.SandboxCapabilities{}
 }
 
 // Cleanup records no side effects.

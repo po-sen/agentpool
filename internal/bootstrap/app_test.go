@@ -8,6 +8,7 @@ import (
 
 func TestNewWiresVersion(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
+	t.Setenv("AGENTPOOL_SNAPSHOT_DIR", "")
 
 	app, err := New("test-version", io.Discard)
 	if err != nil {
@@ -23,6 +24,7 @@ func TestRunWorkerBuildsOpenAICompatibleModelProvider(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "openai_compatible")
 	t.Setenv("AGENTPOOL_MODEL_BASE_URL", "http://localhost:11434/v1")
 	t.Setenv("AGENTPOOL_MODEL_NAME", "local-model")
+	t.Setenv("AGENTPOOL_SNAPSHOT_DIR", "")
 
 	app, err := New("test-version", io.Discard)
 	if err != nil {
@@ -39,6 +41,7 @@ func TestRunWorkerBuildsOpenAICompatibleModelProvider(t *testing.T) {
 func TestNewDoesNotValidateWorkerModelProvider(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "openai")
 	t.Setenv("AGENTPOOL_MODEL_API_KEY", "")
+	t.Setenv("AGENTPOOL_SNAPSHOT_DIR", "")
 
 	app, err := New("test-version", io.Discard)
 	if err != nil {
@@ -51,6 +54,7 @@ func TestNewDoesNotValidateWorkerModelProvider(t *testing.T) {
 
 func TestRunWorkerReturnsErrorForInvalidModelProvider(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "bad")
+	t.Setenv("AGENTPOOL_SNAPSHOT_DIR", "")
 
 	app, err := New("test-version", io.Discard)
 	if err != nil {
@@ -65,6 +69,7 @@ func TestRunWorkerReturnsErrorForInvalidModelProvider(t *testing.T) {
 func TestNewLoadsAgentMaxTurnsConfig(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
 	t.Setenv("AGENTPOOL_AGENT_MAX_TURNS", "6")
+	t.Setenv("AGENTPOOL_SNAPSHOT_DIR", "")
 
 	app, err := New("test-version", io.Discard)
 	if err != nil {
@@ -75,8 +80,23 @@ func TestNewLoadsAgentMaxTurnsConfig(t *testing.T) {
 	}
 }
 
+func TestNewLoadsSnapshotDirConfig(t *testing.T) {
+	snapshotDir := t.TempDir()
+	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
+	t.Setenv("AGENTPOOL_SNAPSHOT_DIR", snapshotDir)
+
+	app, err := New("test-version", io.Discard)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if app.config.Workspace.SnapshotDir != snapshotDir {
+		t.Fatalf("Workspace.SnapshotDir = %q, want %q", app.config.Workspace.SnapshotDir, snapshotDir)
+	}
+}
+
 func TestWorkerInstanceWiresCompositeToolRunner(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
+	t.Setenv("AGENTPOOL_SNAPSHOT_DIR", "")
 
 	app, err := New("test-version", io.Discard)
 	if err != nil {
@@ -94,6 +114,7 @@ func TestWorkerInstanceWiresCompositeToolRunner(t *testing.T) {
 
 func TestWorkerInstanceWiresWorkspaceProvider(t *testing.T) {
 	t.Setenv("AGENTPOOL_MODEL_PROVIDER", "noop")
+	t.Setenv("AGENTPOOL_SNAPSHOT_DIR", t.TempDir())
 
 	app, err := New("test-version", io.Discard)
 	if err != nil {

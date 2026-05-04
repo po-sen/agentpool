@@ -51,6 +51,19 @@ func TestListToolsRequiresSandboxAndWorkspace(t *testing.T) {
 		},
 	})
 	if err != nil {
+		t.Fatalf("ListTools() without command support error = %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("len(tools) without command support = %d, want 0", len(tools))
+	}
+
+	tools, err = runner.ListTools(context.Background(), outbound.ToolListRequest{
+		Context: outbound.ToolContext{
+			WorkspacePath: "/tmp/workspace",
+			Sandbox:       commandCapableSandbox(),
+		},
+	})
+	if err != nil {
 		t.Fatalf("ListTools() full context error = %v", err)
 	}
 	if len(tools) != 1 || tools[0].Name != "run_shell" {
@@ -71,7 +84,7 @@ func TestRunToolExecutesSandboxCommand(t *testing.T) {
 		Name: toolNameRunShell,
 		Context: outbound.ToolContext{
 			WorkspacePath: "/tmp/workspace",
-			Sandbox:       outbound.Sandbox{ID: "sandbox_test"},
+			Sandbox:       commandCapableSandbox(),
 		},
 		Arguments: map[string]string{
 			"command":         " echo hello ",
@@ -93,8 +106,8 @@ func TestRunToolExecutesSandboxCommand(t *testing.T) {
 	if commands.request.WorkspacePath != "/tmp/workspace" {
 		t.Fatalf("workspace path = %q, want /tmp/workspace", commands.request.WorkspacePath)
 	}
-	if commands.request.Sandbox.ID != "sandbox_test" {
-		t.Fatalf("sandbox id = %q, want sandbox_test", commands.request.Sandbox.ID)
+	if !commands.request.Sandbox.SupportsCommands {
+		t.Fatal("sandbox command support = false, want true")
 	}
 	if commands.request.Timeout != 3*time.Second {
 		t.Fatalf("timeout = %s, want 3s", commands.request.Timeout)
@@ -122,6 +135,13 @@ func TestRunToolRejectsMissingContextAndArguments(t *testing.T) {
 				Sandbox:       outbound.Sandbox{ID: "sandbox_test"},
 			},
 		},
+		{
+			Name: toolNameRunShell,
+			Context: outbound.ToolContext{
+				WorkspacePath: "/tmp/workspace",
+				Sandbox:       commandCapableSandbox(),
+			},
+		},
 	}
 	for _, test := range tests {
 		result, err := runner.RunTool(context.Background(), test)
@@ -134,6 +154,32 @@ func TestRunToolRejectsMissingContextAndArguments(t *testing.T) {
 	}
 }
 
+func TestRunToolReportsSandboxUnavailableWithoutCommandSupport(t *testing.T) {
+	commands := &recordingCommandRunner{}
+	runner := newTestRunner(t, commands)
+
+	result, err := runner.RunTool(context.Background(), outbound.ToolCall{
+		Name: toolNameRunShell,
+		Context: outbound.ToolContext{
+			WorkspacePath: "/tmp/workspace",
+			Sandbox:       outbound.Sandbox{ID: "sandbox_test"},
+		},
+		Arguments: map[string]string{"command": "echo hello"},
+	})
+	if err != nil {
+		t.Fatalf("RunTool() error = %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("IsError = false, want true")
+	}
+	if result.Content != "sandbox is not available" {
+		t.Fatalf("Content = %q, want sandbox is not available", result.Content)
+	}
+	if commands.calls != 0 {
+		t.Fatalf("command calls = %d, want 0", commands.calls)
+	}
+}
+
 func TestRunToolRejectsInvalidTimeout(t *testing.T) {
 	runner := newTestRunner(t, &recordingCommandRunner{})
 
@@ -141,7 +187,7 @@ func TestRunToolRejectsInvalidTimeout(t *testing.T) {
 		Name: toolNameRunShell,
 		Context: outbound.ToolContext{
 			WorkspacePath: "/tmp/workspace",
-			Sandbox:       outbound.Sandbox{ID: "sandbox_test"},
+			Sandbox:       commandCapableSandbox(),
 		},
 		Arguments: map[string]string{
 			"command":         "echo hello",
@@ -171,7 +217,7 @@ func TestRunToolMarksNonZeroExitAsToolError(t *testing.T) {
 		Name: toolNameRunShell,
 		Context: outbound.ToolContext{
 			WorkspacePath: "/tmp/workspace",
-			Sandbox:       outbound.Sandbox{ID: "sandbox_test"},
+			Sandbox:       commandCapableSandbox(),
 		},
 		Arguments: map[string]string{"command": "false"},
 	})
@@ -194,7 +240,7 @@ func TestRunToolPropagatesCommandRunnerError(t *testing.T) {
 		Name: toolNameRunShell,
 		Context: outbound.ToolContext{
 			WorkspacePath: "/tmp/workspace",
-			Sandbox:       outbound.Sandbox{ID: "sandbox_test"},
+			Sandbox:       commandCapableSandbox(),
 		},
 		Arguments: map[string]string{"command": "echo hello"},
 	})
@@ -227,6 +273,10 @@ func newTestRunner(t *testing.T, commands outbound.SandboxCommandRunner) *Runner
 	}
 
 	return runner
+}
+
+func commandCapableSandbox() outbound.Sandbox {
+	return outbound.Sandbox{ID: "sandbox_test", SupportsCommands: true}
 }
 
 type recordingCommandRunner struct {

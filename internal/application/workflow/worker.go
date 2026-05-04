@@ -270,7 +270,6 @@ func (w *Worker) startRun(
 		return agent.RunResult{}, nil, err
 	}
 
-	// TODO: Prepare sandbox lazily when sandbox-backed tools are introduced.
 	result, err := w.agent.Run(ctx, agent.RunRequest{
 		RunID: item.ID,
 		Task:  item.Task,
@@ -309,8 +308,8 @@ func (w *Worker) prepareSandboxIfNeeded(
 	if workspacePath == "" {
 		return outbound.Sandbox{}, func() {}, nil
 	}
-	if w.sandbox == nil {
-		return outbound.Sandbox{}, func() {}, errors.New("sandbox provider is required for workspace runs")
+	if !sandboxSupportsCommands(w.sandbox) {
+		return outbound.Sandbox{}, func() {}, nil
 	}
 
 	sandbox, err := w.sandbox.Prepare(ctx, outbound.SandboxRequest{
@@ -321,15 +320,24 @@ func (w *Worker) prepareSandboxIfNeeded(
 	if err != nil {
 		return outbound.Sandbox{}, func() {}, err
 	}
+	if !sandbox.SupportsCommands {
+		w.cleanupSandbox(ctx, sandbox)
+
+		return outbound.Sandbox{}, func() {}, nil
+	}
 
 	cleanup := func() {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sandboxCleanupTimeout)
-		defer cancel()
-
-		_ = w.sandbox.Cleanup(cleanupCtx, sandbox)
+		w.cleanupSandbox(ctx, sandbox)
 	}
 
 	return sandbox, cleanup, nil
+}
+
+func (w *Worker) cleanupSandbox(ctx context.Context, sandbox outbound.Sandbox) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sandboxCleanupTimeout)
+	defer cancel()
+
+	_ = w.sandbox.Cleanup(cleanupCtx, sandbox)
 }
 
 func (w *Worker) completeRun(
@@ -398,7 +406,7 @@ func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error 
 			return errors.Join(cause, err)
 		}
 	}
-	if err := item.FailWithReason(now, publicFailureReason); err != nil {
+	if err := item.FailWithReason(now, publicFailureReasonFor(cause)); err != nil {
 		return errors.Join(cause, err)
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
@@ -413,6 +421,31 @@ func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error 
 	}
 
 	return nil
+}
+
+func publicFailureReasonFor(cause error) string {
+	switch {
+	case errors.Is(cause, outbound.ErrSnapshotNotFound):
+		return "workspace snapshot not found"
+	case errors.Is(cause, outbound.ErrInvalidSnapshotID):
+		return "invalid workspace snapshot id"
+	case errors.Is(cause, run.ErrUnknownWorkspaceSource):
+		return "unknown workspace source"
+	default:
+		return publicFailureReason
+	}
+}
+
+func sandboxSupportsCommands(provider outbound.SandboxProvider) bool {
+	if provider == nil {
+		return false
+	}
+	capabilityProvider, ok := provider.(outbound.SandboxCapabilityProvider)
+	if !ok {
+		return false
+	}
+
+	return capabilityProvider.Capabilities().SupportsCommands
 }
 
 func (w *Worker) publish(ctx context.Context, eventType string, id run.RunID, occurredAt time.Time) error {

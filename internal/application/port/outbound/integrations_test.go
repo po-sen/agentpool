@@ -69,11 +69,15 @@ func (fakeIDGenerator) NewRunID() (run.RunID, error) {
 type fakeSandboxProvider struct{}
 
 func (fakeSandboxProvider) Prepare(context.Context, SandboxRequest) (Sandbox, error) {
-	return Sandbox{ID: "sandbox_test"}, nil
+	return Sandbox{ID: "sandbox_test", SupportsCommands: true}, nil
 }
 
 func (fakeSandboxProvider) Cleanup(context.Context, Sandbox) error {
 	return nil
+}
+
+func (fakeSandboxProvider) Capabilities() SandboxCapabilities {
+	return SandboxCapabilities{SupportsCommands: true}
 }
 
 type fakeSandboxCommandRunner struct{}

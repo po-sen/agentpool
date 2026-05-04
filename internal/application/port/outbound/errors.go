@@ -7,4 +7,6 @@ var (
 	ErrRunQueueEmpty = errors.New("run queue is empty")
 	// ErrSnapshotNotFound is returned when a workspace snapshot cannot be found.
 	ErrSnapshotNotFound = errors.New("workspace snapshot not found")
+	// ErrInvalidSnapshotID is returned when a workspace snapshot ID is invalid.
+	ErrInvalidSnapshotID = errors.New("invalid workspace snapshot id")
 )
