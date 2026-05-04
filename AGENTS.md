@@ -79,6 +79,8 @@ Workspace source selection belongs to run task input and the `Run` aggregate tas
 
 Sandbox command tools must execute through `internal/application/port/outbound.SandboxCommandRunner`; they must not call host `os/exec` directly from tool packages. Concrete sandbox providers may implement command execution when an isolation boundary and policy gate are intentionally designed.
 
+Workspace change collection belongs behind `internal/application/port/outbound.WorkspaceChangeCollector`; filesystem diff logic lives in infrastructure workspace packages. The domain `Run` may store the resulting file-level change summary, but patch contents, logs, and artifacts require explicit future design.
+
 Legacy Git provider experiments may remain under `internal/infrastructure/git/*`, but current workspace source behavior belongs in `internal/infrastructure/workspace/*`. Do not add worker-local path workspace providers without explicit design review. Workspace source implementations should be explicit providers such as snapshot, git, or mounted sources. Local path access is not core behavior.
 
 Unit tests are mandatory for domain packages, application port packages, application command/query/workflow packages, delivery packages, infrastructure packages, bootstrap, config, and runtime helpers. Every production `.go` file under `internal/` must have a same-directory companion test file with the same basename, such as `run_queue.go` and `run_queue_test.go`; `internal/test` is the repository policy-test exception. `cmd/agentpool` stays thin and is exempt unless business logic is added there. Application unit tests must use test-local fakes for ports instead of importing concrete infrastructure. Test imports are checked by `internal/test/import_policy_test.go`.

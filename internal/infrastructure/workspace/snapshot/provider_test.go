@@ -61,14 +61,21 @@ func TestResolveWorkspaceMaterializesSnapshot(t *testing.T) {
 	if workspace.Path == "" {
 		t.Fatal("workspace path is empty")
 	}
+	if workspace.BasePath == "" {
+		t.Fatal("workspace base path is empty")
+	}
 	assertFileContent(t, filepath.Join(workspace.Path, "README.md"), "hello")
 	assertFileContent(t, filepath.Join(workspace.Path, "docs", "guide.md"), "guide")
+	assertFileContent(t, filepath.Join(workspace.BasePath, "README.md"), "hello")
 
 	if err := provider.CleanupWorkspace(context.Background(), workspace); err != nil {
 		t.Fatalf("CleanupWorkspace() error = %v", err)
 	}
 	if _, err := os.Stat(workspace.Path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("workspace still exists after cleanup: %v", err)
+	}
+	if _, err := os.Stat(workspace.BasePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("workspace base still exists after cleanup: %v", err)
 	}
 }
 

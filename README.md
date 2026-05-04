@@ -96,6 +96,12 @@ Completed runs include the one-shot model response summary:
   "result": {
     "summary": "The requested handler tests were updated."
   },
+  "workspace_changes": [
+    {
+      "path": "README.md",
+      "status": "modified"
+    }
+  ],
   "steps": [
     {
       "name": "prepare",
@@ -352,6 +358,8 @@ Inspect the workspace, run the test command if available, and summarize the resu
 ```
 
 There is still no concrete shell execution backend, write access, Docker execution, Git mutation, network fetch, package install, or arbitrary host command execution.
+
+After a workspace-backed run, AgentPool compares the materialized workspace with its snapshot baseline and records file-level `workspace_changes` with `added`, `modified`, or `deleted` status. This is a change summary only; patch contents, artifacts, and logs are future features.
 
 ## Run Lifecycle
 

@@ -22,6 +22,9 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 			Summary: "model output",
 		},
 		FailureReason: "model failed",
+		WorkspaceChanges: []WorkspaceChangeView{
+			{Path: "README.md", Status: "modified"},
+		},
 		Steps: []StepView{
 			{
 				Name:      "execute",
@@ -52,6 +55,9 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	}
 	if view.FailureReason != "model failed" {
 		t.Fatalf("FailureReason = %q, want model failed", view.FailureReason)
+	}
+	if view.WorkspaceChanges[0].Path != "README.md" {
+		t.Fatalf("WorkspaceChanges[0].Path = %q, want README.md", view.WorkspaceChanges[0].Path)
 	}
 	if view.Steps[0].EndedAt == nil || !view.Steps[0].EndedAt.Equal(endedAt) {
 		t.Fatalf("EndedAt = %v, want %v", view.Steps[0].EndedAt, endedAt)

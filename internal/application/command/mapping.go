@@ -24,6 +24,13 @@ func toRunView(item *run.Run) inbound.RunView {
 			EndedAt:   endedAt,
 		})
 	}
+	changes := make([]inbound.WorkspaceChangeView, 0, len(item.WorkspaceChanges))
+	for _, change := range item.WorkspaceChanges {
+		changes = append(changes, inbound.WorkspaceChangeView{
+			Path:   change.Path,
+			Status: string(change.Status),
+		})
+	}
 
 	return inbound.RunView{
 		ID:     item.ID.String(),
@@ -41,9 +48,10 @@ func toRunView(item *run.Run) inbound.RunView {
 		Result: inbound.RunResultView{
 			Summary: item.ResultSummary,
 		},
-		FailureReason: item.FailureReason,
-		Steps:         steps,
-		CreatedAt:     item.CreatedAt,
-		UpdatedAt:     item.UpdatedAt,
+		FailureReason:    item.FailureReason,
+		WorkspaceChanges: changes,
+		Steps:            steps,
+		CreatedAt:        item.CreatedAt,
+		UpdatedAt:        item.UpdatedAt,
 	}
 }

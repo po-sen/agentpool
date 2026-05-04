@@ -38,6 +38,7 @@ type Worker struct {
 	agent        *agent.Runner
 	sandbox      outbound.SandboxProvider
 	workspace    outbound.WorkspaceProvider
+	changes      outbound.WorkspaceChangeCollector
 	policy       outbound.PolicyDecisionPort
 	secrets      outbound.SecretBroker
 	clock        func() time.Time
@@ -56,6 +57,7 @@ type WorkerDependencies struct {
 	Sandbox    outbound.SandboxProvider
 	Agent      *agent.Runner
 	Workspace  outbound.WorkspaceProvider
+	Changes    outbound.WorkspaceChangeCollector
 	Policy     outbound.PolicyDecisionPort
 	Secrets    outbound.SecretBroker
 }
@@ -87,6 +89,7 @@ func NewWorker(
 		agent:        deps.Agent,
 		sandbox:      deps.Sandbox,
 		workspace:    deps.Workspace,
+		changes:      deps.Changes,
 		policy:       deps.Policy,
 		secrets:      deps.Secrets,
 		pollInterval: defaultPollInterval,
@@ -158,7 +161,7 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 	}
 	defer w.cleanupWorkspace(ctx, workspace)
 
-	result, err := w.startRun(ctx, item, workspace.Path)
+	result, changes, err := w.startRun(ctx, item, workspace)
 	if err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
@@ -166,7 +169,7 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 
 		return w.failRun(ctx, item, err)
 	}
-	if err := w.completeRun(ctx, item, result); err != nil {
+	if err := w.completeRun(ctx, item, result, changes); err != nil {
 		if errors.Is(err, errRunStateChanged) {
 			return nil
 		}
@@ -235,32 +238,36 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (outbound.Worksp
 	return workspace, nil
 }
 
-func (w *Worker) startRun(ctx context.Context, item *run.Run, workspacePath string) (agent.RunResult, error) {
+func (w *Worker) startRun(
+	ctx context.Context,
+	item *run.Run,
+	workspace outbound.Workspace,
+) (agent.RunResult, []run.WorkspaceChange, error) {
 	now := w.clock()
 	expectedStatus := item.Status
 	if err := item.StartStep(agentStepName, agentStepRunningMessage, now); err != nil {
-		return agent.RunResult{}, err
+		return agent.RunResult{}, nil, err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return agent.RunResult{}, err
+		return agent.RunResult{}, nil, err
 	}
 
-	sandbox, cleanupSandbox, err := w.prepareSandboxIfNeeded(ctx, item, workspacePath)
+	sandbox, cleanupSandbox, err := w.prepareSandboxIfNeeded(ctx, item, workspace.Path)
 	if err != nil {
-		return agent.RunResult{}, err
+		return agent.RunResult{}, nil, err
 	}
 	defer cleanupSandbox()
 
 	now = w.clock()
 	expectedStatus = item.Status
 	if err := item.StartRunning(now); err != nil {
-		return agent.RunResult{}, err
+		return agent.RunResult{}, nil, err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return agent.RunResult{}, err
+		return agent.RunResult{}, nil, err
 	}
 	if err := w.publish(ctx, outbound.EventRunStarted, item.ID, now); err != nil {
-		return agent.RunResult{}, err
+		return agent.RunResult{}, nil, err
 	}
 
 	// TODO: Prepare sandbox lazily when sandbox-backed tools are introduced.
@@ -268,25 +275,30 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run, workspacePath stri
 		RunID: item.ID,
 		Task:  item.Task,
 		Context: outbound.ToolContext{
-			WorkspacePath: workspacePath,
+			WorkspacePath: workspace.Path,
 			Sandbox:       sandbox,
 		},
 	})
 
 	if err != nil {
-		return agent.RunResult{}, err
+		return agent.RunResult{}, nil, err
+	}
+
+	changes, err := w.collectWorkspaceChanges(ctx, workspace)
+	if err != nil {
+		return agent.RunResult{}, nil, err
 	}
 
 	now = w.clock()
 	expectedStatus = item.Status
 	if err := item.CompleteStep(agentStepName, agentCompletedMessage(result.ToolCallCount), now); err != nil {
-		return agent.RunResult{}, err
+		return agent.RunResult{}, nil, err
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
-		return agent.RunResult{}, err
+		return agent.RunResult{}, nil, err
 	}
 
-	return result, nil
+	return result, changes, nil
 }
 
 func (w *Worker) prepareSandboxIfNeeded(
@@ -320,9 +332,15 @@ func (w *Worker) prepareSandboxIfNeeded(
 	return sandbox, cleanup, nil
 }
 
-func (w *Worker) completeRun(ctx context.Context, item *run.Run, result agent.RunResult) error {
+func (w *Worker) completeRun(
+	ctx context.Context,
+	item *run.Run,
+	result agent.RunResult,
+	changes []run.WorkspaceChange,
+) error {
 	now := w.clock()
 	expectedStatus := item.Status
+	item.RecordWorkspaceChanges(now, changes)
 	if err := item.CompleteWithResult(now, result.Summary); err != nil {
 		return err
 	}
@@ -331,6 +349,38 @@ func (w *Worker) completeRun(ctx context.Context, item *run.Run, result agent.Ru
 	}
 
 	return w.publish(ctx, outbound.EventRunCompleted, item.ID, now)
+}
+
+func (w *Worker) collectWorkspaceChanges(
+	ctx context.Context,
+	workspace outbound.Workspace,
+) ([]run.WorkspaceChange, error) {
+	if w.changes == nil || workspace.Path == "" || workspace.BasePath == "" {
+		return nil, nil
+	}
+
+	changes, err := w.changes.CollectWorkspaceChanges(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+
+	return toDomainWorkspaceChanges(changes), nil
+}
+
+func toDomainWorkspaceChanges(changes []outbound.WorkspaceChange) []run.WorkspaceChange {
+	if len(changes) == 0 {
+		return nil
+	}
+
+	result := make([]run.WorkspaceChange, 0, len(changes))
+	for _, change := range changes {
+		result = append(result, run.WorkspaceChange{
+			Path:   change.Path,
+			Status: run.WorkspaceChangeStatus(change.Status),
+		})
+	}
+
+	return result
 }
 
 func (w *Worker) cleanupWorkspace(ctx context.Context, workspace outbound.Workspace) {

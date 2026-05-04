@@ -201,6 +201,7 @@ func TestWorkerPassesEmptyWorkspaceContextToAgentTools(t *testing.T) {
 			Sandbox:    sandbox,
 			Agent:      applicationagent.NewRunner(&toolCallingModelClient{}, tools),
 			Workspace:  fakeWorkspaceProvider{},
+			Changes:    fakeWorkspaceChangeCollector{},
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
@@ -260,6 +261,7 @@ func TestWorkerPreparesSandboxWithWorkspaceMount(t *testing.T) {
 			Sandbox:    sandbox,
 			Agent:      applicationagent.NewRunner(&toolCallingModelClient{}, tools),
 			Workspace:  workspace,
+			Changes:    fakeWorkspaceChangeCollector{},
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
@@ -292,6 +294,80 @@ func TestWorkerPreparesSandboxWithWorkspaceMount(t *testing.T) {
 	}
 	if tools.calls[0].Context.Sandbox.ID != "sandbox_test" {
 		t.Fatalf("tool sandbox id = %q, want sandbox_test", tools.calls[0].Context.Sandbox.ID)
+	}
+}
+
+func TestWorkerCollectsWorkspaceChangesAfterAgentRun(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{
+		Prompt: "do work",
+		Workspace: run.WorkspaceSource{
+			Type:       run.WorkspaceSourceSnapshot,
+			SnapshotID: "wsnap_test",
+		},
+	}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	if err := queue.Enqueue(ctx, item.ID); err != nil {
+		t.Fatalf("enqueue run: %v", err)
+	}
+
+	workspace := &workspacePathProvider{
+		path:     "/tmp/agentpool-workspace-test",
+		basePath: "/tmp/agentpool-workspace-base-test",
+	}
+	changes := &recordingWorkspaceChangeCollector{
+		changes: []outbound.WorkspaceChange{
+			{Path: "README.md", Status: outbound.WorkspaceChangeModified},
+		},
+	}
+	worker := NewWorker(
+		WorkerDependencies{
+			Queue:      queue,
+			Repo:       repo,
+			StateStore: repo,
+			Events:     publisher,
+			Sandbox:    fakeSandboxProvider{},
+			Agent:      applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
+			Workspace:  workspace,
+			Changes:    changes,
+			Policy:     fakePolicyDecision{},
+			Secrets:    fakeSecretBroker{},
+		},
+		WithClock(func() time.Time { return now }),
+	)
+
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored, err := repo.FindByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("find run: %v", err)
+	}
+	if len(stored.WorkspaceChanges) != 1 {
+		t.Fatalf("len(WorkspaceChanges) = %d, want 1", len(stored.WorkspaceChanges))
+	}
+	if stored.WorkspaceChanges[0].Path != "README.md" {
+		t.Fatalf("WorkspaceChanges[0].Path = %q, want README.md", stored.WorkspaceChanges[0].Path)
+	}
+	if stored.WorkspaceChanges[0].Status != run.WorkspaceChangeModified {
+		t.Fatalf("WorkspaceChanges[0].Status = %q, want modified", stored.WorkspaceChanges[0].Status)
+	}
+	if !changes.called {
+		t.Fatal("workspace change collector was not called")
+	}
+	if changes.workspace.Path != workspace.path || changes.workspace.BasePath != workspace.basePath {
+		t.Fatalf("collector workspace = %#v, want workspace/base paths", changes.workspace)
 	}
 }
 
@@ -619,6 +695,7 @@ func TestWorkerProcessOneDoesNotLeavePrepareStepRunningWhenCancelledDuringPrepar
 			Sandbox:    fakeSandboxProvider{},
 			Agent:      applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
 			Workspace:  fakeWorkspaceProvider{},
+			Changes:    fakeWorkspaceChangeCollector{},
 			Policy: cancellingPolicyDecision{
 				repo: repo,
 				id:   item.ID,
@@ -793,6 +870,7 @@ func newWorkerWithPorts(
 			Sandbox:    sandbox,
 			Agent:      applicationagent.NewRunner(model, fakeToolRunner{}),
 			Workspace:  workspace,
+			Changes:    fakeWorkspaceChangeCollector{},
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
@@ -1005,17 +1083,40 @@ func (p *recordingWorkspaceProvider) CleanupWorkspace(ctx context.Context, _ out
 
 type workspacePathProvider struct {
 	path          string
+	basePath      string
 	cleanupCalled bool
 }
 
 func (p *workspacePathProvider) ResolveWorkspace(context.Context, outbound.WorkspaceResolveRequest) (outbound.Workspace, error) {
-	return outbound.Workspace{Path: p.path}, nil
+	return outbound.Workspace{Path: p.path, BasePath: p.basePath}, nil
 }
 
 func (p *workspacePathProvider) CleanupWorkspace(context.Context, outbound.Workspace) error {
 	p.cleanupCalled = true
 
 	return nil
+}
+
+type fakeWorkspaceChangeCollector struct{}
+
+func (c fakeWorkspaceChangeCollector) CollectWorkspaceChanges(context.Context, outbound.Workspace) ([]outbound.WorkspaceChange, error) {
+	return nil, nil
+}
+
+type recordingWorkspaceChangeCollector struct {
+	called    bool
+	workspace outbound.Workspace
+	changes   []outbound.WorkspaceChange
+}
+
+func (c *recordingWorkspaceChangeCollector) CollectWorkspaceChanges(
+	_ context.Context,
+	workspace outbound.Workspace,
+) ([]outbound.WorkspaceChange, error) {
+	c.called = true
+	c.workspace = workspace
+
+	return c.changes, nil
 }
 
 var errWorkspaceResolveFailed = errors.New("workspace resolve failed")

@@ -20,14 +20,15 @@ type workspaceRequest struct {
 }
 
 type runResponse struct {
-	ID            string             `json:"id"`
-	Status        string             `json:"status"`
-	Task          taskResponse       `json:"task"`
-	Result        *runResultResponse `json:"result,omitempty"`
-	FailureReason string             `json:"failure_reason,omitempty"`
-	Steps         []stepResponse     `json:"steps"`
-	CreatedAt     time.Time          `json:"created_at"`
-	UpdatedAt     time.Time          `json:"updated_at"`
+	ID               string                    `json:"id"`
+	Status           string                    `json:"status"`
+	Task             taskResponse              `json:"task"`
+	Result           *runResultResponse        `json:"result,omitempty"`
+	FailureReason    string                    `json:"failure_reason,omitempty"`
+	WorkspaceChanges []workspaceChangeResponse `json:"workspace_changes,omitempty"`
+	Steps            []stepResponse            `json:"steps"`
+	CreatedAt        time.Time                 `json:"created_at"`
+	UpdatedAt        time.Time                 `json:"updated_at"`
 }
 
 type runResultResponse struct {
@@ -45,6 +46,11 @@ type taskResponse struct {
 type workspaceResponse struct {
 	Type       string `json:"type,omitempty"`
 	SnapshotID string `json:"snapshot_id,omitempty"`
+}
+
+type workspaceChangeResponse struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
 }
 
 type stepResponse struct {
@@ -70,6 +76,13 @@ func toRunResponse(item inbound.RunView) runResponse {
 			EndedAt:   step.EndedAt,
 		})
 	}
+	changes := make([]workspaceChangeResponse, 0, len(item.WorkspaceChanges))
+	for _, change := range item.WorkspaceChanges {
+		changes = append(changes, workspaceChangeResponse{
+			Path:   change.Path,
+			Status: change.Status,
+		})
+	}
 
 	response := runResponse{
 		ID:     item.ID,
@@ -80,10 +93,11 @@ func toRunResponse(item inbound.RunView) runResponse {
 			RepositoryURL: item.Task.RepositoryURL,
 			Branch:        item.Task.Branch,
 		},
-		FailureReason: item.FailureReason,
-		Steps:         steps,
-		CreatedAt:     item.CreatedAt,
-		UpdatedAt:     item.UpdatedAt,
+		FailureReason:    item.FailureReason,
+		WorkspaceChanges: changes,
+		Steps:            steps,
+		CreatedAt:        item.CreatedAt,
+		UpdatedAt:        item.UpdatedAt,
 	}
 	if item.Result.Summary != "" {
 		response.Result = &runResultResponse{Summary: item.Result.Summary}

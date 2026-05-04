@@ -25,6 +25,9 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 			Summary: "model output",
 		},
 		FailureReason: "model failed",
+		WorkspaceChanges: []inbound.WorkspaceChangeView{
+			{Path: "README.md", Status: "modified"},
+		},
 		Steps: []inbound.StepView{
 			{
 				Name:      "execute",
@@ -54,6 +57,12 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	}
 	if response.FailureReason != view.FailureReason {
 		t.Fatalf("FailureReason = %q, want %q", response.FailureReason, view.FailureReason)
+	}
+	if len(response.WorkspaceChanges) != 1 {
+		t.Fatalf("len(WorkspaceChanges) = %d, want 1", len(response.WorkspaceChanges))
+	}
+	if response.WorkspaceChanges[0].Path != "README.md" {
+		t.Fatalf("WorkspaceChanges[0].Path = %q, want README.md", response.WorkspaceChanges[0].Path)
 	}
 	if len(response.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(response.Steps))
@@ -143,6 +152,27 @@ func TestRunResponseJSONIncludesCompletedSteps(t *testing.T) {
 	}
 }
 
+func TestRunResponseJSONIncludesWorkspaceChanges(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:     "run_test",
+		Status: "completed",
+		WorkspaceChanges: []inbound.WorkspaceChangeView{
+			{Path: "README.md", Status: "modified"},
+		},
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"workspace_changes":[{"path":"README.md","status":"modified"}]`) {
+		t.Fatalf("response does not contain workspace changes: %s", got)
+	}
+}
+
 func TestRunResponseJSONIncludesFailureReason(t *testing.T) {
 	payload, err := json.Marshal(toRunResponse(inbound.RunView{
 		ID:            "run_test",
@@ -214,6 +244,9 @@ func TestRunResponseJSONOmitsEmptyResultAndFailureReason(t *testing.T) {
 	}
 	if strings.Contains(got, `"failure_reason"`) {
 		t.Fatalf("response contains empty failure reason: %s", got)
+	}
+	if strings.Contains(got, `"workspace_changes"`) {
+		t.Fatalf("response contains empty workspace changes: %s", got)
 	}
 }
 

@@ -25,6 +25,9 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	item.Status = run.StatusRunning
 	item.ResultSummary = "model output"
 	item.FailureReason = "model failed"
+	item.WorkspaceChanges = []run.WorkspaceChange{
+		{Path: "README.md", Status: run.WorkspaceChangeModified},
+	}
 	item.Steps = []run.Step{
 		{
 			Name:      "execute",
@@ -54,6 +57,12 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	}
 	if view.FailureReason != item.FailureReason {
 		t.Fatalf("FailureReason = %q, want %q", view.FailureReason, item.FailureReason)
+	}
+	if len(view.WorkspaceChanges) != 1 {
+		t.Fatalf("len(WorkspaceChanges) = %d, want 1", len(view.WorkspaceChanges))
+	}
+	if view.WorkspaceChanges[0].Status != string(run.WorkspaceChangeModified) {
+		t.Fatalf("WorkspaceChanges[0].Status = %q, want modified", view.WorkspaceChanges[0].Status)
 	}
 	if len(view.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(view.Steps))

@@ -115,6 +115,27 @@ func TestRunResultMethodsRejectInvalidTransitionsWithoutMutatingOutput(t *testin
 	}
 }
 
+func TestRunRecordWorkspaceChangesStoresDetachedChanges(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	item := newRun(t, now)
+	changes := []WorkspaceChange{
+		{Path: "README.md", Status: WorkspaceChangeModified},
+	}
+
+	item.RecordWorkspaceChanges(now.Add(time.Second), changes)
+	changes[0].Path = "changed"
+
+	if len(item.WorkspaceChanges) != 1 {
+		t.Fatalf("len(WorkspaceChanges) = %d, want 1", len(item.WorkspaceChanges))
+	}
+	if item.WorkspaceChanges[0].Path != "README.md" {
+		t.Fatalf("WorkspaceChanges[0].Path = %q, want README.md", item.WorkspaceChanges[0].Path)
+	}
+	if !item.UpdatedAt.Equal(now.Add(time.Second)) {
+		t.Fatalf("UpdatedAt = %v, want %v", item.UpdatedAt, now.Add(time.Second))
+	}
+}
+
 func TestRunCancelTransitions(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	item := newRun(t, now)
@@ -176,6 +197,25 @@ func TestRunCloneReturnsDetachedStepSlice(t *testing.T) {
 	}
 	if item.Steps[0].Message != "Preparing execution" {
 		t.Fatalf("original step message = %q, want Preparing execution", item.Steps[0].Message)
+	}
+}
+
+func TestRunCloneReturnsDetachedWorkspaceChanges(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	item := newRun(t, now)
+	item.RecordWorkspaceChanges(now.Add(time.Second), []WorkspaceChange{
+		{Path: "README.md", Status: WorkspaceChangeModified},
+	})
+
+	clone := item.Clone()
+	clone.WorkspaceChanges[0].Path = "changed"
+	clone.WorkspaceChanges = append(clone.WorkspaceChanges, WorkspaceChange{Path: "new.txt", Status: WorkspaceChangeAdded})
+
+	if len(item.WorkspaceChanges) != 1 {
+		t.Fatalf("len(original WorkspaceChanges) = %d, want 1", len(item.WorkspaceChanges))
+	}
+	if item.WorkspaceChanges[0].Path != "README.md" {
+		t.Fatalf("original change path = %q, want README.md", item.WorkspaceChanges[0].Path)
 	}
 }
 

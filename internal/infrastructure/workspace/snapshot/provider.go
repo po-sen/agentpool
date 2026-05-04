@@ -83,11 +83,15 @@ func (p *Provider) ResolveWorkspace(ctx context.Context, request outbound.Worksp
 
 // CleanupWorkspace removes materialized snapshot workspaces.
 func (p *Provider) CleanupWorkspace(_ context.Context, workspace outbound.Workspace) error {
-	if strings.TrimSpace(workspace.Path) == "" {
-		return nil
+	var cleanupErr error
+	if strings.TrimSpace(workspace.Path) != "" {
+		cleanupErr = errors.Join(cleanupErr, os.RemoveAll(workspace.Path))
+	}
+	if strings.TrimSpace(workspace.BasePath) != "" {
+		cleanupErr = errors.Join(cleanupErr, os.RemoveAll(workspace.BasePath))
 	}
 
-	return os.RemoveAll(workspace.Path)
+	return cleanupErr
 }
 
 func (p *Provider) resolveSnapshot(ctx context.Context, snapshotID string) (outbound.Workspace, error) {
@@ -120,19 +124,28 @@ func (p *Provider) resolveSnapshot(ctx context.Context, snapshotID string) (outb
 	if err != nil {
 		return outbound.Workspace{}, fmt.Errorf("create workspace temp dir: %w", err)
 	}
+	basePath, err := os.MkdirTemp(p.tempDir, "agentpool-workspace-base-*")
+	if err != nil {
+		_ = os.RemoveAll(workspacePath)
+		return outbound.Workspace{}, fmt.Errorf("create workspace base temp dir: %w", err)
+	}
 	cleanup := true
 	defer func() {
 		if cleanup {
 			_ = os.RemoveAll(workspacePath)
+			_ = os.RemoveAll(basePath)
 		}
 	}()
 
+	if err := p.extractZip(tempFilePath, basePath); err != nil {
+		return outbound.Workspace{}, err
+	}
 	if err := p.extractZip(tempFilePath, workspacePath); err != nil {
 		return outbound.Workspace{}, err
 	}
 
 	cleanup = false
-	return outbound.Workspace{Path: workspacePath}, nil
+	return outbound.Workspace{Path: workspacePath, BasePath: basePath}, nil
 }
 
 func (p *Provider) extractZip(archivePath string, workspacePath string) error {
