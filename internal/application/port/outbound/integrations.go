@@ -13,8 +13,7 @@ type IDGenerator interface {
 
 // Sandbox describes a prepared execution environment.
 type Sandbox struct {
-	ID            string
-	WorkspacePath string
+	ID string
 }
 
 // SandboxRequest contains information needed to prepare a sandbox.

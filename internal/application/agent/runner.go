@@ -26,7 +26,7 @@ type RunnerOption func(*Runner)
 type RunRequest struct {
 	RunID   run.RunID
 	Task    run.TaskSpec
-	Sandbox outbound.Sandbox
+	Context outbound.ToolContext
 }
 
 // RunResult contains the application-level agent run output.
@@ -92,7 +92,7 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (RunResult, error)
 func (r *Runner) newRunSession(ctx context.Context, request RunRequest) (*runSession, error) {
 	tools, err := r.tools.ListTools(ctx, outbound.ToolListRequest{
 		RunID:   request.RunID,
-		Sandbox: request.Sandbox,
+		Context: request.Context,
 	})
 	if err != nil {
 		return nil, err
@@ -175,7 +175,7 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 
 	result, err := r.tools.RunTool(ctx, outbound.ToolCall{
 		RunID:     session.request.RunID,
-		Sandbox:   session.request.Sandbox,
+		Context:   session.request.Context,
 		Name:      parsed.Tool,
 		Arguments: parsed.Arguments,
 	})

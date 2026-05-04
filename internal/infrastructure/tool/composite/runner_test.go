@@ -140,7 +140,7 @@ func TestRunnerUsesRequestContextForDynamicTools(t *testing.T) {
 	}
 
 	tools, err = runner.ListTools(context.Background(), outbound.ToolListRequest{
-		Sandbox: outbound.Sandbox{WorkspacePath: "/tmp/repo"},
+		Context: outbound.ToolContext{WorkspacePath: "/tmp/repo"},
 	})
 	if err != nil {
 		t.Fatalf("ListTools() with workspace error = %v", err)
@@ -195,7 +195,7 @@ type dynamicToolRunner struct {
 }
 
 func (r dynamicToolRunner) ListTools(_ context.Context, request outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
-	if request.Sandbox.WorkspacePath == "" {
+	if request.Context.WorkspacePath == "" {
 		return nil, nil
 	}
 

@@ -12,16 +12,22 @@ type ToolDefinition struct {
 	Description string
 }
 
+// ToolContext carries application execution context visible to tools.
+type ToolContext struct {
+	WorkspacePath string
+	Sandbox       Sandbox
+}
+
 // ToolListRequest contains context needed to list available tools.
 type ToolListRequest struct {
 	RunID   run.RunID
-	Sandbox Sandbox
+	Context ToolContext
 }
 
 // ToolCall describes a provider-neutral tool invocation.
 type ToolCall struct {
 	RunID     run.RunID
-	Sandbox   Sandbox
+	Context   ToolContext
 	Name      string
 	Arguments map[string]string
 }

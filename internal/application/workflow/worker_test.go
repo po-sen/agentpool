@@ -132,6 +132,46 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 	})
 }
 
+func TestWorkerProcessOneDoesNotPrepareSandboxByDefault(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	sandbox := &recordingSandboxProvider{}
+	now := time.Unix(100, 0).UTC()
+
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, now)
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+	if err := queue.Enqueue(ctx, item.ID); err != nil {
+		t.Fatalf("enqueue run: %v", err)
+	}
+
+	worker := newWorkerWithPorts(
+		queue,
+		repo,
+		publisher,
+		now,
+		sandbox,
+		fakeModelClient{},
+		fakeWorkspaceProvider{},
+	)
+
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+	if sandbox.prepareCalled {
+		t.Fatal("sandbox prepare was called")
+	}
+	if sandbox.cleanupCalled {
+		t.Fatal("sandbox cleanup was called")
+	}
+}
+
 func TestWorkerPassesConfiguredWorkspacePathToAgentTools(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
@@ -155,6 +195,7 @@ func TestWorkerPassesConfiguredWorkspacePathToAgentTools(t *testing.T) {
 		t.Fatalf("enqueue run: %v", err)
 	}
 
+	sandbox := &recordingSandboxProvider{}
 	tools := &recordingWorkflowToolRunner{}
 	worker := NewWorker(
 		WorkerDependencies{
@@ -162,7 +203,7 @@ func TestWorkerPassesConfiguredWorkspacePathToAgentTools(t *testing.T) {
 			Repo:       repo,
 			StateStore: repo,
 			Events:     publisher,
-			Sandbox:    fakeSandboxProvider{},
+			Sandbox:    sandbox,
 			Agent:      applicationagent.NewRunner(&toolCallingModelClient{}, tools),
 			Workspace:  fakeWorkspaceProvider{},
 			Policy:     fakePolicyDecision{},
@@ -177,8 +218,14 @@ func TestWorkerPassesConfiguredWorkspacePathToAgentTools(t *testing.T) {
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
-	if tools.calls[0].Sandbox.WorkspacePath != "/tmp/repo" {
-		t.Fatalf("workspace path = %q, want /tmp/repo", tools.calls[0].Sandbox.WorkspacePath)
+	if tools.calls[0].Context.WorkspacePath != "/tmp/repo" {
+		t.Fatalf("workspace path = %q, want /tmp/repo", tools.calls[0].Context.WorkspacePath)
+	}
+	if sandbox.prepareCalled {
+		t.Fatal("sandbox prepare was called")
+	}
+	if sandbox.cleanupCalled {
+		t.Fatal("sandbox cleanup was called")
 	}
 }
 
@@ -600,7 +647,7 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationWhenExecutionFails(t *testi
 	assertEventNotPublished(t, publisher.events, outbound.EventRunFailed)
 }
 
-func TestWorkerProcessOneCleansSandboxWithNonCancelledContext(t *testing.T) {
+func TestWorkerProcessOneDoesNotCleanupWhenSandboxWasNeverPrepared(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -634,11 +681,11 @@ func TestWorkerProcessOneCleansSandboxWithNonCancelledContext(t *testing.T) {
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
-	if !sandbox.cleanupCalled {
-		t.Fatal("sandbox cleanup was not called")
+	if sandbox.prepareCalled {
+		t.Fatal("sandbox prepare was called")
 	}
-	if sandbox.cleanupContextErr != nil {
-		t.Fatalf("cleanup context error = %v, want nil", sandbox.cleanupContextErr)
+	if sandbox.cleanupCalled {
+		t.Fatal("sandbox cleanup was called")
 	}
 }
 
@@ -755,11 +802,14 @@ func (p fakeSandboxProvider) Cleanup(context.Context, outbound.Sandbox) error {
 }
 
 type recordingSandboxProvider struct {
+	prepareCalled     bool
 	cleanupCalled     bool
 	cleanupContextErr error
 }
 
 func (p *recordingSandboxProvider) Prepare(context.Context, outbound.SandboxRequest) (outbound.Sandbox, error) {
+	p.prepareCalled = true
+
 	return outbound.Sandbox{ID: "sandbox_test"}, nil
 }
 

@@ -54,7 +54,7 @@ func NewRunner(cfg Config) *Runner {
 
 // ListTools returns read-only workspace tool definitions when a workspace is available.
 func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
-	if strings.TrimSpace(request.Sandbox.WorkspacePath) == "" {
+	if strings.TrimSpace(request.Context.WorkspacePath) == "" {
 		return nil, nil
 	}
 
@@ -74,9 +74,9 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 func (r *Runner) RunTool(_ context.Context, call outbound.ToolCall) (outbound.ToolResult, error) {
 	switch call.Name {
 	case listFilesToolName:
-		return r.listFiles(call.Sandbox.WorkspacePath, call.Arguments["path"]), nil
+		return r.listFiles(call.Context.WorkspacePath, call.Arguments["path"]), nil
 	case readFileToolName:
-		return r.readFile(call.Sandbox.WorkspacePath, call.Arguments["path"]), nil
+		return r.readFile(call.Context.WorkspacePath, call.Arguments["path"]), nil
 	default:
 		return toolError(fmt.Sprintf("unknown tool: %s", call.Name)), nil
 	}

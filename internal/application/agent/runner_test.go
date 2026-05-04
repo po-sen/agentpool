@@ -68,9 +68,12 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	runner := NewRunner(model, tools)
 
 	result, err := runner.Run(context.Background(), RunRequest{
-		RunID:   "run_test",
-		Task:    run.TaskSpec{Prompt: "do work"},
-		Sandbox: outbound.Sandbox{ID: "sandbox_test", WorkspacePath: "/tmp/workspace"},
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+		Context: outbound.ToolContext{
+			WorkspacePath: "/tmp/workspace",
+			Sandbox:       outbound.Sandbox{ID: "sandbox_test"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
@@ -81,6 +84,12 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	if result.ToolCallCount != 1 {
 		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
 	}
+	if len(tools.listRequests) != 1 {
+		t.Fatalf("len(list requests) = %d, want 1", len(tools.listRequests))
+	}
+	if tools.listRequests[0].Context.WorkspacePath != "/tmp/workspace" {
+		t.Fatalf("list tools workspace path = %q, want /tmp/workspace", tools.listRequests[0].Context.WorkspacePath)
+	}
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
@@ -90,11 +99,11 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	if tools.calls[0].Arguments["text"] != "hello" {
 		t.Fatalf("tool text = %q, want hello", tools.calls[0].Arguments["text"])
 	}
-	if tools.calls[0].Sandbox.ID != "sandbox_test" {
-		t.Fatalf("tool sandbox = %q, want sandbox_test", tools.calls[0].Sandbox.ID)
+	if tools.calls[0].Context.Sandbox.ID != "sandbox_test" {
+		t.Fatalf("tool sandbox = %q, want sandbox_test", tools.calls[0].Context.Sandbox.ID)
 	}
-	if tools.calls[0].Sandbox.WorkspacePath != "/tmp/workspace" {
-		t.Fatalf("tool workspace path = %q, want /tmp/workspace", tools.calls[0].Sandbox.WorkspacePath)
+	if tools.calls[0].Context.WorkspacePath != "/tmp/workspace" {
+		t.Fatalf("tool workspace path = %q, want /tmp/workspace", tools.calls[0].Context.WorkspacePath)
 	}
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
@@ -363,18 +372,20 @@ func (c *recordingModelClient) Generate(_ context.Context, request outbound.Mode
 }
 
 type fakeToolRunner struct {
-	listErr error
-	calls   []outbound.ToolCall
+	listErr      error
+	listRequests []outbound.ToolListRequest
+	calls        []outbound.ToolCall
 }
 
 func newFakeToolRunner() *fakeToolRunner {
 	return &fakeToolRunner{}
 }
 
-func (r *fakeToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
+func (r *fakeToolRunner) ListTools(_ context.Context, request outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
 	if r.listErr != nil {
 		return nil, r.listErr
 	}
+	r.listRequests = append(r.listRequests, request)
 
 	return []outbound.ToolDefinition{
 		{Name: "echo", Description: "Returns text"},

@@ -30,7 +30,7 @@ func TestRunnerListToolsReturnsWorkspaceToolsWithWorkspacePath(t *testing.T) {
 	runner := NewRunner(Config{})
 
 	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{
-		Sandbox: outbound.Sandbox{WorkspacePath: t.TempDir()},
+		Context: outbound.ToolContext{WorkspacePath: t.TempDir()},
 	})
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
@@ -146,7 +146,7 @@ func TestRunnerReadFileRejectsOversizedFile(t *testing.T) {
 	runner := NewRunner(Config{MaxFileBytes: 3})
 
 	result, err := runner.RunTool(context.Background(), outbound.ToolCall{
-		Sandbox:   outbound.Sandbox{WorkspacePath: root},
+		Context:   outbound.ToolContext{WorkspacePath: root},
 		Name:      "read_file",
 		Arguments: map[string]string{"path": "large.txt"},
 	})
@@ -242,7 +242,7 @@ func runWorkspaceTool(t *testing.T, root string, name string, args map[string]st
 
 	runner := NewRunner(Config{})
 	result, err := runner.RunTool(context.Background(), outbound.ToolCall{
-		Sandbox:   outbound.Sandbox{WorkspacePath: root},
+		Context:   outbound.ToolContext{WorkspacePath: root},
 		Name:      name,
 		Arguments: args,
 	})

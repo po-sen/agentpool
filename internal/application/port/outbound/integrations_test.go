@@ -23,7 +23,7 @@ func TestIntegrationPortContracts(t *testing.T) {
 	if _, err := sandbox.Prepare(ctx, SandboxRequest{RunID: "run_test"}); err != nil {
 		t.Fatalf("Prepare() error = %v", err)
 	}
-	if err := sandbox.Cleanup(ctx, Sandbox{ID: "sandbox_test", WorkspacePath: "/tmp/repo"}); err != nil {
+	if err := sandbox.Cleanup(ctx, Sandbox{ID: "sandbox_test"}); err != nil {
 		t.Fatalf("Cleanup() error = %v", err)
 	}
 	if _, err := git.Fetch(ctx, GitFetchRequest{RepositoryURL: "https://example.com/repo.git"}); err != nil {
@@ -55,7 +55,7 @@ func (fakeIDGenerator) NewRunID() (run.RunID, error) {
 type fakeSandboxProvider struct{}
 
 func (fakeSandboxProvider) Prepare(context.Context, SandboxRequest) (Sandbox, error) {
-	return Sandbox{ID: "sandbox_test", WorkspacePath: "/tmp/repo"}, nil
+	return Sandbox{ID: "sandbox_test"}, nil
 }
 
 func (fakeSandboxProvider) Cleanup(context.Context, Sandbox) error {

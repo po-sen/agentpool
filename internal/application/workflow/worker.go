@@ -12,7 +12,6 @@ import (
 )
 
 const defaultPollInterval = 200 * time.Millisecond
-const sandboxCleanupTimeout = 30 * time.Second
 const publicFailureReason = "run failed"
 
 const (
@@ -34,7 +33,6 @@ type Worker struct {
 	repo         run.Repository
 	stateStore   outbound.RunStateStore
 	events       outbound.EventPublisher
-	sandbox      outbound.SandboxProvider
 	agent        *agent.Runner
 	workspace    outbound.WorkspaceProvider
 	policy       outbound.PolicyDecisionPort
@@ -83,7 +81,6 @@ func NewWorker(
 		repo:         deps.Repo,
 		stateStore:   deps.StateStore,
 		events:       deps.Events,
-		sandbox:      deps.Sandbox,
 		agent:        deps.Agent,
 		workspace:    deps.Workspace,
 		policy:       deps.Policy,
@@ -246,23 +243,6 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run, workspacePath stri
 		return agent.RunResult{}, err
 	}
 
-	sandbox, err := w.sandbox.Prepare(ctx, outbound.SandboxRequest{
-		RunID: item.ID,
-		Task:  item.Task,
-	})
-	if err != nil {
-		return agent.RunResult{}, err
-	}
-	if workspacePath != "" {
-		sandbox.WorkspacePath = workspacePath
-	}
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sandboxCleanupTimeout)
-		defer cancel()
-
-		_ = w.sandbox.Cleanup(cleanupCtx, sandbox)
-	}()
-
 	now = w.clock()
 	expectedStatus = item.Status
 	if err := item.StartRunning(now); err != nil {
@@ -275,10 +255,13 @@ func (w *Worker) startRun(ctx context.Context, item *run.Run, workspacePath stri
 		return agent.RunResult{}, err
 	}
 
+	// TODO: Prepare sandbox lazily when sandbox-backed tools are introduced.
 	result, err := w.agent.Run(ctx, agent.RunRequest{
-		RunID:   item.ID,
-		Task:    item.Task,
-		Sandbox: sandbox,
+		RunID: item.ID,
+		Task:  item.Task,
+		Context: outbound.ToolContext{
+			WorkspacePath: workspacePath,
+		},
 	})
 
 	if err != nil {

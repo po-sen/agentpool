@@ -46,7 +46,7 @@ func (r *Runner) RunTool(ctx context.Context, call outbound.ToolCall) (outbound.
 	for _, runner := range r.runners {
 		tools, err := runner.ListTools(ctx, outbound.ToolListRequest{
 			RunID:   call.RunID,
-			Sandbox: call.Sandbox,
+			Context: call.Context,
 		})
 		if err != nil {
 			return outbound.ToolResult{}, err

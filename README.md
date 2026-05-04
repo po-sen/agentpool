@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - There is no real Docker sandbox yet.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol, builtin `echo`, run-requested read-only workspace inspection tools, and an optional configured local workspace source for dev runs; shell, writes, real git clone, and real sandboxed execution are not implemented yet.
+- Agent loop v1 supports a minimal JSON action protocol, builtin `echo`, run-requested read-only workspace inspection tools, and an optional configured local workspace source for dev runs; simple prompt-only runs do not prepare a sandbox, and shell, writes, real git clone, and real sandboxed execution are not implemented yet.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -329,7 +329,7 @@ The explicit no-workspace form is also accepted:
 }
 ```
 
-The local workspace provider resolves the configured directory only for runs that request `workspace.type=configured`; the worker copies that path into `Sandbox.WorkspacePath`, and the read-only workspace tools use it as their root. Tools cannot escape the workspace. `read_file` only supports UTF-8 text files and size-limited content. This is not a git clone provider yet, and it does not run git commands or mutate files. Future workspace source types may include snapshot, git, or mounted workspaces.
+The local workspace provider resolves the configured directory only for runs that request `workspace.type=configured`; the worker passes that path through the tool context, and the read-only workspace tools use it as their root. This does not prepare a sandbox. Tools cannot escape the workspace. `read_file` only supports UTF-8 text files and size-limited content. This is not a git clone provider yet, and it does not run git commands or mutate files. Future workspace source types may include snapshot, git, or mounted workspaces.
 
 ## Tools
 
@@ -388,7 +388,7 @@ Final answers use:
 }
 ```
 
-Workspace tools are read-only and dynamically advertised. Runs without workspace access do not expose `list_files` or `read_file` to the model. `read_file` is text-only, rejects files larger than 64 KiB by default, rejects path traversal and absolute paths, and rejects symlink escapes outside the workspace. If a workspace tool is called without a workspace path, it returns a tool error.
+Workspace tools are read-only and dynamically advertised. Runs without workspace access do not expose `list_files` or `read_file` to the model. Workspace path is separate from sandbox state, so these read-only tools can inspect the resolved workspace without preparing a sandbox. `read_file` is text-only, rejects files larger than 64 KiB by default, rejects path traversal and absolute paths, and rejects symlink escapes outside the workspace. If a workspace tool is called without a workspace path, it returns a tool error.
 
 Example prompt:
 
@@ -396,7 +396,7 @@ Example prompt:
 Use tools to inspect the workspace. List files in the root, then read README.md if present, then summarize what the project does.
 ```
 
-There is still no shell, write access, Docker execution, Git mutation, network fetch, package install, or arbitrary command execution. Real write-capable or command tools will require sandbox and policy controls.
+There is still no shell, write access, Docker execution, Git mutation, network fetch, package install, or arbitrary command execution. Sandbox execution is reserved for future shell, write, and test tools that intentionally require it.
 
 ## Run Lifecycle
 
@@ -418,7 +418,7 @@ Completed runs persist the agent result summary.
 
 ## Run Steps
 
-Run steps are coarse execution timeline entries. The current worker records `prepare` for policy, secrets, and source context preparation, and `agent` for sandbox/model execution. Steps explain the broad phase outcome, but they are not full logs. Tool logs, artifacts, and streaming output are future features.
+Run steps are coarse execution timeline entries. The current worker records `prepare` for policy, secrets, and source context preparation, and `agent` for model and tool-loop execution. Steps explain the broad phase outcome, but they are not full logs. Tool logs, artifacts, and streaming output are future features.
 
 ## Architecture
 
