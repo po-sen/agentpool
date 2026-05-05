@@ -53,6 +53,39 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 	}
 }
 
+func TestRunnerExposesSandboxVerificationPolicyToModel(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{{Content: `{"type":"final","summary":"done"}`}},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "workspace", Description: "Lists workspace metadata"},
+		{Name: "sandbox_exec", Description: "Runs a shell command"},
+	})
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "count the words exactly"},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspace(),
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	systemMessage := model.requests[0].Messages[0]
+	assertMessage(t, systemMessage, "system", "When sandbox_exec is available, prefer using it before the final answer for deterministic or verifiable tasks")
+	assertMessage(t, systemMessage, "system", "Do not guess exact answers when sandbox_exec can cheaply verify them.")
+	assertMessage(t, systemMessage, "system", "exact arithmetic, counts, hashes, encoding/decoding checks, file content inspection, grep/search")
+	if !strings.Contains(result.SystemPrompt, "deterministic or verifiable tasks") {
+		t.Fatalf("SystemPrompt = %q, want sandbox verification policy", result.SystemPrompt)
+	}
+}
+
 func TestRunnerReturnsJSONFinalActionSummary(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{{Content: `{"type":"final","summary":"done"}`}},

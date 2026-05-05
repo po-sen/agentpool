@@ -434,6 +434,8 @@ Each run gets a workspace with two areas:
 
 Run attachments are materialized under `/workspace/input` by default. File contents are inspected through `sandbox_exec`, for example with `sed`, `cat`, `grep`, or scripts written under `/workspace/work`. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
 
+When `sandbox_exec` is available, deterministic or exact-answer tasks should be verified through sandbox execution instead of guessed. Examples include exact arithmetic, counting or searching files, transforming data, and running small scripts, tests, builds, or linters.
+
 Tool calls use this provider-neutral shape when a tool is available:
 
 ```json

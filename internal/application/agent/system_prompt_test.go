@@ -47,7 +47,11 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		`{"type":"final","summary":"..."}`,
 		`{"type":"tool_call","tool":"<tool_name>","arguments":{"key":"value"}}`,
 		"Call tools when they are useful",
-		"Do not call tools when the task can be answered directly.",
+		"For subjective discussion or simple conversation, answer directly when no tool is needed.",
+		"When sandbox_exec is available, prefer using it before the final answer for deterministic or verifiable tasks",
+		"computed, inspected, tested, counted, searched, or derived by running a command or script",
+		"Do not guess exact answers when sandbox_exec can cheaply verify them.",
+		"Use sandbox_exec for exact arithmetic, counts, hashes, encoding/decoding checks, file content inspection, grep/search, data sorting/filtering/transformation, tests, builds, linters, and code behavior checks.",
 		"Only call tools listed under Available tools.",
 		"Never invent tool names.",
 		"Tool names are exact and case-sensitive.",
@@ -60,6 +64,7 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		"timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10",
 		"Use workspace with operation=list to discover files",
 		"workspace does not read file contents.",
+		"Uploaded file paths in the task message are relative to /workspace/input when using sandbox_exec.",
 		"Original run inputs are under /workspace/input and are read-only.",
 		"Generated scripts, temp files, tests, and outputs belong under /workspace/work.",
 		"To read file contents, use sandbox_exec",
@@ -73,6 +78,12 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt does not contain %q:\n%s", want, prompt)
+		}
+	}
+
+	for _, oldToolName := range []string{"list_" + "files", "read_" + "file", "run_" + "shell"} {
+		if strings.Contains(prompt, oldToolName) {
+			t.Fatalf("prompt contains old tool name %q:\n%s", oldToolName, prompt)
 		}
 	}
 }
@@ -90,5 +101,18 @@ func TestBuildSystemPromptHandlesNoTools(t *testing.T) {
 	}
 	if strings.Contains(prompt, "Arguments:") {
 		t.Fatalf("no-tools prompt contains arguments metadata:\n%s", prompt)
+	}
+}
+
+func TestBuildSystemPromptDoesNotPreferSandboxExecWhenUnavailable(t *testing.T) {
+	prompt := buildSystemPrompt([]outbound.ToolDefinition{
+		{Name: "workspace", Description: "Lists workspace files and stats workspace paths."},
+	})
+
+	if strings.Contains(prompt, "prefer using it before the final answer") {
+		t.Fatalf("prompt prefers sandbox_exec when it is unavailable:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "Do not guess exact answers when sandbox_exec can cheaply verify them.") {
+		t.Fatalf("prompt includes sandbox_exec verification rule when it is unavailable:\n%s", prompt)
 	}
 }

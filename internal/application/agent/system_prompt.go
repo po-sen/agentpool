@@ -12,11 +12,16 @@ func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 	builder.WriteString("Respond with exactly one JSON object and no markdown fences.\n")
 	builder.WriteString("For a final answer, use {\"type\":\"final\",\"summary\":\"...\"}.\n")
 	builder.WriteString("For a tool call, use {\"type\":\"tool_call\",\"tool\":\"<tool_name>\",\"arguments\":{\"key\":\"value\"}}.\n")
-	builder.WriteString("Call tools when they are useful to inspect available information. Do not call tools when the task can be answered directly.\n")
+	builder.WriteString("Call tools when they are useful to inspect available information. For subjective discussion or simple conversation, answer directly when no tool is needed.\n")
+	if toolIsDefined(tools, "sandbox_exec") {
+		builder.WriteString("When sandbox_exec is available, prefer using it before the final answer for deterministic or verifiable tasks that can be computed, inspected, tested, counted, searched, or derived by running a command or script. Do not guess exact answers when sandbox_exec can cheaply verify them.\n")
+		builder.WriteString("Use sandbox_exec for exact arithmetic, counts, hashes, encoding/decoding checks, file content inspection, grep/search, data sorting/filtering/transformation, tests, builds, linters, and code behavior checks.\n")
+	}
 	builder.WriteString("Only call tools listed under Available tools. Never invent tool names. Tool names are exact and case-sensitive.\n")
 	builder.WriteString("If Available tools is \"- none\", do not call any tool. Return {\"type\":\"final\",\"summary\":\"...\"} directly.\n")
 	builder.WriteString("If the user asks you to use a tool that is not available, explain that the tool is unavailable and answer directly if possible.\n")
 	builder.WriteString("Use workspace with operation=list to discover files and operation=stat to inspect metadata. workspace does not read file contents.\n")
+	builder.WriteString("Uploaded file paths in the task message are relative to /workspace/input when using sandbox_exec.\n")
 	builder.WriteString("Original run inputs are under /workspace/input and are read-only. Generated scripts, temp files, tests, and outputs belong under /workspace/work.\n")
 	builder.WriteString("To read file contents, use sandbox_exec with concrete commands such as sed -n '1,160p' /workspace/input/README.md or cat /workspace/input/README.md.\n")
 	builder.WriteString("To search files, use sandbox_exec with concrete commands such as grep -R \"keyword\" /workspace/input.\n")
@@ -42,6 +47,16 @@ func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 	}
 
 	return builder.String()
+}
+
+func toolIsDefined(tools []outbound.ToolDefinition, name string) bool {
+	for _, tool := range tools {
+		if tool.Name == name {
+			return true
+		}
+	}
+
+	return false
 }
 
 func writeToolArguments(builder *strings.Builder, arguments []outbound.ToolArgumentDefinition) {
