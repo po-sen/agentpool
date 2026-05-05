@@ -203,14 +203,63 @@ go run ./cmd/agentpool dev
 go run ./cmd/agentpool server
 go run ./cmd/agentpool worker
 go run ./cmd/agentpool version
+go run ./cmd/agentpool run --prompt "Use run_shell to calculate 234 * 887123 with sh."
+go run ./cmd/agentpool get run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
+go run ./cmd/agentpool list
+go run ./cmd/agentpool cancel run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
 ```
 
 - `agentpool dev`: starts the HTTP API and an embedded worker in the same process.
 - `agentpool server`: starts only the HTTP API server.
 - `agentpool worker`: starts only the worker process.
 - `agentpool version`: prints version info.
+- `agentpool run`: submits a run through the HTTP API and waits for a terminal result by default.
+- `agentpool get`: fetches one run.
+- `agentpool list`: lists known runs.
+- `agentpool cancel`: cancels one run before it reaches a terminal state.
 
 `server` and `worker` are separate process modes intended for future persistent infrastructure implementations. With the current in-memory repository and queue, separate processes do not share state.
+
+The local testing CLI is an HTTP client. Start `dev` in one terminal so the server and worker share in-memory state:
+
+```sh
+AGENTPOOL_SANDBOX_PROVIDER=docker \
+AGENTPOOL_SANDBOX_IMAGE=alpine:3.20 \
+go run ./cmd/agentpool dev
+```
+
+Then submit and wait for a run from another terminal:
+
+```sh
+go run ./cmd/agentpool run \
+  --prompt "Use run_shell to calculate 234 * 887123 with sh."
+```
+
+Upload files with repeated `--file` flags:
+
+```sh
+go run ./cmd/agentpool run \
+  --prompt "Inspect README.md and summarize it" \
+  --file README.md
+```
+
+Debug output includes the recorded `agent_system_prompt`, full `agent_turns`, and full `tool_calls`:
+
+```sh
+go run ./cmd/agentpool run \
+  --prompt "Use run_shell to calculate 234 * 887123 with sh." \
+  --debug
+```
+
+Use JSON output when scripting:
+
+```sh
+go run ./cmd/agentpool run \
+  --prompt "Use run_shell to calculate 234 * 887123 with sh." \
+  --json
+```
+
+The CLI address defaults to `http://localhost:8080`. Override it with `--addr` or `AGENTPOOL_CLI_ADDR`.
 
 ## HTTP API
 

@@ -1,0 +1,232 @@
+package cli
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+)
+
+const (
+	sectionAgentSystemPrompt = "Agent system prompt:"
+	sectionAgentTurns        = "Agent turns:"
+	sectionFailure           = "Failure:"
+	sectionResult            = "Result:"
+	sectionSteps             = "Steps:"
+	sectionToolCalls         = "Tool calls:"
+	formatTwoValuesLine      = "%s %s\n"
+	statusLabel              = "Status:"
+)
+
+// WriteRunOutput writes one run in JSON or human-readable form.
+func WriteRunOutput(writer io.Writer, response RunResponse, options OutputOptions) error {
+	if options.JSON {
+		return writeJSON(writer, response)
+	}
+	_, err := writer.Write([]byte(FormatRun(response, options)))
+
+	return err
+}
+
+// WriteRunsOutput writes a run list in JSON or human-readable form.
+func WriteRunsOutput(writer io.Writer, responses []RunResponse, options OutputOptions) error {
+	if options.JSON {
+		return writeJSON(writer, responses)
+	}
+	_, err := writer.Write([]byte(FormatRuns(responses, options)))
+
+	return err
+}
+
+// FormatRun returns a human-readable run summary.
+func FormatRun(response RunResponse, options OutputOptions) string {
+	var buffer bytes.Buffer
+	fmt.Fprintf(&buffer, "Run: %s\n", response.ID)
+	fmt.Fprintf(&buffer, formatTwoValuesLine, statusLabel, response.Status)
+	writeFailure(&buffer, response)
+	writeResult(&buffer, response)
+	writeSteps(&buffer, response.Steps)
+	writeAgentTurns(&buffer, response.AgentTurns, options.Debug)
+	writeToolCalls(&buffer, response.ToolCalls, options.Debug)
+	if options.Debug && response.AgentSystemPrompt != "" {
+		writeSectionHeader(&buffer, sectionAgentSystemPrompt)
+		fmt.Fprintf(&buffer, "%s\n", response.AgentSystemPrompt)
+	}
+
+	return buffer.String()
+}
+
+// FormatRuns returns a human-readable run list.
+func FormatRuns(responses []RunResponse, options OutputOptions) string {
+	if len(responses) == 0 {
+		return "Runs: none\n"
+	}
+
+	var buffer bytes.Buffer
+	for index, response := range responses {
+		if index > 0 {
+			buffer.WriteString("\n")
+		}
+		if options.Debug {
+			buffer.WriteString(FormatRun(response, options))
+			continue
+		}
+		fmt.Fprintf(&buffer, "Run: %s\n", response.ID)
+		fmt.Fprintf(&buffer, formatTwoValuesLine, statusLabel, response.Status)
+		writeFailure(&buffer, response)
+		if response.Result != nil && response.Result.Summary != "" {
+			fmt.Fprintf(&buffer, "Summary: %s\n", response.Result.Summary)
+		}
+	}
+
+	return buffer.String()
+}
+
+func writeJSON(writer io.Writer, value any) error {
+	encoder := json.NewEncoder(writer)
+	encoder.SetIndent("", "  ")
+
+	return encoder.Encode(value)
+}
+
+func writeFailure(buffer *bytes.Buffer, response RunResponse) {
+	if response.FailureCode == "" && response.FailureMessage == "" && response.FailureReason == "" {
+		return
+	}
+
+	buffer.WriteString("\n")
+	if response.FailureCode != "" || response.FailureMessage != "" {
+		fmt.Fprintf(buffer, "%s %s", sectionFailure, response.FailureCode)
+		if response.FailureMessage != "" {
+			fmt.Fprintf(buffer, " - %s", response.FailureMessage)
+		}
+		buffer.WriteString("\n")
+
+		return
+	}
+	fmt.Fprintf(buffer, formatTwoValuesLine, sectionFailure, response.FailureReason)
+}
+
+func writeResult(buffer *bytes.Buffer, response RunResponse) {
+	if response.Result == nil || response.Result.Summary == "" {
+		return
+	}
+
+	writeSectionHeader(buffer, sectionResult)
+	fmt.Fprintf(buffer, "%s\n", response.Result.Summary)
+}
+
+func writeSteps(buffer *bytes.Buffer, steps []StepResponse) {
+	if len(steps) == 0 {
+		return
+	}
+
+	writeSectionHeader(buffer, sectionSteps)
+	for _, step := range steps {
+		line := step.Name
+		if step.Status != "" {
+			line += " - " + step.Status
+		}
+		if step.Message != "" {
+			line += " - " + step.Message
+		}
+		fmt.Fprintf(buffer, "- %s\n", line)
+	}
+}
+
+func writeAgentTurns(buffer *bytes.Buffer, turns []AgentTurnResponse, debug bool) {
+	if len(turns) == 0 {
+		return
+	}
+
+	writeSectionHeader(buffer, sectionAgentTurns)
+	for _, turn := range turns {
+		line := agentTurnLine(turn)
+		if debug {
+			line = agentTurnDebugLine(turn)
+		}
+		fmt.Fprintf(buffer, "%d. %s\n", turn.Index, line)
+	}
+}
+
+func writeToolCalls(buffer *bytes.Buffer, calls []ToolCallResponse, debug bool) {
+	if len(calls) == 0 {
+		return
+	}
+
+	writeSectionHeader(buffer, sectionToolCalls)
+	for _, call := range calls {
+		if debug {
+			fmt.Fprintf(buffer, "- %s: %s\n", call.Name, toolCallStatus(call))
+			writeArguments(buffer, call.Arguments)
+			if call.Result != "" {
+				fmt.Fprintf(buffer, "  result: %s\n", call.Result)
+			}
+			continue
+		}
+		fmt.Fprintf(buffer, "- %s: %s\n", call.Name, toolCallStatus(call))
+	}
+}
+
+func agentTurnLine(turn AgentTurnResponse) string {
+	parts := compactParts(turn.Status, turn.ToolName, turn.Message)
+	if len(parts) == 0 {
+		return "turn"
+	}
+
+	return strings.Join(parts, " ")
+}
+
+func agentTurnDebugLine(turn AgentTurnResponse) string {
+	parts := compactParts(turn.Status, turn.ActionType, turn.ToolName, turn.Message)
+	line := strings.Join(parts, " ")
+	if turn.ResponsePreview != "" {
+		line += "\n  response_preview: " + turn.ResponsePreview
+	}
+	if line == "" {
+		return "turn"
+	}
+
+	return line
+}
+
+func toolCallStatus(call ToolCallResponse) string {
+	if call.IsError {
+		return "error"
+	}
+
+	return "ok"
+}
+
+func writeArguments(buffer *bytes.Buffer, arguments map[string]string) {
+	if len(arguments) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(arguments))
+	for key := range arguments {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		fmt.Fprintf(buffer, "  %s: %s\n", key, arguments[key])
+	}
+}
+
+func writeSectionHeader(buffer *bytes.Buffer, title string) {
+	buffer.WriteString("\n")
+	buffer.WriteString(title)
+	buffer.WriteString("\n")
+}
+
+func compactParts(parts ...string) []string {
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) != "" {
+			result = append(result, part)
+		}
+	}
+
+	return result
+}
