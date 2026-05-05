@@ -136,24 +136,26 @@ func normalizeProtocolResponse(content string) string {
 }
 
 func decodeActionObject(content string) (map[string]any, *actionParseError) {
-	decoder := json.NewDecoder(strings.NewReader(content))
-	decoder.UseNumber()
-
-	var decoded any
-	if err := decoder.Decode(&decoded); err != nil {
+	decoded, extraErr, decodeErr := decodeSingleJSONValue(content)
+	if decodeErr != nil {
+		if repaired, ok := repairMarkdownEscapesInJSONStrings(content); ok {
+			decoded, extraErr, decodeErr = decodeSingleJSONValue(repaired)
+		}
+	}
+	if decodeErr != nil {
 		return nil, newActionParseError(
 			actionParseCodeInvalidJSON,
 			"model response was not valid JSON",
 			`Return exactly one JSON object like {"type":"final","summary":"..."}`,
-			err,
+			decodeErr,
 		)
 	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+	if !errors.Is(extraErr, io.EOF) {
 		return nil, newActionParseError(
 			actionParseCodeMultipleJSONValues,
 			"model response must contain exactly one JSON object",
 			`Return only one object, for example {"type":"final","summary":"..."}`,
-			err,
+			extraErr,
 		)
 	}
 
@@ -168,6 +170,87 @@ func decodeActionObject(content string) (map[string]any, *actionParseError) {
 	}
 
 	return raw, nil
+}
+
+func decodeSingleJSONValue(content string) (any, error, error) {
+	decoder := json.NewDecoder(strings.NewReader(content))
+	decoder.UseNumber()
+
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil, nil, err
+	}
+
+	return decoded, decoder.Decode(&struct{}{}), nil
+}
+
+func repairMarkdownEscapesInJSONStrings(content string) (string, bool) {
+	var builder strings.Builder
+	builder.Grow(len(content))
+
+	changed := false
+	inString := false
+	for index := 0; index < len(content); index++ {
+		current := content[index]
+		if !inString {
+			builder.WriteByte(current)
+			if current == '"' {
+				inString = true
+			}
+			continue
+		}
+
+		switch current {
+		case '"':
+			builder.WriteByte(current)
+			inString = false
+		case '\\':
+			replacement, advance, repaired := repairedJSONStringEscape(content, index)
+			builder.WriteString(replacement)
+			index += advance
+			changed = changed || repaired
+		default:
+			builder.WriteByte(current)
+		}
+	}
+	if !changed {
+		return content, false
+	}
+
+	return builder.String(), true
+}
+
+func repairedJSONStringEscape(content string, index int) (string, int, bool) {
+	if index+1 >= len(content) {
+		return `\`, 0, false
+	}
+	next := content[index+1]
+	if isValidJSONEscape(next) {
+		return content[index : index+2], 1, false
+	}
+	if isMarkdownEscapedPunctuation(next) {
+		return `\\` + string(next), 1, true
+	}
+
+	return `\`, 0, false
+}
+
+func isValidJSONEscape(value byte) bool {
+	switch value {
+	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u':
+		return true
+	default:
+		return false
+	}
+}
+
+func isMarkdownEscapedPunctuation(value byte) bool {
+	switch value {
+	case '!', '#', '*', '+', '-', '.', '>', '[', ']', '_', '`', '~':
+		return true
+	default:
+		return false
+	}
 }
 
 func parseActionObject(raw map[string]any) (action, *actionParseError) {

@@ -72,6 +72,14 @@ func TestParseActionParsesToolCallScalarArgumentsAsStrings(t *testing.T) {
 	}
 }
 
+func TestParseActionRepairsMarkdownEscapedPunctuationInJSONString(t *testing.T) {
+	result := parseAction(`{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"expr 123 \* 654321 \* 2"}}`)
+	assertValidAction(t, result, actionTypeToolCall)
+	if result.action.Arguments["command"] != `expr 123 \* 654321 \* 2` {
+		t.Fatalf("command = %q, want shell-escaped expression", result.action.Arguments["command"])
+	}
+}
+
 func TestParseActionTreatsPlainTextAsNaturalLanguage(t *testing.T) {
 	result := parseAction("done")
 	if result.status != actionParseNaturalLanguage {
