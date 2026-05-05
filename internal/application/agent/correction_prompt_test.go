@@ -69,3 +69,39 @@ func TestBuildUnavailableToolCorrectionMessageListsAvailableTools(t *testing.T) 
 		t.Fatalf("message does not mention requested tool:\n%s", message)
 	}
 }
+
+func TestBuildPlaceholderToolArgumentCorrectionMessageUsesUploadedFiles(t *testing.T) {
+	message := buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
+		Placeholders:    []string{"command=<file_path>"},
+		AvailableTools:  []string{"list_files", "run_shell"},
+		UploadedFileIDs: []string{"README.md"},
+	})
+
+	for _, want := range []string{
+		"Tool call error:",
+		"placeholder argument values: command=<file_path>",
+		"Do not use angle-bracket placeholders such as <file_path>.",
+		"Uploaded files: README.md.",
+		"Use these exact relative paths",
+		"Available tools: list_files, run_shell",
+		"Return exactly one JSON object.",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
+func TestBuildPlaceholderToolArgumentCorrectionMessageHandlesNoUploadedFiles(t *testing.T) {
+	message := buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{})
+
+	for _, want := range []string{
+		"placeholder argument values: one or more arguments",
+		"discover it with an available file-listing tool",
+		"Available tools: none",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}

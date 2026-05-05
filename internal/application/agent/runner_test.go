@@ -78,6 +78,42 @@ func TestRunnerReturnsJSONFinalActionSummary(t *testing.T) {
 	})
 }
 
+func TestRunnerIncludesUploadedFileMetadataInInitialMessage(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{{Content: `{"type":"final","summary":"done"}`}},
+	}
+	runner := NewRunner(model, newFakeToolRunner())
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task: run.TaskSpec{
+			Prompt: "count this file",
+			Attachments: []run.TaskAttachment{
+				{
+					Filename:  "README.md",
+					MediaType: "text/markdown",
+					Content:   []byte("# Demo\n"),
+					SizeBytes: 7,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "done" {
+		t.Fatalf("summary = %q, want done", result.Summary)
+	}
+	initialUserMessage := model.requests[0].Messages[1]
+	assertMessage(t, initialUserMessage, "user", "count this file")
+	assertMessage(t, initialUserMessage, "user", "Uploaded files available in the workspace:")
+	assertMessage(t, initialUserMessage, "user", "path: README.md; media_type: text/markdown; size_bytes: 7")
+	assertMessage(t, initialUserMessage, "user", "If the user refers to this file without naming it")
+	if strings.Contains(initialUserMessage.Content, "# Demo") {
+		t.Fatalf("initial user message exposed attachment content: %q", initialUserMessage.Content)
+	}
+}
+
 func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
@@ -236,6 +272,75 @@ func TestRunnerRecordsExistingToolResultError(t *testing.T) {
 	}
 	lastMessages := model.requests[1].Messages
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool error for read_file:\nfile not found")
+}
+
+func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"run_shell","arguments":{"command":"wc -m <file_path>"}}`},
+			{Content: `{"type":"tool_call","tool":"run_shell","arguments":{"command":"wc -m README.md"}}`},
+			{Content: `{"type":"final","summary":"README.md has 123 characters"}`},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "list_files", Description: "Lists files"},
+		{Name: "run_shell", Description: "Runs shell commands"},
+	})
+	tools.results = map[string]outbound.ToolResult{
+		"run_shell": {Content: "exit_code: 0\nstdout:\n123 README.md\n"},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task: run.TaskSpec{
+			Prompt: "count this file through sh",
+			Attachments: []run.TaskAttachment{
+				{Filename: "README.md", MediaType: "text/markdown", SizeBytes: 123},
+			},
+		},
+		Context: outbound.ToolContext{
+			WorkspacePath:     "/tmp/workspace",
+			WorkspaceHasFiles: true,
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "README.md has 123 characters" {
+		t.Fatalf("summary = %q, want corrected final", result.Summary)
+	}
+	if result.ToolCallCount != 1 {
+		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want only corrected shell call", len(tools.calls))
+	}
+	if tools.calls[0].Arguments["command"] != "wc -m README.md" {
+		t.Fatalf("run_shell command = %q, want corrected file path", tools.calls[0].Arguments["command"])
+	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:           1,
+		status:          run.AgentTurnStatusInvalidToolCall,
+		actionType:      run.AgentTurnActionTypeToolCall,
+		toolName:        "run_shell",
+		message:         "tool call arguments contain placeholder values",
+		responsePreview: `{"type":"tool_call","tool":"run_shell","arguments":{"command":"wc -m <file_path>"}}`,
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "run_shell",
+	})
+	correction := model.requests[1].Messages[len(model.requests[1].Messages)-1]
+	assertMessage(t, correction, "user", "placeholder argument values: command=<file_path>")
+	assertMessage(t, correction, "user", "Uploaded files: README.md")
+	assertMessage(t, correction, "user", "Available tools: list_files, run_shell")
 }
 
 func TestRunnerAllowsAdvertisedRunShellTool(t *testing.T) {

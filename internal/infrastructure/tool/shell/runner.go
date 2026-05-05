@@ -75,9 +75,9 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        argumentCommand,
-					Description: "Shell command to run inside the prepared sandbox workspace.",
+					Description: "Shell command to run inside the prepared sandbox workspace. Uploaded files are available as relative paths from the workspace root.",
 					Required:    true,
-					Example:     "pwd && ls -la",
+					Example:     "wc -m README.md",
 				},
 				{
 					Name:        argumentTimeoutSeconds,

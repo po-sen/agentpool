@@ -29,9 +29,9 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        "command",
-					Description: "Shell command to run inside the prepared sandbox workspace.",
+					Description: "Shell command to run inside the prepared sandbox workspace. Uploaded files are available as relative paths from the workspace root.",
 					Required:    true,
-					Example:     "pwd && ls -la",
+					Example:     "wc -m README.md",
 				},
 				{
 					Name:        "timeout_seconds",
@@ -58,9 +58,14 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		"read_file: Reads text files",
 		"path (required): Relative path of the uploaded workspace file to read. Example: README.md",
 		"run_shell: Runs a command inside the prepared sandbox workspace.",
-		"command (required): Shell command to run inside the prepared sandbox workspace. Example: pwd && ls -la",
+		"command (required): Shell command to run inside the prepared sandbox workspace. Uploaded files are available as relative paths from the workspace root. Example: wc -m README.md",
 		"timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10",
 		"discover uploaded files with list_files",
+		"Uploaded files are available as relative paths in the workspace root.",
+		"If exactly one uploaded file is listed",
+		"For run_shell, the current working directory is the workspace root.",
+		"wc -m README.md",
+		"Never use placeholder argument values such as <file_path>",
 		"no markdown fences",
 		"Do not return tool_result.",
 		"Do not return multiple JSON objects.",

@@ -74,9 +74,9 @@ func TestListToolsRequiresSandboxAndWorkspace(t *testing.T) {
 	}
 	commandArgument := tools[0].Arguments[0]
 	if commandArgument.Name != argumentCommand ||
-		commandArgument.Description != "Shell command to run inside the prepared sandbox workspace." ||
+		commandArgument.Description != "Shell command to run inside the prepared sandbox workspace. Uploaded files are available as relative paths from the workspace root." ||
 		!commandArgument.Required ||
-		commandArgument.Example != "pwd && ls -la" {
+		commandArgument.Example != "wc -m README.md" {
 		t.Fatalf("run_shell command argument = %#v, want required command metadata", commandArgument)
 	}
 	timeoutArgument := tools[0].Arguments[1]

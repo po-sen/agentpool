@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -176,7 +177,7 @@ func (r *Runner) newRunSession(ctx context.Context, request RunRequest) (*runSes
 		availableToolNames: availableToolNames(tools),
 		messages: []outbound.ModelMessage{
 			{Role: modelRoleSystem, Content: systemPrompt},
-			{Role: modelRoleUser, Content: request.Task.Prompt},
+			{Role: modelRoleUser, Content: buildTaskMessage(request.Task)},
 		},
 	}, nil
 }
@@ -305,6 +306,9 @@ func (r *Runner) handleAction(
 		if !session.toolIsAvailable(parsed.Tool) {
 			return handleUnavailableToolCall(session, content, parsed, turnIndex, startedAt, endedAt)
 		}
+		if placeholders := placeholderArgumentValues(parsed.Arguments); len(placeholders) > 0 {
+			return handlePlaceholderToolCall(session, content, parsed, placeholders, turnIndex, startedAt, endedAt)
+		}
 
 		session.recordTurn(TurnRecord{
 			Index:           turnIndex,
@@ -334,6 +338,40 @@ func (r *Runner) handleAction(
 			errors.New("unknown agent action type"),
 		)
 	}
+}
+
+func buildTaskMessage(task run.TaskSpec) string {
+	if len(task.Attachments) == 0 {
+		return task.Prompt
+	}
+
+	var builder strings.Builder
+	builder.WriteString(task.Prompt)
+	builder.WriteString("\n\nUploaded files available in the workspace:\n")
+	for _, attachment := range task.Attachments {
+		builder.WriteString("- path: ")
+		builder.WriteString(attachment.Filename)
+		if attachment.MediaType != "" {
+			builder.WriteString("; media_type: ")
+			builder.WriteString(attachment.MediaType)
+		}
+		builder.WriteString("; size_bytes: ")
+		builder.WriteString(strconv.FormatInt(attachmentSizeBytes(attachment), 10))
+		builder.WriteString("\n")
+	}
+	if len(task.Attachments) == 1 {
+		builder.WriteString("If the user refers to this file without naming it, use the uploaded path above.\n")
+	}
+
+	return builder.String()
+}
+
+func attachmentSizeBytes(attachment run.TaskAttachment) int64 {
+	if attachment.SizeBytes > 0 {
+		return attachment.SizeBytes
+	}
+
+	return int64(len(attachment.Content))
 }
 
 func (s *runSession) finalResult(summary string) RunResult {
@@ -394,6 +432,54 @@ func handleUnavailableToolCall(
 	)
 
 	return RunResult{}, false, nil
+}
+
+func handlePlaceholderToolCall(
+	session *runSession,
+	content string,
+	parsed action,
+	placeholders []string,
+	turnIndex int,
+	startedAt time.Time,
+	endedAt time.Time,
+) (RunResult, bool, error) {
+	message := "tool call arguments contain placeholder values"
+	session.recordTurn(TurnRecord{
+		Index:           turnIndex,
+		Status:          run.AgentTurnStatusInvalidToolCall,
+		ActionType:      run.AgentTurnActionTypeToolCall,
+		ToolName:        parsed.Tool,
+		Message:         message,
+		ResponsePreview: previewModelResponse(content),
+		StartedAt:       startedAt,
+		EndedAt:         endedAt,
+	})
+	session.messages = append(session.messages,
+		outbound.ModelMessage{Role: modelRoleAssistant, Content: content},
+		outbound.ModelMessage{
+			Role: modelRoleUser,
+			Content: buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
+				Placeholders:    placeholders,
+				AvailableTools:  session.availableToolNames,
+				UploadedFileIDs: uploadedFilePaths(session.request.Task),
+			}),
+		},
+	)
+
+	return RunResult{}, false, nil
+}
+
+func uploadedFilePaths(task run.TaskSpec) []string {
+	if len(task.Attachments) == 0 {
+		return nil
+	}
+
+	paths := make([]string, 0, len(task.Attachments))
+	for _, attachment := range task.Attachments {
+		paths = append(paths, attachment.Filename)
+	}
+
+	return paths
 }
 
 func (r *Runner) handleToolCall(ctx context.Context, session *runSession, content string, parsed action) (RunResult, bool, error) {
@@ -538,6 +624,72 @@ func availableToolNames(tools []outbound.ToolDefinition) []string {
 	sort.Strings(names)
 
 	return names
+}
+
+func placeholderArgumentValues(arguments map[string]string) []string {
+	if len(arguments) == 0 {
+		return nil
+	}
+
+	var placeholders []string
+	for name, value := range arguments {
+		for _, token := range placeholderTokens(value) {
+			placeholders = append(placeholders, name+"="+token)
+		}
+	}
+	sort.Strings(placeholders)
+
+	return placeholders
+}
+
+func placeholderTokens(value string) []string {
+	var tokens []string
+	remaining := value
+	for {
+		start := strings.Index(remaining, "<")
+		if start < 0 {
+			break
+		}
+		remaining = remaining[start+1:]
+		end := strings.Index(remaining, ">")
+		if end < 0 {
+			break
+		}
+		name := remaining[:end]
+		token := "<" + name + ">"
+		if isPlaceholderName(name) {
+			tokens = append(tokens, token)
+		}
+		remaining = remaining[end+1:]
+	}
+
+	return tokens
+}
+
+func isPlaceholderName(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" || len(normalized) > 64 {
+		return false
+	}
+	for _, char := range normalized {
+		if (char >= 'a' && char <= 'z') ||
+			(char >= '0' && char <= '9') ||
+			char == '_' ||
+			char == '-' ||
+			char == ' ' {
+			continue
+		}
+
+		return false
+	}
+
+	compact := strings.NewReplacer("_", "", "-", "", " ", "").Replace(normalized)
+	switch compact {
+	case "command", "filename", "filepath", "key", "path", "toolname", "value":
+		return true
+	default:
+		return strings.Contains(compact, "file") || strings.Contains(compact, "path")
+	}
 }
 
 func previewModelResponse(content string) string {
