@@ -61,7 +61,15 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 		},
 		{
 			Name:        toolNameReadFile,
-			Description: "Reads one UTF-8 text file from the uploaded workspace. Argument: path.",
+			Description: "Reads one UTF-8 text file from the uploaded workspace.",
+			Arguments: []outbound.ToolArgumentDefinition{
+				{
+					Name:        argumentPath,
+					Description: "Relative path of the uploaded workspace file to read.",
+					Required:    true,
+					Example:     "README.md",
+				},
+			},
 		},
 	}, nil
 }

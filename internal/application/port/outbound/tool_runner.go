@@ -6,10 +6,19 @@ import (
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
-// ToolDefinition describes an application-visible tool.
+// ToolDefinition describes a model-facing callable tool shape.
 type ToolDefinition struct {
 	Name        string
 	Description string
+	Arguments   []ToolArgumentDefinition
+}
+
+// ToolArgumentDefinition describes a model-facing string tool argument.
+type ToolArgumentDefinition struct {
+	Name        string
+	Description string
+	Required    bool
+	Example     string
 }
 
 // ToolContext carries application execution context visible to tools.

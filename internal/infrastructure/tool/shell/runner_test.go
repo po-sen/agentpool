@@ -69,6 +69,23 @@ func TestListToolsRequiresSandboxAndWorkspace(t *testing.T) {
 	if len(tools) != 1 || tools[0].Name != "run_shell" {
 		t.Fatalf("tools = %#v, want run_shell", tools)
 	}
+	if len(tools[0].Arguments) != 2 {
+		t.Fatalf("run_shell arguments = %#v, want command and timeout_seconds", tools[0].Arguments)
+	}
+	commandArgument := tools[0].Arguments[0]
+	if commandArgument.Name != argumentCommand ||
+		commandArgument.Description != "Shell command to run inside the prepared sandbox workspace." ||
+		!commandArgument.Required ||
+		commandArgument.Example != "pwd && ls -la" {
+		t.Fatalf("run_shell command argument = %#v, want required command metadata", commandArgument)
+	}
+	timeoutArgument := tools[0].Arguments[1]
+	if timeoutArgument.Name != argumentTimeoutSeconds ||
+		timeoutArgument.Description != "Optional timeout in seconds. Must be a positive integer and no more than the configured maximum." ||
+		timeoutArgument.Required ||
+		timeoutArgument.Example != "10" {
+		t.Fatalf("run_shell timeout argument = %#v, want optional timeout_seconds metadata", timeoutArgument)
+	}
 }
 
 func TestListToolsAllowsEmptyWorkspaceWithCommandSandbox(t *testing.T) {

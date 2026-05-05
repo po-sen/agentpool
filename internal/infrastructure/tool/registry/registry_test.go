@@ -38,6 +38,32 @@ func TestRegistryCombinesTools(t *testing.T) {
 	}
 }
 
+func TestRegistryPreservesToolArgumentMetadata(t *testing.T) {
+	arguments := []outbound.ToolArgumentDefinition{
+		{
+			Name:        "path",
+			Description: "Relative path of the uploaded workspace file to read.",
+			Required:    true,
+			Example:     "README.md",
+		},
+	}
+	runner, err := New(fakeToolRunner{name: "read_file", arguments: arguments})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("len(tools) = %d, want 1", len(tools))
+	}
+	if len(tools[0].Arguments) != 1 || tools[0].Arguments[0] != arguments[0] {
+		t.Fatalf("tool arguments = %#v, want %#v", tools[0].Arguments, arguments)
+	}
+}
+
 func TestRegistrySupportsNoTools(t *testing.T) {
 	runner, err := New()
 	if err != nil {
@@ -209,11 +235,12 @@ func TestRegistryUsesCallContextForDynamicToolDispatch(t *testing.T) {
 }
 
 type fakeToolRunner struct {
-	name string
+	name      string
+	arguments []outbound.ToolArgumentDefinition
 }
 
 func (r fakeToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
-	return []outbound.ToolDefinition{{Name: r.name, Description: "test tool"}}, nil
+	return []outbound.ToolDefinition{{Name: r.name, Description: "test tool", Arguments: r.arguments}}, nil
 }
 
 func (r fakeToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound.ToolResult, error) {

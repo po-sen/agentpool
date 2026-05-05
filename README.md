@@ -432,6 +432,16 @@ Tool calls use this provider-neutral shape when a tool is available:
 }
 ```
 
+Advertised tools include minimal argument hints in the system prompt while execution still receives string arguments:
+
+```text
+Available tools:
+- run_shell: Runs a command inside the prepared sandbox workspace.
+  Arguments:
+  - command (required): Shell command to run inside the prepared sandbox workspace. Example: pwd && ls -la
+  - timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10
+```
+
 Final answers use:
 
 ```json

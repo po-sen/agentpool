@@ -48,6 +48,19 @@ func TestRunnerExposesToolsWhenWorkspaceHasFiles(t *testing.T) {
 	if tools[0].Name != toolNameListFiles || tools[1].Name != toolNameReadFile {
 		t.Fatalf("tools = %#v, want list_files and read_file", tools)
 	}
+	if len(tools[0].Arguments) != 0 {
+		t.Fatalf("list_files arguments = %#v, want none", tools[0].Arguments)
+	}
+	if len(tools[1].Arguments) != 1 {
+		t.Fatalf("read_file arguments = %#v, want path argument", tools[1].Arguments)
+	}
+	pathArgument := tools[1].Arguments[0]
+	if pathArgument.Name != argumentPath ||
+		pathArgument.Description != "Relative path of the uploaded workspace file to read." ||
+		!pathArgument.Required ||
+		pathArgument.Example != "README.md" {
+		t.Fatalf("read_file path argument = %#v, want required path metadata", pathArgument)
+	}
 }
 
 func TestRunnerListsFiles(t *testing.T) {

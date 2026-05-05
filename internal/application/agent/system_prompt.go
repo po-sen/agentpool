@@ -33,7 +33,39 @@ func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 		builder.WriteString(": ")
 		builder.WriteString(tool.Description)
 		builder.WriteString("\n")
+		writeToolArguments(&builder, tool.Arguments)
 	}
 
 	return builder.String()
+}
+
+func writeToolArguments(builder *strings.Builder, arguments []outbound.ToolArgumentDefinition) {
+	if len(arguments) == 0 {
+		builder.WriteString("  Arguments: none\n")
+
+		return
+	}
+
+	builder.WriteString("  Arguments:\n")
+	for _, argument := range arguments {
+		builder.WriteString("  - ")
+		builder.WriteString(argument.Name)
+		builder.WriteString(" (")
+		builder.WriteString(argumentRequirement(argument.Required))
+		builder.WriteString("): ")
+		builder.WriteString(argument.Description)
+		if argument.Example != "" {
+			builder.WriteString(" Example: ")
+			builder.WriteString(argument.Example)
+		}
+		builder.WriteString("\n")
+	}
+}
+
+func argumentRequirement(required bool) string {
+	if required {
+		return "required"
+	}
+
+	return "optional"
 }

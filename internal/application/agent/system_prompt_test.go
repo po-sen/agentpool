@@ -11,7 +11,36 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 	prompt := buildSystemPrompt([]outbound.ToolDefinition{
 		{Name: "echo", Description: "Returns text"},
 		{Name: "list_files", Description: "Lists files"},
-		{Name: "read_file", Description: "Reads text files"},
+		{
+			Name:        "read_file",
+			Description: "Reads text files",
+			Arguments: []outbound.ToolArgumentDefinition{
+				{
+					Name:        "path",
+					Description: "Relative path of the uploaded workspace file to read.",
+					Required:    true,
+					Example:     "README.md",
+				},
+			},
+		},
+		{
+			Name:        "run_shell",
+			Description: "Runs a command inside the prepared sandbox workspace.",
+			Arguments: []outbound.ToolArgumentDefinition{
+				{
+					Name:        "command",
+					Description: "Shell command to run inside the prepared sandbox workspace.",
+					Required:    true,
+					Example:     "pwd && ls -la",
+				},
+				{
+					Name:        "timeout_seconds",
+					Description: "Optional timeout in seconds. Must be a positive integer and no more than the configured maximum.",
+					Required:    false,
+					Example:     "10",
+				},
+			},
+		},
 	})
 
 	for _, want := range []string{
@@ -25,7 +54,12 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		"Tool names are exact and case-sensitive.",
 		"echo: Returns text",
 		"list_files: Lists files",
+		"Arguments: none",
 		"read_file: Reads text files",
+		"path (required): Relative path of the uploaded workspace file to read. Example: README.md",
+		"run_shell: Runs a command inside the prepared sandbox workspace.",
+		"command (required): Shell command to run inside the prepared sandbox workspace. Example: pwd && ls -la",
+		"timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10",
 		"discover uploaded files with list_files",
 		"no markdown fences",
 		"Do not return tool_result.",
@@ -48,5 +82,8 @@ func TestBuildSystemPromptHandlesNoTools(t *testing.T) {
 	}
 	if !strings.Contains(prompt, `Return {"type":"final","summary":"..."} directly`) {
 		t.Fatalf("prompt does not require direct final response:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "Arguments:") {
+		t.Fatalf("no-tools prompt contains arguments metadata:\n%s", prompt)
 	}
 }

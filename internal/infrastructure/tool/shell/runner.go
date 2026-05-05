@@ -72,6 +72,20 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 		{
 			Name:        toolNameRunShell,
 			Description: "Runs a command inside the prepared sandbox workspace.",
+			Arguments: []outbound.ToolArgumentDefinition{
+				{
+					Name:        argumentCommand,
+					Description: "Shell command to run inside the prepared sandbox workspace.",
+					Required:    true,
+					Example:     "pwd && ls -la",
+				},
+				{
+					Name:        argumentTimeoutSeconds,
+					Description: "Optional timeout in seconds. Must be a positive integer and no more than the configured maximum.",
+					Required:    false,
+					Example:     "10",
+				},
+			},
 		},
 	}, nil
 }
