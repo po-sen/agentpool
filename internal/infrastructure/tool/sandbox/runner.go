@@ -226,20 +226,24 @@ func formatCommandResult(result outbound.SandboxCommandResult, maxOutputBytes in
 }
 
 func truncateStreams(stdout string, stderr string, maxBytes int) (string, string, bool) {
-	truncated := false
-	remaining := maxBytes
+	if stdout == "" {
+		stderr, truncated := truncateString(stderr, maxBytes)
 
-	stdout, cut := truncateString(stdout, remaining)
-	truncated = truncated || cut
-	remaining -= len(stdout)
-	if remaining < 0 {
-		remaining = 0
+		return stdout, stderr, truncated
+	}
+	if stderr == "" {
+		stdout, truncated := truncateString(stdout, maxBytes)
+
+		return stdout, stderr, truncated
 	}
 
-	stderr, cut = truncateString(stderr, remaining)
-	truncated = truncated || cut
+	stdoutBudget := maxBytes / 2
+	stderrBudget := maxBytes - stdoutBudget
 
-	return stdout, stderr, truncated
+	stdout, stdoutTruncated := truncateString(stdout, stdoutBudget)
+	stderr, stderrTruncated := truncateString(stderr, stderrBudget)
+
+	return stdout, stderr, stdoutTruncated || stderrTruncated
 }
 
 func truncateString(content string, maxBytes int) (string, bool) {

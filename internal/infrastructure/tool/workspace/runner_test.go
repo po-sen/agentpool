@@ -209,6 +209,42 @@ func TestRunnerBoundsListOutput(t *testing.T) {
 	}
 }
 
+func TestRunnerListMissingInputPathReturnsSafeError(t *testing.T) {
+	workspace := testWorkspace(t)
+
+	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
+		argumentOperation: operationList,
+		argumentArea:      areaInput,
+		argumentPath:      "missing",
+	})
+
+	assertMissingPathError(t, result, workspace)
+}
+
+func TestRunnerListMissingWorkPathReturnsSafeError(t *testing.T) {
+	workspace := testWorkspace(t)
+
+	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
+		argumentOperation: operationList,
+		argumentArea:      areaWork,
+		argumentPath:      "missing",
+	})
+
+	assertMissingPathError(t, result, workspace)
+}
+
+func TestRunnerListMissingAllPathReturnsSafeError(t *testing.T) {
+	workspace := testWorkspace(t)
+
+	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
+		argumentOperation: operationList,
+		argumentArea:      areaAll,
+		argumentPath:      "missing",
+	})
+
+	assertMissingPathError(t, result, workspace)
+}
+
 func TestRunnerRejectsUnknownToolName(t *testing.T) {
 	result, err := NewRunner(Config{}).RunTool(context.Background(), outbound.ToolCall{
 		Name:    "unknown_tool",
@@ -283,4 +319,15 @@ func assertNotContains(t *testing.T, got string, want string) {
 	if strings.Contains(got, want) {
 		t.Fatalf("%q unexpectedly contains %q", got, want)
 	}
+}
+
+func assertMissingPathError(t *testing.T, result outbound.ToolResult, workspace outbound.Workspace) {
+	t.Helper()
+
+	if !result.IsError || !strings.Contains(result.Content, "path is not available") {
+		t.Fatalf("result = %#v, want missing path error", result)
+	}
+	assertNotContains(t, result.Content, workspace.RootPath)
+	assertNotContains(t, result.Content, workspace.InputPath)
+	assertNotContains(t, result.Content, workspace.WorkPath)
 }

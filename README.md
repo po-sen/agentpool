@@ -412,7 +412,7 @@ curl -sS -X POST http://localhost:8080/v1/runs \
 
 Uploaded files are currently limited to UTF-8 text files with safe relative names, at most 10 files, 1 MiB per file, and 5 MiB total. Supported extensions are `.txt`, `.md`, `.json`, `.yaml`, `.yml`, `.go`, `.py`, `.js`, and `.ts`.
 
-The runtime does not persist workspace contents beyond cleanup. AgentPool does not currently accept archive uploads, mounted directories, or git checkout as workspace input. It does not provide file mutation, workspace diffing, archive materialization, or product file permissions.
+The runtime does not persist workspace contents beyond cleanup. AgentPool does not currently accept archive uploads, mounted directories, or git checkout as workspace input. AgentPool does not mutate run inputs or product files. The writable `/workspace/work` area is ephemeral run-local storage.
 
 ## Tools
 
@@ -557,7 +557,7 @@ Example prompt:
 Summarize the task and explain the next implementation step.
 ```
 
-There is still no write access, Git mutation, network fetch, package install, or arbitrary host command execution. Shell commands are available only when the dev Docker sandbox is explicitly enabled.
+There is still no write-back to run inputs, product files, Git, or external systems. Agents may write temporary/generated files only under `/workspace/work`, and workspace contents are cleaned up after the run. Shell commands are available only when the dev Docker sandbox is explicitly enabled.
 
 ## Dev Docker Sandbox
 
@@ -568,6 +568,8 @@ AGENTPOOL_SANDBOX_PROVIDER=docker \
 AGENTPOOL_SANDBOX_IMAGE=alpine:3.20 \
 go run ./cmd/agentpool dev
 ```
+
+The default dev image is intentionally minimal. Commands available inside `sandbox_exec` depend on `AGENTPOOL_SANDBOX_IMAGE`; use a richer image when tasks need Python, Go, Node.js, or other tooling.
 
 Submit a prompt-only run that asks the agent to use sandbox execution:
 

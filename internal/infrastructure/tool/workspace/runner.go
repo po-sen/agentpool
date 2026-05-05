@@ -200,6 +200,9 @@ func (r *Runner) list(ctx context.Context, areas []workspaceArea, relativePath s
 		if errors.Is(err, errTooManyFiles) {
 			return outbound.ToolResult{Content: "workspace contains too many files to list", IsError: true}
 		}
+		if errors.Is(err, os.ErrNotExist) {
+			return outbound.ToolResult{Content: "path is not available", IsError: true}
+		}
 		if err != nil {
 			return outbound.ToolResult{Content: "list workspace failed", IsError: true}
 		}

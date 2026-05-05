@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 )
@@ -176,6 +177,86 @@ func TestRunnerFormatsCommandResult(t *testing.T) {
 		if !strings.Contains(result.Content, want) {
 			t.Fatalf("Content = %q, want %q", result.Content, want)
 		}
+	}
+}
+
+func TestFormatCommandResultPreservesStderrWithLargeStdout(t *testing.T) {
+	content := formatCommandResult(outbound.SandboxCommandResult{
+		Stdout: strings.Repeat("o", 1000),
+		Stderr: strings.Repeat("e", 1000),
+	}, 100)
+
+	if !strings.Contains(content, "stdout:\n"+strings.Repeat("o", 50)) {
+		t.Fatalf("content = %q, want truncated stdout", content)
+	}
+	if !strings.Contains(content, "stderr:\n"+strings.Repeat("e", 50)) {
+		t.Fatalf("content = %q, want preserved stderr", content)
+	}
+	if !strings.Contains(content, "truncated: true") {
+		t.Fatalf("content = %q, want truncation marker", content)
+	}
+}
+
+func TestFormatCommandResultPreservesStdoutWithLargeStderr(t *testing.T) {
+	content := formatCommandResult(outbound.SandboxCommandResult{
+		Stdout: strings.Repeat("o", 1000),
+		Stderr: strings.Repeat("e", 1000),
+	}, 40)
+
+	if !strings.Contains(content, "stdout:\n"+strings.Repeat("o", 20)) {
+		t.Fatalf("content = %q, want preserved stdout", content)
+	}
+	if !strings.Contains(content, "stderr:\n"+strings.Repeat("e", 20)) {
+		t.Fatalf("content = %q, want truncated stderr", content)
+	}
+	if !strings.Contains(content, "truncated: true") {
+		t.Fatalf("content = %q, want truncation marker", content)
+	}
+}
+
+func TestFormatCommandResultStdoutOnlyUsesWholeBudget(t *testing.T) {
+	content := formatCommandResult(outbound.SandboxCommandResult{
+		Stdout: "abcdefghijklmnop",
+	}, 8)
+
+	if !strings.Contains(content, "stdout:\nabcdefgh\n") {
+		t.Fatalf("content = %q, want stdout to use whole budget", content)
+	}
+	if !strings.Contains(content, "truncated: true") {
+		t.Fatalf("content = %q, want truncation marker", content)
+	}
+}
+
+func TestFormatCommandResultStderrOnlyUsesWholeBudget(t *testing.T) {
+	content := formatCommandResult(outbound.SandboxCommandResult{
+		Stderr: "abcdefghijklmnop",
+	}, 8)
+
+	if !strings.Contains(content, "stderr:\nabcdefgh\n") {
+		t.Fatalf("content = %q, want stderr to use whole budget", content)
+	}
+	if !strings.Contains(content, "truncated: true") {
+		t.Fatalf("content = %q, want truncation marker", content)
+	}
+}
+
+func TestFormatCommandResultTruncatesUTF8Safely(t *testing.T) {
+	content := formatCommandResult(outbound.SandboxCommandResult{
+		Stdout: strings.Repeat("界", 10),
+		Stderr: strings.Repeat("錯", 10),
+	}, 10)
+
+	if !utf8.ValidString(content) {
+		t.Fatalf("content is not valid UTF-8: %q", content)
+	}
+	if !strings.Contains(content, "stdout:\n界\n") {
+		t.Fatalf("content = %q, want safe stdout rune", content)
+	}
+	if !strings.Contains(content, "stderr:\n錯\n") {
+		t.Fatalf("content = %q, want safe stderr rune", content)
+	}
+	if !strings.Contains(content, "truncated: true") {
+		t.Fatalf("content = %q, want truncation marker", content)
 	}
 }
 
