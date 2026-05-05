@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - The default sandbox provider is noop. A dev-only Docker sandbox can be enabled explicitly to verify sandbox-backed shell commands.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol, read-only uploaded-file tools, and opt-in dev Docker `run_shell`. The default runtime has no command-capable sandbox and does not expose `run_shell`.
+- Agent loop v1 supports a minimal JSON action protocol, a `workspace` metadata tool, and opt-in dev Docker `sandbox_exec`. The default runtime has no command-capable sandbox and does not expose `sandbox_exec`.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -167,7 +167,7 @@ Failed runs can include partial `agent_turns` and `tool_calls` when the agent in
       "index": 2,
       "status": "tool_call",
       "action_type": "tool_call",
-      "tool_name": "list_files"
+      "tool_name": "workspace"
     },
     {
       "index": 5,
@@ -177,9 +177,13 @@ Failed runs can include partial `agent_turns` and `tool_calls` when the agent in
   ],
   "tool_calls": [
     {
-      "name": "list_files",
-      "arguments": {},
-      "result": "files:\nREADME.md",
+      "name": "workspace",
+      "arguments": {
+        "operation": "list",
+        "area": "all",
+        "path": "."
+      },
+      "result": "files:\n/workspace/input/README.md",
       "is_error": false
     }
   ]
@@ -203,7 +207,7 @@ go run ./cmd/agentpool dev
 go run ./cmd/agentpool server
 go run ./cmd/agentpool worker
 go run ./cmd/agentpool version
-go run ./cmd/agentpool run --prompt "Use run_shell to calculate 234 * 887123 with sh."
+go run ./cmd/agentpool run --prompt "Use sandbox_exec to calculate 234 * 887123 with sh."
 go run ./cmd/agentpool get run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
 go run ./cmd/agentpool list
 go run ./cmd/agentpool cancel run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
@@ -232,7 +236,7 @@ Then submit and wait for a run from another terminal:
 
 ```sh
 go run ./cmd/agentpool run \
-  --prompt "Use run_shell to calculate 234 * 887123 with sh."
+  --prompt "Use sandbox_exec to calculate 234 * 887123 with sh."
 ```
 
 Upload files with repeated `--file` flags:
@@ -247,7 +251,7 @@ Debug output includes the recorded `agent_system_prompt`, full `agent_turns`, an
 
 ```sh
 go run ./cmd/agentpool run \
-  --prompt "Use run_shell to calculate 234 * 887123 with sh." \
+  --prompt "Use sandbox_exec to calculate 234 * 887123 with sh." \
   --debug
 ```
 
@@ -255,7 +259,7 @@ Use JSON output when scripting:
 
 ```sh
 go run ./cmd/agentpool run \
-  --prompt "Use run_shell to calculate 234 * 887123 with sh." \
+  --prompt "Use sandbox_exec to calculate 234 * 887123 with sh." \
   --json
 ```
 
@@ -416,9 +420,19 @@ AgentPool has an application-owned tool loop. Models can respond with a JSON `to
 
 The agent protocol accepts only `tool_call` and `final` JSON actions. Models should return exactly one JSON object with no markdown fences. For compatibility, AgentPool normalizes whole-response fenced JSON blocks and simple scalar values that can safely become strings, such as `{"type":"final","summary":true}` becoming summary `"true"` and numeric tool arguments becoming string arguments. AgentPool does not extract JSON from arbitrary prose. Unknown JSON action types, malformed JSON, unsupported fields, nested argument values, or multiple JSON objects are rejected as protocol errors with targeted correction feedback. Plain natural-language output is still accepted as a final summary for compatibility with local models.
 
-When uploaded files are present, the agent can discover them with `list_files` and read selected text files with `read_file`. File tools are not advertised for empty prompt-only workspaces. File contents are not injected into the initial prompt by default.
+AgentPool exposes exactly two model-facing tools:
 
-The `run_shell` tool is sandbox-backed and is advertised when a run has a workspace path and a command-capable sandbox. Because every run has a workspace, enabling the dev Docker sandbox can expose `run_shell` for prompt-only runs as well as uploaded-file runs. In the default runtime the sandbox provider is `noop`, so `run_shell` is not available.
+- `workspace`: metadata/control-plane. It lists files and stats paths, but does not read file contents.
+- `sandbox_exec`: execution/data-plane. It runs commands through a command-capable sandbox.
+
+Each run gets a workspace with two areas:
+
+```text
+/workspace/input  read-only run inputs
+/workspace/work   read-write agent working directory
+```
+
+Run attachments are materialized under `/workspace/input` by default. File contents are inspected through `sandbox_exec`, for example with `sed`, `cat`, `grep`, or scripts written under `/workspace/work`. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
 
 Tool calls use this provider-neutral shape when a tool is available:
 
@@ -436,10 +450,16 @@ Advertised tools include minimal argument hints in the system prompt while execu
 
 ```text
 Available tools:
-- run_shell: Runs a command inside the prepared sandbox workspace.
+- workspace: Lists workspace files and stats workspace paths without reading file contents.
   Arguments:
-  - command (required): Shell command to run inside the prepared sandbox workspace. Example: pwd && ls -la
+  - operation (required): Operation to run. Supported values: "list" or "stat". Example: list
+  - area (optional): Workspace area to inspect. Supported values: "input", "work", or "all". Example: input
+  - path (optional): Safe relative path inside the selected area. Example: README.md
+- sandbox_exec: Runs a shell command inside the prepared sandbox with /workspace/work as the working directory.
+  Arguments:
+  - command (required): Shell command to run inside the sandbox. Example: sed -n '1,160p' /workspace/input/README.md
   - timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10
+  - max_output_bytes (optional): Optional maximum combined stdout and stderr bytes returned by the tool. Example: 65536
 ```
 
 Final answers use:
@@ -492,7 +512,7 @@ Example snippet:
       "index": 2,
       "status": "tool_call",
       "action_type": "tool_call",
-      "tool_name": "list_files"
+      "tool_name": "workspace"
     },
     {
       "index": 5,
@@ -516,11 +536,11 @@ Example response snippet:
 {
   "tool_calls": [
     {
-      "name": "run_shell",
+      "name": "sandbox_exec",
       "arguments": {
         "command": "pwd && ls -la"
       },
-      "result": "exit_code: 0\nstdout:\n/workspace\n...",
+      "result": "exit_code: 0\ntimed_out: false\nstdout:\n/workspace/work\n...",
       "is_error": false,
       "started_at": "2026-05-04T16:59:50Z",
       "ended_at": "2026-05-04T17:00:22Z"
@@ -529,7 +549,7 @@ Example response snippet:
 }
 ```
 
-This is useful for verifying `list_files`, `read_file`, and dev Docker `run_shell` execution. Shell stdout, stderr, timeout, and exit code are included because the shell tool formats them into the tool result. Tool call history is stored only in the current in-memory run state for now, and each result is truncated before it is stored.
+This is useful for verifying `workspace` metadata calls and dev Docker `sandbox_exec` execution. Command stdout, stderr, timeout, exit code, and truncation marker are included because `sandbox_exec` formats them into the tool result. Tool call history is stored only in the current in-memory run state for now, and each result is truncated before it is stored.
 
 Example prompt:
 
@@ -549,31 +569,31 @@ AGENTPOOL_SANDBOX_IMAGE=alpine:3.20 \
 go run ./cmd/agentpool dev
 ```
 
-Submit a prompt-only run that asks the agent to use shell:
+Submit a prompt-only run that asks the agent to use sandbox execution:
 
 ```sh
 curl -sS -X POST http://localhost:8080/v1/runs \
   -H 'Content-Type: application/json' \
-  -d '{"prompt":"Use run_shell to calculate 234 * 887123 with sh."}'
+  -d '{"prompt":"Use sandbox_exec to calculate 234 * 887123 with sh."}'
 ```
 
-When Docker sandboxing is enabled, `agent_system_prompt` should show `run_shell` under `Available tools`, and the command runs inside Docker with `/workspace` as an empty read-only workspace.
+When Docker sandboxing is enabled, `agent_system_prompt` should show `sandbox_exec` under `Available tools`, and the command runs inside Docker with `/workspace/work` as the current writable directory.
 
-Submit an uploaded-file run that asks the agent to use both file tools and shell when available:
+Submit an uploaded-file run that asks the agent to inspect metadata and read contents through sandbox execution:
 
 ```sh
 curl -sS -X POST http://localhost:8080/v1/runs \
-  -F 'prompt=List files, read README.md, then run pwd and ls -la if run_shell is available.' \
+  -F 'prompt=List files with workspace, read README.md with sandbox_exec, then run pwd and ls -la.' \
   -F 'files=@README.md'
 ```
 
-With the default `noop` sandbox, `list_files` and `read_file` are available when files are uploaded, but `run_shell` is unavailable. With `AGENTPOOL_SANDBOX_PROVIDER=docker`, the worker prepares a command-capable sandbox for the run workspace, and `run_shell` runs through:
+With the default `noop` sandbox, `workspace` is available but `sandbox_exec` is unavailable. With `AGENTPOOL_SANDBOX_PROVIDER=docker`, the worker prepares a command-capable sandbox for the run workspace, and `sandbox_exec` runs through:
 
 ```text
-docker run --rm --network none -v <workspace>:/workspace:ro -w /workspace <image> /bin/sh -lc <command>
+docker run --rm --network none -v <input>:/workspace/input:ro -v <work>:/workspace/work:rw -w /workspace/work <image> /bin/sh -lc <command>
 ```
 
-Docker must be installed and running. The run workspace is mounted read-only at `/workspace`, networking is disabled with `--network none`, and no secrets are passed into the container. This provider is dev-only and does not provide write-back, persistent storage, or production sandbox hardening.
+Docker must be installed and running. Run inputs are mounted read-only at `/workspace/input`, agent work is mounted read-write at `/workspace/work`, networking is disabled with `--network none`, and no secrets are passed into the container. This provider is dev-only and does not provide persistent storage or production sandbox hardening.
 
 ## Run Lifecycle
 

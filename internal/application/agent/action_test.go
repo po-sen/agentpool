@@ -54,7 +54,7 @@ func TestParseActionParsesFencedToolCallAction(t *testing.T) {
 }
 
 func TestParseActionParsesToolCallScalarArgumentsAsStrings(t *testing.T) {
-	result := parseAction(`{"type":"tool_call","tool":"run_shell","arguments":{"timeout_seconds":30,"dry_run":false}}`)
+	result := parseAction(`{"type":"tool_call","tool":"sandbox_exec","arguments":{"timeout_seconds":30,"dry_run":false}}`)
 	assertValidAction(t, result, actionTypeToolCall)
 	if result.action.Arguments["timeout_seconds"] != "30" {
 		t.Fatalf("timeout_seconds = %q, want 30", result.action.Arguments["timeout_seconds"])

@@ -34,8 +34,8 @@ const (
 
 const (
 	finalActionHint    = `Return {"type":"final","summary":"..."}`
-	protocolActionHint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"read_file","arguments":{"path":"README.md"}}`
-	toolCallActionHint = `Return {"type":"tool_call","tool":"read_file","arguments":{"path":"README.md"}}`
+	protocolActionHint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}`
+	toolCallActionHint = `Return {"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}`
 )
 
 type action struct {

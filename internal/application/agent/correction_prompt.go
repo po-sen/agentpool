@@ -23,7 +23,7 @@ func buildProtocolCorrectionMessage(parseErr actionParseError) string {
 	}
 	hint := parseErr.Hint
 	if hint == "" {
-		hint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"read_file","arguments":{"path":"README.md"}}.`
+		hint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}.`
 	}
 
 	return `Protocol error:
@@ -32,7 +32,7 @@ Your previous response was invalid because ` + message + `.
 Return exactly one JSON object with only the allowed fields.
 Examples:
 {"type":"final","summary":"Finished the task."}
-{"type":"tool_call","tool":"read_file","arguments":{"path":"README.md"}}
+{"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}
 Do not return tool_result. Do not return multiple JSON objects. Do not use markdown fences.`
 }
 
@@ -71,9 +71,9 @@ func buildPlaceholderToolArgumentCorrectionMessage(request placeholderToolArgume
 	if len(request.UploadedFileIDs) > 0 {
 		builder.WriteString("Uploaded files: ")
 		builder.WriteString(strings.Join(request.UploadedFileIDs, ", "))
-		builder.WriteString(". Use these exact relative paths when a file path is needed.\n")
+		builder.WriteString(". Use /workspace/input paths when reading uploaded file contents through sandbox_exec.\n")
 	} else {
-		builder.WriteString("If a file path is needed, discover it with an available file-listing tool before calling a file or shell tool.\n")
+		builder.WriteString("If a file path is needed, discover it with workspace operation=list before using sandbox_exec.\n")
 	}
 	builder.WriteString("Available tools: ")
 	builder.WriteString(availableText)

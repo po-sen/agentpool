@@ -35,7 +35,7 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	item.AgentSystemPrompt = "system prompt"
 	item.ToolCalls = []run.ToolCall{
 		{
-			Name:      "run_shell",
+			Name:      "sandbox_exec",
 			Arguments: map[string]string{"command": "pwd"},
 			Result:    "exit_code: 0",
 			StartedAt: time.Unix(104, 0).UTC(),
@@ -47,7 +47,7 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 			Index:           1,
 			Status:          run.AgentTurnStatusToolCall,
 			ActionType:      run.AgentTurnActionTypeToolCall,
-			ToolName:        "run_shell",
+			ToolName:        "sandbox_exec",
 			Message:         "model requested tool call",
 			ResponsePreview: `{"type":"tool_call"}`,
 			StartedAt:       time.Unix(106, 0).UTC(),
@@ -116,8 +116,8 @@ func assertMappedAgentTurn(t *testing.T, turns []inbound.AgentTurnView) {
 	if len(turns) != 1 {
 		t.Fatalf("len(AgentTurns) = %d, want 1", len(turns))
 	}
-	if turns[0].ToolName != "run_shell" {
-		t.Fatalf("AgentTurns[0].ToolName = %q, want run_shell", turns[0].ToolName)
+	if turns[0].ToolName != "sandbox_exec" {
+		t.Fatalf("AgentTurns[0].ToolName = %q, want sandbox_exec", turns[0].ToolName)
 	}
 }
 

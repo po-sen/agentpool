@@ -23,8 +23,8 @@ func TestProviderPrepareReturnsCommandCapableSandbox(t *testing.T) {
 	provider := NewProvider(Config{})
 
 	sandbox, err := provider.Prepare(context.Background(), outbound.SandboxRequest{
-		RunID:         "run_test",
-		WorkspacePath: "/tmp/workspace",
+		RunID:     "run_test",
+		Workspace: testWorkspace(),
 	})
 	if err != nil {
 		t.Fatalf("Prepare() error = %v", err)
@@ -46,9 +46,9 @@ func TestProviderRunCommandBuildsDockerRun(t *testing.T) {
 	provider := newProviderWithExecutor(Config{Image: "busybox:1.36"}, executor)
 
 	result, err := provider.RunCommand(context.Background(), outbound.SandboxCommandRequest{
-		Sandbox:       commandCapableSandbox(),
-		WorkspacePath: "/tmp/workspace",
-		Command:       "pwd",
+		Sandbox:   commandCapableSandbox(),
+		Workspace: testWorkspace(),
+		Command:   "pwd",
 	})
 	if err != nil {
 		t.Fatalf("RunCommand() error = %v", err)
@@ -66,9 +66,11 @@ func TestProviderRunCommandBuildsDockerRun(t *testing.T) {
 		"--network",
 		"none",
 		"-v",
-		"/tmp/workspace:/workspace:ro",
+		"/tmp/workspace/input:/workspace/input:ro",
+		"-v",
+		"/tmp/workspace/work:/workspace/work:rw",
 		"-w",
-		"/workspace",
+		"/workspace/work",
 		"busybox:1.36",
 		"/bin/sh",
 		"-lc",
@@ -89,9 +91,9 @@ func TestProviderRunCommandMapsNonZeroExitCode(t *testing.T) {
 	})
 
 	result, err := provider.RunCommand(context.Background(), outbound.SandboxCommandRequest{
-		Sandbox:       commandCapableSandbox(),
-		WorkspacePath: "/tmp/workspace",
-		Command:       "false",
+		Sandbox:   commandCapableSandbox(),
+		Workspace: testWorkspace(),
+		Command:   "false",
 	})
 	if err != nil {
 		t.Fatalf("RunCommand() error = %v", err)
@@ -115,9 +117,9 @@ func TestProviderRunCommandMapsTimeout(t *testing.T) {
 	})
 
 	result, err := provider.RunCommand(context.Background(), outbound.SandboxCommandRequest{
-		Sandbox:       commandCapableSandbox(),
-		WorkspacePath: "/tmp/workspace",
-		Command:       "sleep 60",
+		Sandbox:   commandCapableSandbox(),
+		Workspace: testWorkspace(),
+		Command:   "sleep 60",
 	})
 	if err != nil {
 		t.Fatalf("RunCommand() error = %v", err)
@@ -138,9 +140,9 @@ func TestProviderRunCommandReportsDockerStartFailure(t *testing.T) {
 	})
 
 	_, err := provider.RunCommand(context.Background(), outbound.SandboxCommandRequest{
-		Sandbox:       commandCapableSandbox(),
-		WorkspacePath: "/tmp/workspace",
-		Command:       "pwd",
+		Sandbox:   commandCapableSandbox(),
+		Workspace: testWorkspace(),
+		Command:   "pwd",
 	})
 	if err == nil {
 		t.Fatal("RunCommand() error = nil, want error")
@@ -158,8 +160,67 @@ func TestProviderCleanupIsNoop(t *testing.T) {
 	}
 }
 
+func TestProviderRunCommandRejectsMissingInputPath(t *testing.T) {
+	provider := newProviderWithExecutor(Config{}, &recordingExecutor{})
+
+	_, err := provider.RunCommand(context.Background(), outbound.SandboxCommandRequest{
+		Sandbox: commandCapableSandbox(),
+		Workspace: outbound.Workspace{
+			WorkPath: "/tmp/workspace/work",
+		},
+		Command: "pwd",
+	})
+	if err == nil || !strings.Contains(err.Error(), "workspace input path is required") {
+		t.Fatalf("RunCommand() error = %v, want missing input path", err)
+	}
+}
+
+func TestProviderRunCommandRejectsMissingWorkPath(t *testing.T) {
+	provider := newProviderWithExecutor(Config{}, &recordingExecutor{})
+
+	_, err := provider.RunCommand(context.Background(), outbound.SandboxCommandRequest{
+		Sandbox: commandCapableSandbox(),
+		Workspace: outbound.Workspace{
+			InputPath: "/tmp/workspace/input",
+		},
+		Command: "pwd",
+	})
+	if err == nil || !strings.Contains(err.Error(), "workspace work path is required") {
+		t.Fatalf("RunCommand() error = %v, want missing work path", err)
+	}
+}
+
+func TestProviderRunCommandRejectsMissingCommand(t *testing.T) {
+	provider := newProviderWithExecutor(Config{}, &recordingExecutor{})
+
+	_, err := provider.RunCommand(context.Background(), outbound.SandboxCommandRequest{
+		Sandbox:   commandCapableSandbox(),
+		Workspace: testWorkspace(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "command is required") {
+		t.Fatalf("RunCommand() error = %v, want missing command", err)
+	}
+}
+
+func TestProviderPrepareRejectsMissingWorkspace(t *testing.T) {
+	provider := NewProvider(Config{})
+
+	_, err := provider.Prepare(context.Background(), outbound.SandboxRequest{RunID: "run_test"})
+	if err == nil || !strings.Contains(err.Error(), "workspace input path is required") {
+		t.Fatalf("Prepare() error = %v, want missing workspace path", err)
+	}
+}
+
 func commandCapableSandbox() outbound.Sandbox {
 	return outbound.Sandbox{ID: sandboxID, SupportsCommands: true}
+}
+
+func testWorkspace() outbound.Workspace {
+	return outbound.Workspace{
+		RootPath:  "/tmp/workspace",
+		InputPath: "/tmp/workspace/input",
+		WorkPath:  "/tmp/workspace/work",
+	}
 }
 
 type recordingExecutor struct {

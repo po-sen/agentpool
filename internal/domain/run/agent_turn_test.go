@@ -15,7 +15,7 @@ func TestRunRecordAgentTurnsCopiesAndTruncatesRecords(t *testing.T) {
 			Index:           1,
 			Status:          AgentTurnStatusToolCall,
 			ActionType:      AgentTurnActionTypeToolCall,
-			ToolName:        "read_file",
+			ToolName:        "workspace",
 			Message:         "model requested tool call",
 			ResponsePreview: strings.Repeat("a", MaxAgentTurnPreviewLength+10),
 			StartedAt:       now.Add(time.Second),

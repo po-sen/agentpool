@@ -7,16 +7,16 @@ import (
 )
 
 func TestBuildToolObservationFormatsSuccess(t *testing.T) {
-	got := buildToolObservation("read_file", outbound.ToolResult{Content: "# Demo\n"})
-	want := "Tool result for read_file:\n# Demo\n"
+	got := buildToolObservation("workspace", outbound.ToolResult{Content: "files:\n/workspace/input/README.md\n"})
+	want := "Tool result for workspace:\nfiles:\n/workspace/input/README.md\n"
 	if got != want {
 		t.Fatalf("observation = %q, want %q", got, want)
 	}
 }
 
 func TestBuildToolObservationFormatsError(t *testing.T) {
-	got := buildToolObservation("read_file", outbound.ToolResult{Content: "file not found", IsError: true})
-	want := "Tool error for read_file:\nfile not found"
+	got := buildToolObservation("workspace", outbound.ToolResult{Content: "path is not available", IsError: true})
+	want := "Tool error for workspace:\npath is not available"
 	if got != want {
 		t.Fatalf("observation = %q, want %q", got, want)
 	}

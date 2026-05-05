@@ -261,9 +261,9 @@ func TestGetRunIncludesToolCalls(t *testing.T) {
 			Status: "completed",
 			ToolCalls: []inbound.ToolCallView{
 				{
-					Name:      "read_file",
-					Arguments: map[string]string{"path": "README.md"},
-					Result:    "# Demo\n",
+					Name:      "workspace",
+					Arguments: map[string]string{"operation": "stat", "area": "input", "path": "README.md"},
+					Result:    "virtual_path: /workspace/input/README.md\n",
 					StartedAt: time.Unix(101, 0).UTC(),
 					EndedAt:   time.Unix(102, 0).UTC(),
 				},
@@ -287,10 +287,10 @@ func TestGetRunIncludesToolCalls(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"tool_calls":[{"name":"read_file"`) {
+	if !strings.Contains(response.Body.String(), `"tool_calls":[{"name":"workspace"`) {
 		t.Fatalf("response missing tool_calls: %s", response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"path":"README.md"`) {
+	if !strings.Contains(response.Body.String(), `"operation":"stat"`) {
 		t.Fatalf("response missing tool arguments: %s", response.Body.String())
 	}
 }
@@ -305,7 +305,7 @@ func TestGetRunIncludesAgentTurns(t *testing.T) {
 					Index:           1,
 					Status:          "tool_call",
 					ActionType:      "tool_call",
-					ToolName:        "list_files",
+					ToolName:        "workspace",
 					Message:         "model requested tool call",
 					ResponsePreview: `{"type":"tool_call"}`,
 					StartedAt:       time.Unix(101, 0).UTC(),
@@ -334,7 +334,7 @@ func TestGetRunIncludesAgentTurns(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `"agent_turns":[{"index":1,"status":"tool_call"`) {
 		t.Fatalf("response missing agent_turns: %s", response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"tool_name":"list_files"`) {
+	if !strings.Contains(response.Body.String(), `"tool_name":"workspace"`) {
 		t.Fatalf("response missing turn tool name: %s", response.Body.String())
 	}
 }
@@ -381,7 +381,7 @@ func TestGetRunIncludesFailureDiagnosticsAndPartialToolCalls(t *testing.T) {
 				{
 					Index:     1,
 					Status:    "tool_call",
-					ToolName:  "run_shell",
+					ToolName:  "sandbox_exec",
 					Message:   "model requested tool call",
 					StartedAt: time.Unix(100, 0).UTC(),
 					EndedAt:   time.Unix(101, 0).UTC(),
@@ -389,7 +389,7 @@ func TestGetRunIncludesFailureDiagnosticsAndPartialToolCalls(t *testing.T) {
 			},
 			ToolCalls: []inbound.ToolCallView{
 				{
-					Name:      "run_shell",
+					Name:      "sandbox_exec",
 					Arguments: map[string]string{"command": "pwd"},
 					Result:    "tool execution failed",
 					IsError:   true,
@@ -423,7 +423,7 @@ func TestGetRunIncludesFailureDiagnosticsAndPartialToolCalls(t *testing.T) {
 	if !strings.Contains(body, `"failure_message":"tool execution failed"`) {
 		t.Fatalf("response missing failure_message: %s", body)
 	}
-	if !strings.Contains(body, `"tool_calls":[{"name":"run_shell"`) {
+	if !strings.Contains(body, `"tool_calls":[{"name":"sandbox_exec"`) {
 		t.Fatalf("response missing partial tool_calls: %s", body)
 	}
 	if !strings.Contains(body, `"agent_turns":[{"index":1,"status":"tool_call"`) {

@@ -27,23 +27,36 @@ func TestPrepareWorkspaceWritesAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareWorkspace() error = %v", err)
 	}
-	if workspace.Path == "" {
-		t.Fatal("workspace path is empty")
+	if workspace.RootPath == "" {
+		t.Fatal("workspace root path is empty")
+	}
+	if workspace.InputPath != filepath.Join(workspace.RootPath, "input") {
+		t.Fatalf("InputPath = %q, want root/input", workspace.InputPath)
+	}
+	if workspace.WorkPath != filepath.Join(workspace.RootPath, "work") {
+		t.Fatalf("WorkPath = %q, want root/work", workspace.WorkPath)
 	}
 	if !workspace.HasFiles {
 		t.Fatal("workspace HasFiles = false, want true")
 	}
 
-	content, err := os.ReadFile(filepath.Join(workspace.Path, "README.md"))
+	content, err := os.ReadFile(filepath.Join(workspace.InputPath, "README.md"))
 	if err != nil {
 		t.Fatalf("read README: %v", err)
 	}
 	if string(content) != "# Demo\n" {
 		t.Fatalf("README content = %q, want # Demo", content)
 	}
-	if _, err := os.Stat(filepath.Join(workspace.Path, "internal", "app.go")); err != nil {
+	if _, err := os.Stat(filepath.Join(workspace.InputPath, "internal", "app.go")); err != nil {
 		t.Fatalf("stat nested attachment: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(workspace.RootPath, "README.md")); !os.IsNotExist(err) {
+		t.Fatalf("root attachment stat error = %v, want not exist", err)
+	}
+	assertPerm(t, workspace.RootPath, workspaceDirPerm)
+	assertPerm(t, workspace.InputPath, workspaceDirPerm)
+	assertPerm(t, workspace.WorkPath, workspaceDirPerm)
+	assertPerm(t, filepath.Join(workspace.InputPath, "README.md"), workspaceFilePerm)
 }
 
 func TestPrepareWorkspaceRejectsPathTraversal(t *testing.T) {
@@ -84,7 +97,7 @@ func TestCleanupWorkspaceRemovesDirectory(t *testing.T) {
 	if err := provider.CleanupWorkspace(context.Background(), workspace); err != nil {
 		t.Fatalf("CleanupWorkspace() error = %v", err)
 	}
-	if _, err := os.Stat(workspace.Path); !os.IsNotExist(err) {
+	if _, err := os.Stat(workspace.RootPath); !os.IsNotExist(err) {
 		t.Fatalf("workspace path still exists or stat error = %v", err)
 	}
 }
@@ -97,14 +110,20 @@ func TestPrepareWorkspaceCreatesEmptyWorkspaceForNoAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareWorkspace() error = %v", err)
 	}
-	if workspace.Path == "" {
-		t.Fatal("workspace path is empty")
+	if workspace.RootPath == "" {
+		t.Fatal("workspace root path is empty")
 	}
 	if workspace.HasFiles {
 		t.Fatal("workspace HasFiles = true, want false")
 	}
-	if _, err := os.Stat(workspace.Path); err != nil {
+	if _, err := os.Stat(workspace.RootPath); err != nil {
 		t.Fatalf("stat empty workspace: %v", err)
+	}
+	if _, err := os.Stat(workspace.InputPath); err != nil {
+		t.Fatalf("stat empty input workspace: %v", err)
+	}
+	if _, err := os.Stat(workspace.WorkPath); err != nil {
+		t.Fatalf("stat empty work workspace: %v", err)
 	}
 
 	entries, err := os.ReadDir(baseDir)
@@ -117,7 +136,19 @@ func TestPrepareWorkspaceCreatesEmptyWorkspaceForNoAttachments(t *testing.T) {
 	if err := provider.CleanupWorkspace(context.Background(), workspace); err != nil {
 		t.Fatalf("CleanupWorkspace() error = %v", err)
 	}
-	if _, err := os.Stat(workspace.Path); !os.IsNotExist(err) {
+	if _, err := os.Stat(workspace.RootPath); !os.IsNotExist(err) {
 		t.Fatalf("workspace path still exists or stat error = %v", err)
+	}
+}
+
+func assertPerm(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("%s permissions = %v, want %v", path, got, want)
 	}
 }

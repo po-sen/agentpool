@@ -45,8 +45,8 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 		t.Fatalf("model RunID = %s, want run_test", model.requests[0].RunID)
 	}
 	assertMessage(t, model.requests[0].Messages[0], "system", "Available tools")
-	assertMessage(t, model.requests[0].Messages[0], "system", "list_files: Lists files")
-	assertMessage(t, model.requests[0].Messages[0], "system", "read_file: Reads text files")
+	assertMessage(t, model.requests[0].Messages[0], "system", "workspace: Lists workspace metadata")
+	assertMessage(t, model.requests[0].Messages[0], "system", "sandbox_exec: Runs a shell command")
 	assertMessage(t, model.requests[0].Messages[1], "user", "do work")
 	if !strings.Contains(result.SystemPrompt, "Available tools") {
 		t.Fatalf("SystemPrompt = %q, want available tools", result.SystemPrompt)
@@ -135,8 +135,8 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 		Context: outbound.ToolContext{
-			WorkspacePath: "/tmp/workspace",
-			Sandbox:       outbound.Sandbox{ID: "sandbox_test"},
+			Workspace: testToolWorkspace(),
+			Sandbox:   outbound.Sandbox{ID: "sandbox_test"},
 		},
 	})
 	if err != nil {
@@ -233,15 +233,15 @@ func TestRunnerRejectsUnavailableToolBeforeToolRunner(t *testing.T) {
 func TestRunnerRecordsExistingToolResultError(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
-			{Content: `{"type":"tool_call","tool":"read_file","arguments":{"path":"missing.md"}}`},
+			{Content: `{"type":"tool_call","tool":"workspace","arguments":{"operation":"stat","area":"input","path":"missing.md"}}`},
 			{Content: `{"type":"final","summary":"handled tool error"}`},
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "read_file", Description: "Reads text files"},
+		{Name: "workspace", Description: "Lists workspace metadata"},
 	})
 	tools.results = map[string]outbound.ToolResult{
-		"read_file": {Content: "file not found", IsError: true},
+		"workspace": {Content: "path is not available", IsError: true},
 	}
 	runner := NewRunner(model, tools)
 
@@ -258,11 +258,11 @@ func TestRunnerRecordsExistingToolResultError(t *testing.T) {
 	if len(result.ToolCalls) != 1 {
 		t.Fatalf("len(ToolCalls) = %d, want 1", len(result.ToolCalls))
 	}
-	if result.ToolCalls[0].Name != "read_file" {
-		t.Fatalf("tool record name = %q, want read_file", result.ToolCalls[0].Name)
+	if result.ToolCalls[0].Name != "workspace" {
+		t.Fatalf("tool record name = %q, want workspace", result.ToolCalls[0].Name)
 	}
-	if result.ToolCalls[0].Result != "file not found" {
-		t.Fatalf("tool record result = %q, want file not found", result.ToolCalls[0].Result)
+	if result.ToolCalls[0].Result != "path is not available" {
+		t.Fatalf("tool record result = %q, want path is not available", result.ToolCalls[0].Result)
 	}
 	if !result.ToolCalls[0].IsError {
 		t.Fatal("tool record IsError = false, want true")
@@ -271,23 +271,23 @@ func TestRunnerRecordsExistingToolResultError(t *testing.T) {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
 	lastMessages := model.requests[1].Messages
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool error for read_file:\nfile not found")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool error for workspace:\npath is not available")
 }
 
 func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
-			{Content: `{"type":"tool_call","tool":"run_shell","arguments":{"command":"wc -m <file_path>"}}`},
-			{Content: `{"type":"tool_call","tool":"run_shell","arguments":{"command":"wc -m README.md"}}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -m <file_path>"}}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -m /workspace/input/README.md"}}`},
 			{Content: `{"type":"final","summary":"README.md has 123 characters"}`},
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "list_files", Description: "Lists files"},
-		{Name: "run_shell", Description: "Runs shell commands"},
+		{Name: "workspace", Description: "Lists workspace metadata"},
+		{Name: "sandbox_exec", Description: "Runs a shell command"},
 	})
 	tools.results = map[string]outbound.ToolResult{
-		"run_shell": {Content: "exit_code: 0\nstdout:\n123 README.md\n"},
+		"sandbox_exec": {Content: "exit_code: 0\nstdout:\n123 /workspace/input/README.md\n"},
 	}
 	runner := NewRunner(model, tools)
 
@@ -300,8 +300,7 @@ func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {
 			},
 		},
 		Context: outbound.ToolContext{
-			WorkspacePath:     "/tmp/workspace",
-			WorkspaceHasFiles: true,
+			Workspace: testToolWorkspaceWithFiles(),
 			Sandbox: outbound.Sandbox{
 				ID:               "sandbox_test",
 				SupportsCommands: true,
@@ -320,41 +319,41 @@ func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want only corrected shell call", len(tools.calls))
 	}
-	if tools.calls[0].Arguments["command"] != "wc -m README.md" {
-		t.Fatalf("run_shell command = %q, want corrected file path", tools.calls[0].Arguments["command"])
+	if tools.calls[0].Arguments["command"] != "wc -m /workspace/input/README.md" {
+		t.Fatalf("sandbox_exec command = %q, want corrected file path", tools.calls[0].Arguments["command"])
 	}
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
 		index:           1,
 		status:          run.AgentTurnStatusInvalidToolCall,
 		actionType:      run.AgentTurnActionTypeToolCall,
-		toolName:        "run_shell",
+		toolName:        "sandbox_exec",
 		message:         "tool call arguments contain placeholder values",
-		responsePreview: `{"type":"tool_call","tool":"run_shell","arguments":{"command":"wc -m <file_path>"}}`,
+		responsePreview: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -m <file_path>"}}`,
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
 		index:      2,
 		status:     run.AgentTurnStatusToolCall,
 		actionType: run.AgentTurnActionTypeToolCall,
-		toolName:   "run_shell",
+		toolName:   "sandbox_exec",
 	})
 	correction := model.requests[1].Messages[len(model.requests[1].Messages)-1]
 	assertMessage(t, correction, "user", "placeholder argument values: command=<file_path>")
 	assertMessage(t, correction, "user", "Uploaded files: README.md")
-	assertMessage(t, correction, "user", "Available tools: list_files, run_shell")
+	assertMessage(t, correction, "user", "Available tools: sandbox_exec, workspace")
 }
 
-func TestRunnerAllowsAdvertisedRunShellTool(t *testing.T) {
+func TestRunnerAllowsAdvertisedSandboxExecTool(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
-			{Content: `{"type":"tool_call","tool":"run_shell","arguments":{"command":"pwd"}}`},
-			{Content: `{"type":"final","summary":"shell ran"}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"pwd"}}`},
+			{Content: `{"type":"final","summary":"sandbox command ran"}`},
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "run_shell", Description: "Runs shell commands"},
+		{Name: "sandbox_exec", Description: "Runs a shell command"},
 	})
 	tools.results = map[string]outbound.ToolResult{
-		"run_shell": {Content: "exit_code: 0\nstdout:\n/workspace\n"},
+		"sandbox_exec": {Content: "exit_code: 0\nstdout:\n/workspace/work\n"},
 	}
 	runner := NewRunner(model, tools)
 
@@ -362,7 +361,7 @@ func TestRunnerAllowsAdvertisedRunShellTool(t *testing.T) {
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 		Context: outbound.ToolContext{
-			WorkspacePath: "/tmp/workspace",
+			Workspace: testToolWorkspace(),
 			Sandbox: outbound.Sandbox{
 				ID:               "sandbox_test",
 				SupportsCommands: true,
@@ -375,11 +374,11 @@ func TestRunnerAllowsAdvertisedRunShellTool(t *testing.T) {
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
-	if tools.calls[0].Name != "run_shell" {
-		t.Fatalf("tool name = %q, want run_shell", tools.calls[0].Name)
+	if tools.calls[0].Name != "sandbox_exec" {
+		t.Fatalf("tool name = %q, want sandbox_exec", tools.calls[0].Name)
 	}
-	if len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "run_shell" {
-		t.Fatalf("ToolCalls = %#v, want run_shell record", result.ToolCalls)
+	if len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "sandbox_exec" {
+		t.Fatalf("ToolCalls = %#v, want sandbox_exec record", result.ToolCalls)
 	}
 }
 
@@ -997,9 +996,8 @@ func (r *fakeToolRunner) ListTools(_ context.Context, request outbound.ToolListR
 
 	return []outbound.ToolDefinition{
 		{Name: "echo", Description: "Returns text"},
-		{Name: "list_files", Description: "Lists files"},
-		{Name: "read_file", Description: "Reads text files"},
-		{Name: "run_shell", Description: "Runs a shell command"},
+		{Name: "workspace", Description: "Lists workspace metadata"},
+		{Name: "sandbox_exec", Description: "Runs a shell command"},
 	}, nil
 }
 
@@ -1118,8 +1116,8 @@ func assertEchoToolInvocation(t *testing.T, tools *fakeToolRunner) {
 	if len(tools.listRequests) != 1 {
 		t.Fatalf("len(list requests) = %d, want 1", len(tools.listRequests))
 	}
-	if tools.listRequests[0].Context.WorkspacePath != "/tmp/workspace" {
-		t.Fatalf("list tools workspace path = %q, want /tmp/workspace", tools.listRequests[0].Context.WorkspacePath)
+	if tools.listRequests[0].Context.Workspace != testToolWorkspace() {
+		t.Fatalf("list tools workspace = %#v, want test workspace", tools.listRequests[0].Context.Workspace)
 	}
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
@@ -1133,7 +1131,22 @@ func assertEchoToolInvocation(t *testing.T, tools *fakeToolRunner) {
 	if tools.calls[0].Context.Sandbox.ID != "sandbox_test" {
 		t.Fatalf("tool sandbox = %q, want sandbox_test", tools.calls[0].Context.Sandbox.ID)
 	}
-	if tools.calls[0].Context.WorkspacePath != "/tmp/workspace" {
-		t.Fatalf("tool workspace path = %q, want /tmp/workspace", tools.calls[0].Context.WorkspacePath)
+	if tools.calls[0].Context.Workspace != testToolWorkspace() {
+		t.Fatalf("tool workspace = %#v, want test workspace", tools.calls[0].Context.Workspace)
 	}
+}
+
+func testToolWorkspace() outbound.Workspace {
+	return outbound.Workspace{
+		RootPath:  "/tmp/workspace",
+		InputPath: "/tmp/workspace/input",
+		WorkPath:  "/tmp/workspace/work",
+	}
+}
+
+func testToolWorkspaceWithFiles() outbound.Workspace {
+	workspace := testToolWorkspace()
+	workspace.HasFiles = true
+
+	return workspace
 }

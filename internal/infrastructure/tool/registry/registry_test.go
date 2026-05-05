@@ -20,7 +20,7 @@ func TestRegistryImplementsToolRunner(t *testing.T) {
 func TestRegistryCombinesTools(t *testing.T) {
 	runner, err := New(
 		fakeToolRunner{name: "echo"},
-		fakeToolRunner{name: "read_file"},
+		fakeToolRunner{name: "workspace"},
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -33,21 +33,21 @@ func TestRegistryCombinesTools(t *testing.T) {
 	if len(tools) != 2 {
 		t.Fatalf("len(tools) = %d, want 2", len(tools))
 	}
-	if tools[0].Name != "echo" || tools[1].Name != "read_file" {
-		t.Fatalf("tools = %#v, want echo and read_file", tools)
+	if tools[0].Name != "echo" || tools[1].Name != "workspace" {
+		t.Fatalf("tools = %#v, want echo and workspace", tools)
 	}
 }
 
 func TestRegistryPreservesToolArgumentMetadata(t *testing.T) {
 	arguments := []outbound.ToolArgumentDefinition{
 		{
-			Name:        "path",
-			Description: "Relative path of the uploaded workspace file to read.",
+			Name:        "operation",
+			Description: "Workspace metadata operation.",
 			Required:    true,
-			Example:     "README.md",
+			Example:     "list",
 		},
 	}
-	runner, err := New(fakeToolRunner{name: "read_file", arguments: arguments})
+	runner, err := New(fakeToolRunner{name: "workspace", arguments: arguments})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -92,24 +92,47 @@ func TestRegistrySupportsNoTools(t *testing.T) {
 
 func TestRegistryDispatchesToCorrectRunner(t *testing.T) {
 	echoRunner := &recordingToolRunner{name: "echo", content: "echoed"}
-	readRunner := &recordingToolRunner{name: "read_file", content: "read"}
-	runner, err := New(echoRunner, readRunner)
+	workspaceRunner := &recordingToolRunner{name: "workspace", content: "files"}
+	runner, err := New(echoRunner, workspaceRunner)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	result, err := runner.RunTool(context.Background(), outbound.ToolCall{Name: "read_file"})
+	result, err := runner.RunTool(context.Background(), outbound.ToolCall{Name: "workspace"})
 	if err != nil {
 		t.Fatalf("RunTool() error = %v", err)
 	}
-	if result.Content != "read" {
-		t.Fatalf("Content = %q, want read", result.Content)
+	if result.Content != "files" {
+		t.Fatalf("Content = %q, want files", result.Content)
 	}
 	if echoRunner.calls != 0 {
 		t.Fatalf("echo calls = %d, want 0", echoRunner.calls)
 	}
-	if readRunner.calls != 1 {
-		t.Fatalf("read calls = %d, want 1", readRunner.calls)
+	if workspaceRunner.calls != 1 {
+		t.Fatalf("workspace calls = %d, want 1", workspaceRunner.calls)
+	}
+}
+
+func TestRegistryDispatchesSandboxExec(t *testing.T) {
+	workspaceRunner := &recordingToolRunner{name: "workspace", content: "files"}
+	sandboxRunner := &recordingToolRunner{name: "sandbox_exec", content: "exit_code: 0"}
+	runner, err := New(workspaceRunner, sandboxRunner)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runner.RunTool(context.Background(), outbound.ToolCall{Name: "sandbox_exec"})
+	if err != nil {
+		t.Fatalf("RunTool() error = %v", err)
+	}
+	if result.Content != "exit_code: 0" {
+		t.Fatalf("Content = %q, want command result", result.Content)
+	}
+	if workspaceRunner.calls != 0 {
+		t.Fatalf("workspace calls = %d, want 0", workspaceRunner.calls)
+	}
+	if sandboxRunner.calls != 1 {
+		t.Fatalf("sandbox calls = %d, want 1", sandboxRunner.calls)
 	}
 }
 
@@ -177,7 +200,7 @@ func TestRegistryPropagatesListToolsErrors(t *testing.T) {
 func TestRegistryUsesRequestContextForDynamicTools(t *testing.T) {
 	runner, err := New(
 		fakeToolRunner{name: "echo"},
-		dynamicToolRunner{name: "read_file"},
+		dynamicToolRunner{name: "workspace"},
 	)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -193,44 +216,42 @@ func TestRegistryUsesRequestContextForDynamicTools(t *testing.T) {
 
 	tools, err = runner.ListTools(context.Background(), outbound.ToolListRequest{
 		Context: outbound.ToolContext{
-			WorkspacePath:     "/tmp/repo",
-			WorkspaceHasFiles: true,
+			Workspace: testWorkspace(),
 		},
 	})
 	if err != nil {
 		t.Fatalf("ListTools() with workspace error = %v", err)
 	}
-	if len(tools) != 2 || tools[0].Name != "echo" || tools[1].Name != "read_file" {
-		t.Fatalf("tools with workspace = %#v, want echo and read_file", tools)
+	if len(tools) != 2 || tools[0].Name != "echo" || tools[1].Name != "workspace" {
+		t.Fatalf("tools with workspace = %#v, want echo and workspace", tools)
 	}
 }
 
 func TestRegistryUsesCallContextForDynamicToolDispatch(t *testing.T) {
-	runner, err := New(dynamicToolRunner{name: "read_file"})
+	runner, err := New(dynamicToolRunner{name: "workspace"})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	result, err := runner.RunTool(context.Background(), outbound.ToolCall{Name: "read_file"})
+	result, err := runner.RunTool(context.Background(), outbound.ToolCall{Name: "workspace"})
 	if err != nil {
 		t.Fatalf("RunTool() without workspace error = %v", err)
 	}
-	if !result.IsError || result.Content != "unknown tool: read_file" {
+	if !result.IsError || result.Content != "unknown tool: workspace" {
 		t.Fatalf("RunTool() without workspace result = %#v, want unknown tool error", result)
 	}
 
 	result, err = runner.RunTool(context.Background(), outbound.ToolCall{
-		Name: "read_file",
+		Name: "workspace",
 		Context: outbound.ToolContext{
-			WorkspacePath:     "/tmp/repo",
-			WorkspaceHasFiles: true,
+			Workspace: testWorkspace(),
 		},
 	})
 	if err != nil {
 		t.Fatalf("RunTool() with workspace error = %v", err)
 	}
-	if result.IsError || result.Content != "read_file" {
-		t.Fatalf("RunTool() with workspace result = %#v, want read_file content", result)
+	if result.IsError || result.Content != "workspace" {
+		t.Fatalf("RunTool() with workspace result = %#v, want workspace content", result)
 	}
 }
 
@@ -280,7 +301,7 @@ type dynamicToolRunner struct {
 }
 
 func (r dynamicToolRunner) ListTools(_ context.Context, request outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
-	if request.Context.WorkspacePath == "" || !request.Context.WorkspaceHasFiles {
+	if request.Context.Workspace.InputPath == "" || request.Context.Workspace.WorkPath == "" {
 		return nil, nil
 	}
 
@@ -289,4 +310,13 @@ func (r dynamicToolRunner) ListTools(_ context.Context, request outbound.ToolLis
 
 func (r dynamicToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound.ToolResult, error) {
 	return outbound.ToolResult{Content: r.name}, nil
+}
+
+func testWorkspace() outbound.Workspace {
+	return outbound.Workspace{
+		RootPath:  "/tmp/repo",
+		InputPath: "/tmp/repo/input",
+		WorkPath:  "/tmp/repo/work",
+		HasFiles:  true,
+	}
 }

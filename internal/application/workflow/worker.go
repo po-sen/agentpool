@@ -285,9 +285,8 @@ func (w *Worker) startRun(
 		RunID: item.ID,
 		Task:  item.Task,
 		Context: outbound.ToolContext{
-			WorkspacePath:     workspace.Path,
-			WorkspaceHasFiles: workspace.HasFiles,
-			Sandbox:           sandbox,
+			Workspace: workspace,
+			Sandbox:   sandbox,
 		},
 	})
 
@@ -319,7 +318,7 @@ func (w *Worker) prepareWorkspace(ctx context.Context, item *run.Run) (outbound.
 }
 
 func (w *Worker) cleanupWorkspace(ctx context.Context, workspace outbound.Workspace) {
-	if w.workspace == nil || workspace.Path == "" {
+	if w.workspace == nil || workspace.RootPath == "" {
 		return
 	}
 
@@ -334,14 +333,14 @@ func (w *Worker) prepareSandbox(
 	item *run.Run,
 	workspace outbound.Workspace,
 ) (outbound.Sandbox, error) {
-	if workspace.Path == "" || !sandboxSupportsCommands(w.sandbox) {
+	if workspace.InputPath == "" || workspace.WorkPath == "" || !sandboxSupportsCommands(w.sandbox) {
 		return outbound.Sandbox{}, nil
 	}
 
 	return w.sandbox.Prepare(ctx, outbound.SandboxRequest{
-		RunID:         item.ID,
-		Task:          item.Task,
-		WorkspacePath: workspace.Path,
+		RunID:     item.ID,
+		Task:      item.Task,
+		Workspace: workspace,
 	})
 }
 

@@ -24,9 +24,9 @@ import (
 	sandboxdocker "github.com/po-sen/agentpool/internal/infrastructure/sandbox/docker"
 	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
 	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
-	filetools "github.com/po-sen/agentpool/internal/infrastructure/tool/file"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/registry"
-	"github.com/po-sen/agentpool/internal/infrastructure/tool/shell"
+	toolsandbox "github.com/po-sen/agentpool/internal/infrastructure/tool/sandbox"
+	toolworkspace "github.com/po-sen/agentpool/internal/infrastructure/tool/workspace"
 	workspacetemp "github.com/po-sen/agentpool/internal/infrastructure/workspace/temp"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
 	"github.com/po-sen/agentpool/internal/runtime/logger"
@@ -135,12 +135,12 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	shellTools, err := shell.NewRunner(sandboxProvider, shell.Config{})
+	sandboxTools, err := toolsandbox.NewRunner(sandboxProvider, toolsandbox.Config{})
 	if err != nil {
 		return nil, err
 	}
-	fileTools := filetools.NewRunner(filetools.Config{})
-	toolRunner, err := registry.New(fileTools, shellTools)
+	workspaceTools := toolworkspace.NewRunner(toolworkspace.Config{})
+	toolRunner, err := registry.New(workspaceTools, sandboxTools)
 	if err != nil {
 		return nil, err
 	}

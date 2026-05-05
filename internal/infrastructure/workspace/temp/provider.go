@@ -48,24 +48,50 @@ func (p *Provider) PrepareWorkspace(
 		return outbound.Workspace{}, err
 	}
 
+	inputPath := filepath.Join(root, "input")
+	workPath := filepath.Join(root, "work")
+	if err := createWorkspaceDir(inputPath); err != nil {
+		_ = os.RemoveAll(root)
+
+		return outbound.Workspace{}, err
+	}
+	if err := createWorkspaceDir(workPath); err != nil {
+		_ = os.RemoveAll(root)
+
+		return outbound.Workspace{}, err
+	}
+
 	for _, attachment := range request.Attachments {
-		if err := writeAttachment(root, attachment.Filename, attachment.Content); err != nil {
+		if err := writeAttachment(inputPath, attachment.Filename, attachment.Content); err != nil {
 			_ = os.RemoveAll(root)
 
 			return outbound.Workspace{}, err
 		}
 	}
 
-	return outbound.Workspace{Path: root, HasFiles: len(request.Attachments) > 0}, nil
+	return outbound.Workspace{
+		RootPath:  root,
+		InputPath: inputPath,
+		WorkPath:  workPath,
+		HasFiles:  len(request.Attachments) > 0,
+	}, nil
 }
 
 // CleanupWorkspace removes a prepared temp workspace.
 func (p *Provider) CleanupWorkspace(_ context.Context, workspace outbound.Workspace) error {
-	if workspace.Path == "" {
+	if workspace.RootPath == "" {
 		return nil
 	}
 
-	return os.RemoveAll(workspace.Path)
+	return os.RemoveAll(workspace.RootPath)
+}
+
+func createWorkspaceDir(path string) error {
+	if err := os.Mkdir(path, workspaceDirPerm); err != nil {
+		return err
+	}
+
+	return os.Chmod(path, workspaceDirPerm)
 }
 
 func writeAttachment(root string, filename string, content []byte) error {

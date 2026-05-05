@@ -56,7 +56,11 @@ func (p *Provider) Capabilities() outbound.SandboxCapabilities {
 }
 
 // Prepare returns a command-capable dev sandbox marker.
-func (p *Provider) Prepare(context.Context, outbound.SandboxRequest) (outbound.Sandbox, error) {
+func (p *Provider) Prepare(_ context.Context, request outbound.SandboxRequest) (outbound.Sandbox, error) {
+	if err := validateWorkspace(request.Workspace); err != nil {
+		return outbound.Sandbox{}, err
+	}
+
 	return outbound.Sandbox{
 		ID:               sandboxID,
 		SupportsCommands: true,
@@ -79,14 +83,18 @@ func (p *Provider) RunCommand(
 			ExitCode: 1,
 		}, nil
 	}
-	if strings.TrimSpace(request.WorkspacePath) == "" {
-		return outbound.SandboxCommandResult{}, errors.New("workspace path is required")
+	if err := validateWorkspace(request.Workspace); err != nil {
+		return outbound.SandboxCommandResult{}, err
 	}
 	if strings.TrimSpace(request.Command) == "" {
 		return outbound.SandboxCommandResult{}, errors.New("command is required")
 	}
 
-	output := p.executor.Run(ctx, dockerBinary, dockerRunArgs(p.image, request.WorkspacePath, request.Command)...)
+	output := p.executor.Run(
+		ctx,
+		dockerBinary,
+		dockerRunArgs(p.image, request.Workspace.InputPath, request.Workspace.WorkPath, request.Command)...,
+	)
 	result := outbound.SandboxCommandResult{
 		Stdout:   output.stdout,
 		Stderr:   output.stderr,
@@ -107,16 +115,29 @@ func (p *Provider) RunCommand(
 	return result, nil
 }
 
-func dockerRunArgs(image string, workspacePath string, command string) []string {
+func validateWorkspace(workspace outbound.Workspace) error {
+	if strings.TrimSpace(workspace.InputPath) == "" {
+		return errors.New("workspace input path is required")
+	}
+	if strings.TrimSpace(workspace.WorkPath) == "" {
+		return errors.New("workspace work path is required")
+	}
+
+	return nil
+}
+
+func dockerRunArgs(image string, inputPath string, workPath string, command string) []string {
 	return []string{
 		"run",
 		"--rm",
 		"--network",
 		"none",
 		"-v",
-		workspacePath + ":/workspace:ro",
+		inputPath + ":/workspace/input:ro",
+		"-v",
+		workPath + ":/workspace/work:rw",
 		"-w",
-		"/workspace",
+		"/workspace/work",
 		image,
 		"/bin/sh",
 		"-lc",

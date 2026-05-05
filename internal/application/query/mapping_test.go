@@ -35,9 +35,9 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	item.AgentSystemPrompt = "system prompt"
 	item.ToolCalls = []run.ToolCall{
 		{
-			Name:      "read_file",
-			Arguments: map[string]string{"path": "README.md"},
-			Result:    "# Demo\n",
+			Name:      "workspace",
+			Arguments: map[string]string{"operation": "stat", "area": "input", "path": "README.md"},
+			Result:    "virtual_path: /workspace/input/README.md\n",
 			StartedAt: time.Unix(104, 0).UTC(),
 			EndedAt:   time.Unix(105, 0).UTC(),
 		},
@@ -47,7 +47,7 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 			Index:           1,
 			Status:          run.AgentTurnStatusToolCall,
 			ActionType:      run.AgentTurnActionTypeToolCall,
-			ToolName:        "read_file",
+			ToolName:        "workspace",
 			Message:         "model requested tool call",
 			ResponsePreview: `{"type":"tool_call"}`,
 			StartedAt:       time.Unix(106, 0).UTC(),

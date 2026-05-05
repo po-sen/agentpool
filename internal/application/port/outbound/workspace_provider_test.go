@@ -19,8 +19,14 @@ func TestWorkspaceProviderContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareWorkspace() error = %v", err)
 	}
-	if workspace.Path == "" {
-		t.Fatal("workspace path is empty")
+	if workspace.RootPath == "" {
+		t.Fatal("workspace root path is empty")
+	}
+	if workspace.InputPath == "" {
+		t.Fatal("workspace input path is empty")
+	}
+	if workspace.WorkPath == "" {
+		t.Fatal("workspace work path is empty")
 	}
 	if !workspace.HasFiles {
 		t.Fatal("workspace HasFiles = false, want true")
@@ -33,7 +39,12 @@ func TestWorkspaceProviderContract(t *testing.T) {
 type contractWorkspaceProvider struct{}
 
 func (contractWorkspaceProvider) PrepareWorkspace(context.Context, WorkspacePrepareRequest) (Workspace, error) {
-	return Workspace{Path: "/tmp/workspace", HasFiles: true}, nil
+	return Workspace{
+		RootPath:  "/tmp/workspace",
+		InputPath: "/tmp/workspace/input",
+		WorkPath:  "/tmp/workspace/work",
+		HasFiles:  true,
+	}, nil
 }
 
 func (contractWorkspaceProvider) CleanupWorkspace(context.Context, Workspace) error {

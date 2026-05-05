@@ -9,8 +9,9 @@ func TestSandboxCommandRunnerContract(t *testing.T) {
 	var runner SandboxCommandRunner = contractSandboxCommandRunner{}
 
 	result, err := runner.RunCommand(context.Background(), SandboxCommandRequest{
-		Sandbox: Sandbox{ID: "sandbox_test"},
-		Command: "true",
+		Sandbox:   Sandbox{ID: "sandbox_test"},
+		Workspace: Workspace{RootPath: "/tmp/workspace", InputPath: "/tmp/workspace/input", WorkPath: "/tmp/workspace/work"},
+		Command:   "true",
 	})
 	if err != nil {
 		t.Fatalf("RunCommand() error = %v", err)

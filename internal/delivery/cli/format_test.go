@@ -15,10 +15,10 @@ func TestFormatRunCompletedIncludesSummary(t *testing.T) {
 			{Name: "prepare", Status: statusCompleted, Message: "Prepared policy"},
 			{Name: "agent", Status: statusCompleted, Message: "Agent generated result summary"},
 		},
-		ToolCalls: []ToolCallResponse{{Name: "run_shell"}},
+		ToolCalls: []ToolCallResponse{{Name: "sandbox_exec"}},
 	}, OutputOptions{})
 
-	for _, want := range []string{"Run: run_done", "Status: completed", "234 * 887123", "Tool calls:", "- run_shell: ok"} {
+	for _, want := range []string{"Run: run_done", "Status: completed", "234 * 887123", "Tool calls:", "- sandbox_exec: ok"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}
@@ -50,14 +50,14 @@ func TestFormatRunDebugIncludesSystemPromptAndDetails(t *testing.T) {
 		Status:            statusCompleted,
 		AgentSystemPrompt: "AgentPool is running a task.",
 		AgentTurns: []AgentTurnResponse{
-			{Index: 1, Status: "tool_call", ActionType: "tool_call", ToolName: "list_files", ResponsePreview: `{"type":"tool_call"}`},
+			{Index: 1, Status: "tool_call", ActionType: "tool_call", ToolName: "workspace", ResponsePreview: `{"type":"tool_call"}`},
 		},
 		ToolCalls: []ToolCallResponse{
-			{Name: "list_files", Arguments: map[string]string{"path": "."}, Result: "README.md"},
+			{Name: "workspace", Arguments: map[string]string{"operation": "list", "path": "."}, Result: "/workspace/input/README.md"},
 		},
 	}, OutputOptions{Debug: true})
 
-	for _, want := range []string{"Agent system prompt:", "AgentPool is running a task.", "response_preview:", "path: .", "result: README.md"} {
+	for _, want := range []string{"Agent system prompt:", "AgentPool is running a task.", "response_preview:", "operation: list", "path: .", "result: /workspace/input/README.md"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}

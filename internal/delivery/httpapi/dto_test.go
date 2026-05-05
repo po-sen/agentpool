@@ -41,7 +41,7 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 		},
 		ToolCalls: []inbound.ToolCallView{
 			{
-				Name:      "run_shell",
+				Name:      "sandbox_exec",
 				Arguments: map[string]string{"command": "pwd"},
 				Result:    "exit_code: 0",
 				StartedAt: time.Unix(104, 0).UTC(),
@@ -53,7 +53,7 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 				Index:           1,
 				Status:          "tool_call",
 				ActionType:      "tool_call",
-				ToolName:        "run_shell",
+				ToolName:        "sandbox_exec",
 				Message:         "model requested tool call",
 				ResponsePreview: `{"type":"tool_call"}`,
 				StartedAt:       time.Unix(106, 0).UTC(),
@@ -114,8 +114,8 @@ func assertAgentTurnResponse(t *testing.T, turns []agentTurnResponse) {
 	if len(turns) != 1 {
 		t.Fatalf("len(AgentTurns) = %d, want 1", len(turns))
 	}
-	if turns[0].ToolName != "run_shell" {
-		t.Fatalf("AgentTurns[0].ToolName = %q, want run_shell", turns[0].ToolName)
+	if turns[0].ToolName != "sandbox_exec" {
+		t.Fatalf("AgentTurns[0].ToolName = %q, want sandbox_exec", turns[0].ToolName)
 	}
 }
 
@@ -318,11 +318,11 @@ func TestRunResponseJSONIncludesToolCalls(t *testing.T) {
 		Status: "completed",
 		ToolCalls: []inbound.ToolCallView{
 			{
-				Name: "run_shell",
+				Name: "sandbox_exec",
 				Arguments: map[string]string{
 					"command": "pwd && ls -la",
 				},
-				Result:    "exit_code: 0\nstdout:\n/workspace\n",
+				Result:    "exit_code: 0\nstdout:\n/workspace/work\n",
 				StartedAt: time.Unix(101, 0).UTC(),
 				EndedAt:   time.Unix(102, 0).UTC(),
 			},
@@ -336,13 +336,13 @@ func TestRunResponseJSONIncludesToolCalls(t *testing.T) {
 	}
 
 	got := string(payload)
-	if !strings.Contains(got, `"tool_calls":[{"name":"run_shell"`) {
+	if !strings.Contains(got, `"tool_calls":[{"name":"sandbox_exec"`) {
 		t.Fatalf("response does not contain tool_calls: %s", got)
 	}
 	if !strings.Contains(got, `"command":"pwd \u0026\u0026 ls -la"`) {
 		t.Fatalf("response does not contain tool arguments: %s", got)
 	}
-	if !strings.Contains(got, `"result":"exit_code: 0\nstdout:\n/workspace\n"`) {
+	if !strings.Contains(got, `"result":"exit_code: 0\nstdout:\n/workspace/work\n"`) {
 		t.Fatalf("response does not contain tool result: %s", got)
 	}
 }
@@ -364,7 +364,7 @@ func TestRunResponseJSONIncludesAgentTurns(t *testing.T) {
 				Index:           2,
 				Status:          "tool_call",
 				ActionType:      "tool_call",
-				ToolName:        "list_files",
+				ToolName:        "workspace",
 				Message:         "model requested tool call",
 				ResponsePreview: `{"type":"tool_call"}`,
 				StartedAt:       time.Unix(103, 0).UTC(),
@@ -383,7 +383,7 @@ func TestRunResponseJSONIncludesAgentTurns(t *testing.T) {
 	if !strings.Contains(got, `"agent_turns":[{"index":1,"status":"protocol_error"`) {
 		t.Fatalf("response does not contain agent_turns: %s", got)
 	}
-	if !strings.Contains(got, `"tool_name":"list_files"`) {
+	if !strings.Contains(got, `"tool_name":"workspace"`) {
 		t.Fatalf("response does not contain turn tool name: %s", got)
 	}
 	if !strings.Contains(got, `"response_preview":"{bad}"`) {
@@ -470,8 +470,8 @@ func TestRunResponseJSONIncludesEmptyToolArgumentsObject(t *testing.T) {
 		Status: "completed",
 		ToolCalls: []inbound.ToolCallView{
 			{
-				Name:      "list_files",
-				Result:    "files:\nREADME.md",
+				Name:      "workspace",
+				Result:    "files:\n/workspace/input/README.md",
 				StartedAt: time.Unix(101, 0).UTC(),
 				EndedAt:   time.Unix(102, 0).UTC(),
 			},

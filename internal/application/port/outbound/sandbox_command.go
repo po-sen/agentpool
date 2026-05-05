@@ -7,10 +7,10 @@ import (
 
 // SandboxCommandRequest describes a command execution request inside a prepared sandbox.
 type SandboxCommandRequest struct {
-	Sandbox       Sandbox
-	WorkspacePath string
-	Command       string
-	Timeout       time.Duration
+	Sandbox   Sandbox
+	Workspace Workspace
+	Command   string
+	Timeout   time.Duration
 }
 
 // SandboxCommandResult describes the result of a sandbox command.
