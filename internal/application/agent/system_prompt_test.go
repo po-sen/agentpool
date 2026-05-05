@@ -39,9 +39,9 @@ func TestBuildSystemPromptListsPriorityToolPolicy(t *testing.T) {
 
 	for _, want := range []string{
 		"Tool policy:",
-		"If sandbox_exec is available and the answer can be computed, counted, searched, inspected, tested, or otherwise verified by a command, call sandbox_exec before final.",
+		"If sandbox_exec is available and the task has an exact or verifiable answer, call sandbox_exec before final.",
 		"Do not guess exact answers when sandbox_exec can verify them.",
-		"Use sandbox_exec for arithmetic, counts, hashes, encoding/decoding, file content inspection, grep/search, data transforms, tests, builds, linters, and code behavior checks.",
+		"Use sandbox_exec for arithmetic, counts, searches, file content inspection, data transforms, tests, builds, linters, and code behavior checks.",
 		"For subjective discussion, architecture advice, brainstorming, or simple conversation, answer directly when no command is needed.",
 		"If a needed tool is unavailable, answer with what can be known and say what could not be verified.",
 	} {
@@ -57,6 +57,9 @@ func TestBuildSystemPromptListsWorkspaceRules(t *testing.T) {
 		"/workspace/input contains read-only run inputs.",
 		"/workspace/work is writable and is the sandbox_exec working directory.",
 		"Uploaded file paths in the task are relative to /workspace/input.",
+		"Use workspace to discover paths first when files are involved.",
+		"workspace accepts either area plus relative path, or full /workspace/input|work virtual paths.",
+		"Use /workspace/input for read-only inputs and /workspace/work for generated files.",
 		"workspace only lists/stats paths; it does not read file contents.",
 		"Use sandbox_exec to read/search/process file contents.",
 		"Do not modify /workspace/input.",

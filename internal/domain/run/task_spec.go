@@ -12,23 +12,39 @@ const MaxPromptLength = 8000
 
 const (
 	// MaxAttachmentCount is the maximum number of files accepted for one task.
-	MaxAttachmentCount = 10
+	MaxAttachmentCount = 500
 	// MaxAttachmentSizeBytes is the maximum size accepted for one uploaded text file.
-	MaxAttachmentSizeBytes int64 = 1 << 20
+	MaxAttachmentSizeBytes int64 = 2 << 20
 	// MaxTotalAttachmentSizeBytes is the maximum total size accepted for all uploaded text files.
-	MaxTotalAttachmentSizeBytes int64 = 5 << 20
+	MaxTotalAttachmentSizeBytes int64 = 25 << 20
 )
 
 var supportedAttachmentExtensions = map[string]struct{}{
+	".css":  {},
 	".go":   {},
+	".html": {},
 	".js":   {},
 	".json": {},
+	".jsx":  {},
 	".md":   {},
+	".mod":  {},
 	".py":   {},
+	".sh":   {},
+	".sum":  {},
+	".toml": {},
 	".ts":   {},
+	".tsx":  {},
 	".txt":  {},
 	".yaml": {},
 	".yml":  {},
+}
+
+var supportedAttachmentBasenames = map[string]struct{}{
+	".dockerignore": {},
+	".env.example":  {},
+	".gitignore":    {},
+	"dockerfile":    {},
+	"makefile":      {},
 }
 
 // TaskSpec describes the work requested by a run submitter.
@@ -103,7 +119,7 @@ func (a TaskAttachment) Validate() error {
 	if err := validateAttachmentFilename(a.Filename); err != nil {
 		return err
 	}
-	if _, ok := supportedAttachmentExtensions[strings.ToLower(path.Ext(a.Filename))]; !ok {
+	if !supportedAttachmentName(a.Filename) {
 		return ErrUnsupportedAttachmentType
 	}
 	if a.SizeBytes < 0 {
@@ -120,6 +136,16 @@ func (a TaskAttachment) Validate() error {
 	}
 
 	return nil
+}
+
+func supportedAttachmentName(filename string) bool {
+	base := strings.ToLower(path.Base(filename))
+	if _, ok := supportedAttachmentBasenames[base]; ok {
+		return true
+	}
+	_, ok := supportedAttachmentExtensions[strings.ToLower(path.Ext(filename))]
+
+	return ok
 }
 
 func (a TaskAttachment) effectiveSize() int64 {

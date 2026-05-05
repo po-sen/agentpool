@@ -22,6 +22,10 @@ func Execute(ctx context.Context, command Command, stdout io.Writer) error {
 		return executeList(ctx, client, command, stdout)
 	case CommandCancel:
 		return executeCancel(ctx, client, command, stdout)
+	case CommandArtifacts:
+		return executeArtifacts(ctx, client, command, stdout)
+	case CommandArtifact:
+		return executeArtifact(ctx, client, command, stdout)
 	default:
 		return fmt.Errorf("unsupported HTTP client command: %s", command.Kind)
 	}
@@ -29,8 +33,10 @@ func Execute(ctx context.Context, command Command, stdout io.Writer) error {
 
 func executeRun(ctx context.Context, client *Client, command Command, stdout io.Writer) error {
 	created, err := client.CreateRun(ctx, CreateRunRequest{
-		Prompt: command.Run.Prompt,
-		Files:  command.Run.Files,
+		Prompt:   command.Run.Prompt,
+		Files:    command.Run.Files,
+		Dirs:     command.Run.Dirs,
+		Archives: command.Run.Archives,
 	})
 	if err != nil {
 		return err
@@ -73,4 +79,23 @@ func executeCancel(ctx context.Context, client *Client, command Command, stdout 
 	}
 
 	return WriteRunOutput(stdout, response, command.Output)
+}
+
+func executeArtifacts(ctx context.Context, client *Client, command Command, stdout io.Writer) error {
+	response, err := client.ListArtifacts(ctx, command.RunID)
+	if err != nil {
+		return err
+	}
+
+	return WriteArtifactsOutput(stdout, response, command.Output)
+}
+
+func executeArtifact(ctx context.Context, client *Client, command Command, stdout io.Writer) error {
+	artifact, err := client.GetArtifact(ctx, command.RunID, command.Path)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(artifact.Content)
+
+	return err
 }

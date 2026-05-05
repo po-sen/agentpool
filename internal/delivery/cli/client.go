@@ -4,21 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"os"
-	"path"
-	"path/filepath"
 	"strings"
 	"time"
 )
 
 const (
 	apiRunsPath        = "/v1/runs"
+	apiArtifactsPath   = "artifacts"
 	apiCancelPath      = "cancel"
 	contentTypeHeader  = "Content-Type"
 	jsonContentType    = "application/json"
@@ -37,8 +34,10 @@ type Client struct {
 
 // CreateRunRequest contains CLI run submission input.
 type CreateRunRequest struct {
-	Prompt string
-	Files  []string
+	Prompt   string
+	Files    []string
+	Dirs     []string
+	Archives []string
 }
 
 // RunResponse mirrors the public run JSON response.
@@ -53,6 +52,7 @@ type RunResponse struct {
 	Steps             []StepResponse      `json:"steps"`
 	ToolCalls         []ToolCallResponse  `json:"tool_calls,omitempty"`
 	AgentTurns        []AgentTurnResponse `json:"agent_turns,omitempty"`
+	Artifacts         []ArtifactResponse  `json:"artifacts,omitempty"`
 	AgentSystemPrompt string              `json:"agent_system_prompt,omitempty"`
 	CreatedAt         time.Time           `json:"created_at"`
 	UpdatedAt         time.Time           `json:"updated_at"`
@@ -72,6 +72,25 @@ type AttachmentResponse struct {
 	Filename  string `json:"filename"`
 	MediaType string `json:"media_type,omitempty"`
 	SizeBytes int64  `json:"size_bytes"`
+}
+
+// ArtifactsResponse mirrors the public artifact list JSON response.
+type ArtifactsResponse struct {
+	Artifacts []ArtifactResponse `json:"artifacts"`
+}
+
+// ArtifactResponse mirrors artifact metadata in the public run JSON response.
+type ArtifactResponse struct {
+	Path      string `json:"path"`
+	MediaType string `json:"media_type,omitempty"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// ArtifactContent contains one fetched artifact body and response metadata.
+type ArtifactContent struct {
+	Path      string
+	MediaType string
+	Content   []byte
 }
 
 // RunResultResponse mirrors successful run output in the public run JSON response.
@@ -136,7 +155,7 @@ func NewClient(addr string) (*Client, error) {
 
 // CreateRun submits a prompt-only JSON run or multipart file run.
 func (c *Client) CreateRun(ctx context.Context, request CreateRunRequest) (RunResponse, error) {
-	if len(request.Files) > 0 {
+	if len(request.Files) > 0 || len(request.Dirs) > 0 || len(request.Archives) > 0 {
 		return c.CreateRunMultipart(ctx, request)
 	}
 
@@ -170,13 +189,18 @@ func (c *Client) CreateRunJSON(ctx context.Context, request CreateRunRequest) (R
 
 // CreateRunMultipart submits a run with uploaded files through POST /v1/runs.
 func (c *Client) CreateRunMultipart(ctx context.Context, request CreateRunRequest) (RunResponse, error) {
+	uploads, err := collectUploadInputs(request)
+	if err != nil {
+		return RunResponse{}, err
+	}
+
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	if err := writer.WriteField(flagPrompt, request.Prompt); err != nil {
 		return RunResponse{}, err
 	}
-	for _, filePath := range request.Files {
-		if err := writeMultipartFile(writer, filePath); err != nil {
+	for _, upload := range uploads {
+		if err := writeMultipartUpload(writer, upload); err != nil {
 			_ = writer.Close()
 
 			return RunResponse{}, err
@@ -255,6 +279,63 @@ func (c *Client) CancelRun(ctx context.Context, id string) (RunResponse, error) 
 	return response, nil
 }
 
+// ListArtifacts fetches artifact metadata for one run.
+func (c *Client) ListArtifacts(ctx context.Context, id string) (ArtifactsResponse, error) {
+	httpRequest, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		c.runEndpoint(id)+"/"+apiArtifactsPath,
+		nil,
+	)
+	if err != nil {
+		return ArtifactsResponse{}, err
+	}
+
+	var response ArtifactsResponse
+	if err := c.doJSON(httpRequest, http.StatusOK, &response); err != nil {
+		return ArtifactsResponse{}, err
+	}
+
+	return response, nil
+}
+
+// GetArtifact fetches one run artifact body.
+func (c *Client) GetArtifact(ctx context.Context, id string, artifactPath string) (ArtifactContent, error) {
+	if !safeRelativeFilename(artifactPath) {
+		return ArtifactContent{}, fmt.Errorf("unsafe artifact path: %s", artifactPath)
+	}
+	httpRequest, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		c.runEndpoint(id)+"/"+apiArtifactsPath+"/"+artifactPathEndpoint(artifactPath),
+		nil,
+	)
+	if err != nil {
+		return ArtifactContent{}, err
+	}
+
+	response, err := c.httpClient.Do(httpRequest) //nolint:gosec // CLI intentionally connects to user-configured AgentPool API addresses.
+	if err != nil {
+		return ArtifactContent{}, err
+	}
+	defer func() {
+		_ = response.Body.Close()
+	}()
+	if response.StatusCode != http.StatusOK {
+		return ArtifactContent{}, decodeAPIError(response)
+	}
+	content, err := io.ReadAll(response.Body)
+	if err != nil {
+		return ArtifactContent{}, err
+	}
+
+	return ArtifactContent{
+		Path:      artifactPath,
+		MediaType: response.Header.Get(contentTypeHeader),
+		Content:   content,
+	}, nil
+}
+
 // WaitRun polls one run until it reaches a terminal state.
 func (c *Client) WaitRun(ctx context.Context, id string, pollInterval time.Duration) (RunResponse, error) {
 	if pollInterval <= 0 {
@@ -291,6 +372,15 @@ func (c *Client) runEndpoint(id string) string {
 	return c.endpoint(apiRunsPath + "/" + url.PathEscape(id))
 }
 
+func artifactPathEndpoint(artifactPath string) string {
+	components := strings.Split(artifactPath, "/")
+	for index, component := range components {
+		components[index] = url.PathEscape(component)
+	}
+
+	return strings.Join(components, "/")
+}
+
 func (c *Client) doJSON(request *http.Request, expectedStatus int, target any) error {
 	response, err := c.httpClient.Do(request) //nolint:gosec // CLI intentionally connects to user-configured AgentPool API addresses.
 	if err != nil {
@@ -320,69 +410,16 @@ func decodeAPIError(response *http.Response) error {
 	return fmt.Errorf("AgentPool API error (%d)", response.StatusCode)
 }
 
-func writeMultipartFile(writer *multipart.Writer, filePath string) error {
-	filename, err := uploadFilename(filePath)
+func writeMultipartUpload(writer *multipart.Writer, upload uploadFile) error {
+	part, err := writer.CreateFormFile(multipartFilesName, upload.filename)
 	if err != nil {
 		return err
 	}
-	source, err := os.Open(filePath) //nolint:gosec // CLI intentionally reads user-selected upload paths.
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = source.Close()
-	}()
-
-	part, err := writer.CreateFormFile(multipartFilesName, filename)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(part, source); err != nil {
+	if _, err := part.Write(upload.content); err != nil {
 		return err
 	}
 
 	return nil
-}
-
-func uploadFilename(filePath string) (string, error) {
-	if strings.TrimSpace(filePath) == "" {
-		return "", errors.New("file path is required")
-	}
-	if filepath.IsAbs(filePath) {
-		return safeBaseFilename(filePath)
-	}
-
-	name := filepath.ToSlash(filePath)
-	if !safeRelativeFilename(name) {
-		return "", fmt.Errorf("unsafe file path: %s", filePath)
-	}
-
-	return name, nil
-}
-
-func safeBaseFilename(filePath string) (string, error) {
-	name := filepath.Base(filePath)
-	if !safeRelativeFilename(name) {
-		return "", fmt.Errorf("unsafe file path: %s", filePath)
-	}
-
-	return name, nil
-}
-
-func safeRelativeFilename(name string) bool {
-	if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, "\\") {
-		return false
-	}
-	if path.Clean(name) != name {
-		return false
-	}
-	for _, component := range strings.Split(name, "/") {
-		if component == "" || component == "." || component == ".." {
-			return false
-		}
-	}
-
-	return true
 }
 
 func waitForPoll(ctx context.Context, interval time.Duration) error {

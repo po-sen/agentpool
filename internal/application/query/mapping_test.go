@@ -54,6 +54,9 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 			EndedAt:         time.Unix(107, 0).UTC(),
 		},
 	}
+	item.Artifacts = []run.Artifact{
+		{Path: "report.md", MediaType: "text/markdown", Content: []byte("# Report\n"), SizeBytes: 9},
+	}
 	item.Steps = []run.Step{
 		{
 			Name:      "execute",
@@ -105,8 +108,17 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 		t.Fatalf("domain tool call path = %q, want README.md", item.ToolCalls[0].Arguments["path"])
 	}
 	assertMappedAgentTurn(t, view.AgentTurns)
+	assertMappedArtifacts(t, view.Artifacts)
 	if view.Steps[0].EndedAt == nil || !view.Steps[0].EndedAt.Equal(endedAt) {
 		t.Fatalf("EndedAt = %v, want %v", view.Steps[0].EndedAt, endedAt)
+	}
+}
+
+func assertMappedArtifacts(t *testing.T, artifacts []inbound.ArtifactView) {
+	t.Helper()
+
+	if len(artifacts) != 1 || artifacts[0].Path != "report.md" {
+		t.Fatalf("Artifacts = %#v, want report metadata", artifacts)
 	}
 }
 

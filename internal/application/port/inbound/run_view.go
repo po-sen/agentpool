@@ -16,6 +16,7 @@ type RunView struct {
 	Steps             []StepView
 	ToolCalls         []ToolCallView
 	AgentTurns        []AgentTurnView
+	Artifacts         []ArtifactView
 	AgentSystemPrompt string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
@@ -39,6 +40,21 @@ type TaskView struct {
 type AttachmentView struct {
 	Filename  string
 	MediaType string
+	SizeBytes int64
+}
+
+// ArtifactView is artifact metadata exposed by application use cases.
+type ArtifactView struct {
+	Path      string
+	MediaType string
+	SizeBytes int64
+}
+
+// ArtifactContentView is one artifact's metadata and content.
+type ArtifactContentView struct {
+	Path      string
+	MediaType string
+	Content   []byte
 	SizeBytes int64
 }
 

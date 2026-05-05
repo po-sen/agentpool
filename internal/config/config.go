@@ -8,7 +8,7 @@ import (
 
 const defaultHTTPAddr = ":8080"
 const defaultModelTimeout = 30 * time.Second
-const defaultAgentMaxTurns = 4
+const defaultAgentMaxTurns = 8
 const defaultSandboxImage = "alpine:3.20"
 
 // ModelProvider identifies the configured model provider.

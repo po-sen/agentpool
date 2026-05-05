@@ -57,6 +57,9 @@ func TestRunnerListsInputFiles(t *testing.T) {
 		t.Fatalf("result = %#v, want success", result)
 	}
 	assertContains(t, result.Content, "/workspace/input/README.md")
+	assertContains(t, result.Content, "area: input")
+	assertContains(t, result.Content, "relative_path: README.md")
+	assertContains(t, result.Content, "size_bytes: 4")
 	assertNotContains(t, result.Content, "/workspace/work/scratch.txt")
 	assertNotContains(t, result.Content, workspace.InputPath)
 }
@@ -117,6 +120,23 @@ func TestRunnerStatsInputFile(t *testing.T) {
 	assertNotContains(t, result.Content, workspace.InputPath)
 }
 
+func TestRunnerStatsInputFileWithVirtualPath(t *testing.T) {
+	workspace := testWorkspace(t)
+	writeFile(t, workspace.InputPath, "README.md", "demo")
+
+	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
+		argumentOperation: operationStat,
+		argumentPath:      "/workspace/input/README.md",
+	})
+	if result.IsError {
+		t.Fatalf("result = %#v, want success", result)
+	}
+	assertContains(t, result.Content, "virtual_path: /workspace/input/README.md")
+	assertContains(t, result.Content, "area: input")
+	assertContains(t, result.Content, "relative_path: README.md")
+	assertNotContains(t, result.Content, workspace.InputPath)
+}
+
 func TestRunnerStatsWorkFile(t *testing.T) {
 	workspace := testWorkspace(t)
 	writeFile(t, workspace.WorkPath, "scratch.txt", "scratch")
@@ -132,6 +152,23 @@ func TestRunnerStatsWorkFile(t *testing.T) {
 	assertContains(t, result.Content, "virtual_path: /workspace/work/scratch.txt")
 	assertContains(t, result.Content, "area: work")
 	assertContains(t, result.Content, "type: file")
+	assertNotContains(t, result.Content, workspace.WorkPath)
+}
+
+func TestRunnerStatsWorkFileWithVirtualPath(t *testing.T) {
+	workspace := testWorkspace(t)
+	writeFile(t, workspace.WorkPath, "scratch.txt", "scratch")
+
+	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
+		argumentOperation: operationStat,
+		argumentPath:      "/workspace/work/scratch.txt",
+	})
+	if result.IsError {
+		t.Fatalf("result = %#v, want success", result)
+	}
+	assertContains(t, result.Content, "virtual_path: /workspace/work/scratch.txt")
+	assertContains(t, result.Content, "area: work")
+	assertContains(t, result.Content, "relative_path: scratch.txt")
 	assertNotContains(t, result.Content, workspace.WorkPath)
 }
 
@@ -166,6 +203,21 @@ func TestRunnerRejectsUnsafePaths(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunnerRejectsConflictingAreaAndVirtualPath(t *testing.T) {
+	workspace := testWorkspace(t)
+	writeFile(t, workspace.InputPath, "README.md", "demo")
+
+	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
+		argumentOperation: operationStat,
+		argumentArea:      areaWork,
+		argumentPath:      "/workspace/input/README.md",
+	})
+	if !result.IsError || !strings.Contains(result.Content, "conflicts with virtual path area") {
+		t.Fatalf("result = %#v, want conflict error", result)
+	}
+	assertNotContains(t, result.Content, workspace.RootPath)
 }
 
 func TestRunnerRejectsUnknownArea(t *testing.T) {
@@ -243,6 +295,40 @@ func TestRunnerListMissingAllPathReturnsSafeError(t *testing.T) {
 	})
 
 	assertMissingPathError(t, result, workspace)
+}
+
+func TestRunnerListAllPathReturnsPartialMatches(t *testing.T) {
+	workspace := testWorkspace(t)
+	writeFile(t, workspace.WorkPath, "scratch.txt", "scratch")
+
+	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
+		argumentOperation: operationList,
+		argumentArea:      areaAll,
+		argumentPath:      "scratch.txt",
+	})
+	if result.IsError {
+		t.Fatalf("result = %#v, want partial success", result)
+	}
+	assertContains(t, result.Content, "virtual_path: /workspace/work/scratch.txt")
+	assertNotContains(t, result.Content, "path is not available")
+	assertNotContains(t, result.Content, workspace.WorkPath)
+}
+
+func TestRunnerStatAllPathReturnsPartialMatches(t *testing.T) {
+	workspace := testWorkspace(t)
+	writeFile(t, workspace.WorkPath, "scratch.txt", "scratch")
+
+	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
+		argumentOperation: operationStat,
+		argumentArea:      areaAll,
+		argumentPath:      "scratch.txt",
+	})
+	if result.IsError {
+		t.Fatalf("result = %#v, want partial success", result)
+	}
+	assertContains(t, result.Content, "virtual_path: /workspace/work/scratch.txt")
+	assertNotContains(t, result.Content, "path is not available")
+	assertNotContains(t, result.Content, workspace.WorkPath)
 }
 
 func TestRunnerRejectsUnknownToolName(t *testing.T) {

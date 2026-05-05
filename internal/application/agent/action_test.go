@@ -34,6 +34,14 @@ func TestParseActionParsesFencedFinalAction(t *testing.T) {
 	}
 }
 
+func TestParseActionExtractsOneEmbeddedJSONObject(t *testing.T) {
+	result := parseAction("Here is the action:\n{\"type\":\"final\",\"summary\":\"done\"}\nThanks.")
+	assertValidAction(t, result, actionTypeFinal)
+	if result.action.Summary != "done" {
+		t.Fatalf("Summary = %q, want done", result.action.Summary)
+	}
+}
+
 func TestParseActionParsesToolCallAction(t *testing.T) {
 	result := parseAction(`{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}`)
 	assertValidAction(t, result, actionTypeToolCall)
@@ -123,6 +131,11 @@ func TestParseActionReturnsProtocolErrorForInvalidProtocol(t *testing.T) {
 			code: actionParseCodeMultipleJSONValues,
 		},
 		{
+			name: "multiple embedded objects",
+			body: `First {"type":"tool_call","tool":"echo","arguments":{"text":"hello"}} then {"type":"final","summary":"done"}`,
+			code: actionParseCodeMultipleJSONValues,
+		},
+		{
 			name: "invalid json",
 			body: `{"type":"final","summary":"done"`,
 			code: actionParseCodeInvalidJSON,
@@ -136,11 +149,6 @@ func TestParseActionReturnsProtocolErrorForInvalidProtocol(t *testing.T) {
 			name: "invalid expression json",
 			body: `{"type":"final","summary":0.11 < 0.2}`,
 			code: actionParseCodeInvalidJSON,
-		},
-		{
-			name: "fence with prose remains invalid",
-			body: "Here is the answer: {\"type\":\"final\",\"summary\":\"done\"}",
-			code: "",
 		},
 	}
 

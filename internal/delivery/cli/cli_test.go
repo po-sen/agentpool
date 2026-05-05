@@ -40,6 +40,10 @@ func TestParseRunCommand(t *testing.T) {
 		"README.md",
 		"--file",
 		"internal/application/workflow/worker.go",
+		"--dir",
+		".",
+		"--archive",
+		"project.tar.gz",
 		"--timeout",
 		"3s",
 		"--poll-interval",
@@ -66,6 +70,8 @@ func TestParseRunCommand(t *testing.T) {
 		t.Fatal("debug flag = false, want true")
 	}
 	assertFiles(t, got.Run.Files, []string{"README.md", "internal/application/workflow/worker.go"})
+	assertFiles(t, got.Run.Dirs, []string{"."})
+	assertFiles(t, got.Run.Archives, []string{"project.tar.gz"})
 }
 
 func TestParseRunNoWait(t *testing.T) {
@@ -114,6 +120,27 @@ func TestParseCancelCommand(t *testing.T) {
 	}
 }
 
+func TestParseArtifactCommands(t *testing.T) {
+	list, err := Parse([]string{commandArtifactsName, "run_test", "--json"})
+	if err != nil {
+		t.Fatalf("parse artifacts command: %v", err)
+	}
+	if list.Kind != CommandArtifacts || list.RunID != "run_test" {
+		t.Fatalf("parsed artifacts command = %#v", list)
+	}
+	if !list.Output.JSON {
+		t.Fatal("artifacts json flag = false, want true")
+	}
+
+	get, err := Parse([]string{commandArtifactName, "run_test", "reports/report.md"})
+	if err != nil {
+		t.Fatalf("parse artifact command: %v", err)
+	}
+	if get.Kind != CommandArtifact || get.RunID != "run_test" || get.Path != "reports/report.md" {
+		t.Fatalf("parsed artifact command = %#v", get)
+	}
+}
+
 func TestParseUsesAddressEnvFallback(t *testing.T) {
 	t.Setenv(envCLIAddr, "http://example.test")
 
@@ -143,6 +170,8 @@ func TestParseInvalidArgs(t *testing.T) {
 		{name: "get missing id", args: []string{commandGetName}},
 		{name: "list extra arg", args: []string{commandListName, "extra"}},
 		{name: "cancel missing id", args: []string{commandCancelName}},
+		{name: "artifacts missing id", args: []string{commandArtifactsName}},
+		{name: "artifact missing path", args: []string{commandArtifactName, "run_test"}},
 		{name: "server extra arg", args: []string{commandServerName, "extra"}},
 	}
 

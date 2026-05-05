@@ -17,8 +17,8 @@ func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 	builder.WriteString("- Only call tools listed under Available tools. Never invent tool names.\n\n")
 	builder.WriteString("Tool policy:\n")
 	if toolIsDefined(tools, "sandbox_exec") {
-		builder.WriteString("- If sandbox_exec is available and the answer can be computed, counted, searched, inspected, tested, or otherwise verified by a command, call sandbox_exec before final. Do not guess exact answers when sandbox_exec can verify them.\n")
-		builder.WriteString("- Use sandbox_exec for arithmetic, counts, hashes, encoding/decoding, file content inspection, grep/search, data transforms, tests, builds, linters, and code behavior checks.\n")
+		builder.WriteString("- If sandbox_exec is available and the task has an exact or verifiable answer, call sandbox_exec before final. Do not guess exact answers when sandbox_exec can verify them.\n")
+		builder.WriteString("- Use sandbox_exec for arithmetic, counts, searches, file content inspection, data transforms, tests, builds, linters, and code behavior checks.\n")
 	}
 	builder.WriteString("- For subjective discussion, architecture advice, brainstorming, or simple conversation, answer directly when no command is needed.\n")
 	builder.WriteString("- If a needed tool is unavailable, answer with what can be known and say what could not be verified.\n\n")
@@ -26,6 +26,9 @@ func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 	builder.WriteString("- /workspace/input contains read-only run inputs.\n")
 	builder.WriteString("- /workspace/work is writable and is the sandbox_exec working directory.\n")
 	builder.WriteString("- Uploaded file paths in the task are relative to /workspace/input.\n")
+	builder.WriteString("- Use workspace to discover paths first when files are involved.\n")
+	builder.WriteString("- workspace accepts either area plus relative path, or full /workspace/input|work virtual paths.\n")
+	builder.WriteString("- Use /workspace/input for read-only inputs and /workspace/work for generated files.\n")
 	builder.WriteString("- workspace only lists/stats paths; it does not read file contents.\n")
 	builder.WriteString("- Use sandbox_exec to read/search/process file contents.\n")
 	builder.WriteString("- Do not modify /workspace/input.\n")

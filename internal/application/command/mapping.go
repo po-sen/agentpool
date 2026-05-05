@@ -56,6 +56,7 @@ func toRunView(item *run.Run) inbound.RunView {
 			EndedAt:         turn.EndedAt,
 		})
 	}
+	artifacts := artifactViews(item.Artifacts)
 
 	return inbound.RunView{
 		ID:     item.ID.String(),
@@ -76,10 +77,28 @@ func toRunView(item *run.Run) inbound.RunView {
 		Steps:             steps,
 		ToolCalls:         toolCalls,
 		AgentTurns:        agentTurns,
+		Artifacts:         artifacts,
 		AgentSystemPrompt: item.AgentSystemPrompt,
 		CreatedAt:         item.CreatedAt,
 		UpdatedAt:         item.UpdatedAt,
 	}
+}
+
+func artifactViews(artifacts []run.Artifact) []inbound.ArtifactView {
+	if len(artifacts) == 0 {
+		return nil
+	}
+
+	views := make([]inbound.ArtifactView, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		views = append(views, inbound.ArtifactView{
+			Path:      artifact.Path,
+			MediaType: artifact.MediaType,
+			SizeBytes: artifact.SizeBytes,
+		})
+	}
+
+	return views
 }
 
 func copyToolArguments(arguments map[string]string) map[string]string {

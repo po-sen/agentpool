@@ -57,6 +57,9 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 				EndedAt:         time.Unix(107, 0).UTC(),
 			},
 		},
+		Artifacts: []ArtifactView{
+			{Path: "report.md", MediaType: "text/markdown", SizeBytes: 9},
+		},
 		CreatedAt: time.Unix(100, 0).UTC(),
 		UpdatedAt: time.Unix(103, 0).UTC(),
 	}
@@ -93,5 +96,13 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	}
 	if view.AgentTurns[0].ToolName != "workspace" {
 		t.Fatalf("AgentTurns[0].ToolName = %q, want workspace", view.AgentTurns[0].ToolName)
+	}
+	if view.Artifacts[0].Path != "report.md" {
+		t.Fatalf("Artifacts[0].Path = %q, want report.md", view.Artifacts[0].Path)
+	}
+
+	content := ArtifactContentView{Path: "report.md", Content: []byte("# Report\n"), SizeBytes: 9}
+	if string(content.Content) != "# Report\n" {
+		t.Fatalf("ArtifactContentView.Content = %q, want report", string(content.Content))
 	}
 }

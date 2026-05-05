@@ -31,6 +31,7 @@ const (
 	defaultMaxFiles = 200
 
 	virtualWorkspaceRoot = "/workspace"
+	messagePathUnsafe    = "path is unsafe"
 )
 
 var errTooManyFiles = errors.New("too many files")
@@ -82,9 +83,9 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 				},
 				{
 					Name:        argumentPath,
-					Description: `Safe relative path inside the selected area. Defaults to ".".`,
+					Description: `Safe relative path inside the selected area, or a /workspace/input|work virtual path. Defaults to ".".`,
 					Required:    false,
-					Example:     "README.md",
+					Example:     "/workspace/input/README.md",
 				},
 			},
 		},
@@ -104,13 +105,13 @@ func (r *Runner) RunTool(ctx context.Context, call outbound.ToolCall) (outbound.
 	if operation == "" {
 		return outbound.ToolResult{Content: "missing operation argument", IsError: true}, nil
 	}
-	areas, areaMessage := selectedAreas(call.Context.Workspace, call.Arguments[argumentArea])
-	if areaMessage != "" {
-		return outbound.ToolResult{Content: areaMessage, IsError: true}, nil
-	}
-	relativePath, pathMessage := safeRelativePath(call.Arguments[argumentPath])
-	if pathMessage != "" {
-		return outbound.ToolResult{Content: pathMessage, IsError: true}, nil
+	areas, relativePath, selectionMessage := resolveSelection(
+		call.Context.Workspace,
+		call.Arguments[argumentArea],
+		call.Arguments[argumentPath],
+	)
+	if selectionMessage != "" {
+		return outbound.ToolResult{Content: selectionMessage, IsError: true}, nil
 	}
 
 	switch operation {
@@ -153,28 +154,113 @@ func selectedAreas(workspace outbound.Workspace, rawArea string) ([]workspaceAre
 	}
 }
 
+func resolveSelection(workspace outbound.Workspace, rawArea string, rawPath string) ([]workspaceArea, string, string) {
+	if area, relativePath, ok, message := virtualPathSelection(rawPath); ok || message != "" {
+		if message != "" {
+			return nil, "", message
+		}
+		if conflict := virtualAreaConflict(rawArea, area); conflict != "" {
+			return nil, "", conflict
+		}
+		areas, areaMessage := selectedAreas(workspace, area)
+		if areaMessage != "" {
+			return nil, "", areaMessage
+		}
+
+		return areas, relativePath, ""
+	}
+
+	areas, areaMessage := selectedAreas(workspace, rawArea)
+	if areaMessage != "" {
+		return nil, "", areaMessage
+	}
+	relativePath, pathMessage := safeRelativePath(rawPath)
+	if pathMessage != "" {
+		return nil, "", pathMessage
+	}
+
+	return areas, relativePath, ""
+}
+
+func virtualPathSelection(rawPath string) (string, string, bool, string) {
+	cleanPath := strings.TrimSpace(rawPath)
+	if cleanPath == "" {
+		return "", "", false, ""
+	}
+	if strings.HasPrefix(cleanPath, virtualWorkspaceRoot+"/") || cleanPath == virtualWorkspaceRoot {
+		area, relativePath, ok := splitVirtualPath(cleanPath)
+		if !ok {
+			return "", "", false, messagePathUnsafe
+		}
+		if relativePath == "" {
+			relativePath = "."
+		}
+		if message := validateRelativePath(relativePath); message != "" {
+			return "", "", false, message
+		}
+
+		return area, relativePath, true, ""
+	}
+	if path.IsAbs(cleanPath) || filepath.IsAbs(cleanPath) {
+		return "", "", false, messagePathUnsafe
+	}
+
+	return "", "", false, ""
+}
+
+func splitVirtualPath(cleanPath string) (string, string, bool) {
+	for _, area := range []string{areaInput, areaWork} {
+		prefix := virtualWorkspaceRoot + "/" + area
+		switch {
+		case cleanPath == prefix:
+			return area, ".", true
+		case strings.HasPrefix(cleanPath, prefix+"/"):
+			return area, strings.TrimPrefix(cleanPath, prefix+"/"), true
+		}
+	}
+
+	return "", "", false
+}
+
+func virtualAreaConflict(rawArea string, virtualArea string) string {
+	area := strings.TrimSpace(rawArea)
+	if area == "" || area == areaAll || area == virtualArea {
+		return ""
+	}
+
+	return fmt.Sprintf("workspace area %q conflicts with virtual path area %q", area, virtualArea)
+}
+
 func safeRelativePath(rawPath string) (string, string) {
 	cleanPath := strings.TrimSpace(rawPath)
 	if cleanPath == "" {
 		return ".", ""
 	}
+	if message := validateRelativePath(cleanPath); message != "" {
+		return "", message
+	}
+
+	return cleanPath, ""
+}
+
+func validateRelativePath(cleanPath string) string {
 	if path.IsAbs(cleanPath) ||
 		filepath.IsAbs(cleanPath) ||
 		strings.Contains(cleanPath, "\\") ||
 		strings.Contains(cleanPath, ":") ||
 		path.Clean(cleanPath) != cleanPath {
-		return "", "path is unsafe"
+		return messagePathUnsafe
 	}
 	if cleanPath == "." {
-		return cleanPath, ""
+		return ""
 	}
 	for _, component := range strings.Split(cleanPath, "/") {
 		if component == "" || component == "." || component == ".." {
-			return "", "path is unsafe"
+			return messagePathUnsafe
 		}
 	}
 
-	return cleanPath, ""
+	return ""
 }
 
 func confinedPath(area workspaceArea, relativePath string) (string, error) {
@@ -194,60 +280,65 @@ func confinedPath(area workspaceArea, relativePath string) (string, error) {
 }
 
 func (r *Runner) list(ctx context.Context, areas []workspaceArea, relativePath string) outbound.ToolResult {
-	var files []string
+	var files []workspaceFile
+	foundPath := false
 	for _, area := range areas {
-		areaFiles, err := r.collectFiles(ctx, area, relativePath, len(files))
+		areaFiles, found, err := r.collectFiles(ctx, area, relativePath, len(files))
 		if errors.Is(err, errTooManyFiles) {
 			return outbound.ToolResult{Content: "workspace contains too many files to list", IsError: true}
-		}
-		if errors.Is(err, os.ErrNotExist) {
-			return outbound.ToolResult{Content: "path is not available", IsError: true}
 		}
 		if err != nil {
 			return outbound.ToolResult{Content: "list workspace failed", IsError: true}
 		}
+		foundPath = foundPath || found
 		files = append(files, areaFiles...)
 	}
 
-	sort.Strings(files)
+	if !foundPath {
+		return outbound.ToolResult{Content: "path is not available", IsError: true}
+	}
+	sort.Slice(files, func(i int, j int) bool {
+		return files[i].virtualPath < files[j].virtualPath
+	})
 	if len(files) == 0 {
 		return outbound.ToolResult{Content: "files:\n"}
 	}
 
-	return outbound.ToolResult{Content: "files:\n" + strings.Join(files, "\n")}
+	return outbound.ToolResult{Content: "files:\n" + formatWorkspaceFiles(files)}
 }
 
-func (r *Runner) collectFiles(ctx context.Context, area workspaceArea, relativePath string, currentCount int) ([]string, error) {
+type workspaceFile struct {
+	virtualPath  string
+	area         string
+	relativePath string
+	sizeBytes    int64
+}
+
+func (r *Runner) collectFiles(
+	ctx context.Context,
+	area workspaceArea,
+	relativePath string,
+	currentCount int,
+) ([]workspaceFile, bool, error) {
 	root, err := confinedPath(area, relativePath)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if _, err := os.Lstat(root); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+
+		return nil, false, err
 	}
 
-	var files []string
+	var files []workspaceFile
 	err = filepath.WalkDir(root, func(current string, entry fs.DirEntry, err error) error {
-		if err != nil {
+		file, ok, err := collectWorkspaceFile(ctx, area, current, entry, err)
+		if err != nil || !ok {
 			return err
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if entry.IsDir() {
-			return nil
-		}
-
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-
-		relative, err := filepath.Rel(area.root, current)
-		if err != nil {
-			return err
-		}
-		files = append(files, virtualPath(area.name, filepath.ToSlash(relative)))
+		files = append(files, file)
 		if currentCount+len(files) > r.maxFiles {
 			return errTooManyFiles
 		}
@@ -255,7 +346,63 @@ func (r *Runner) collectFiles(ctx context.Context, area workspaceArea, relativeP
 		return nil
 	})
 
-	return files, err
+	return files, true, err
+}
+
+func collectWorkspaceFile(
+	ctx context.Context,
+	area workspaceArea,
+	current string,
+	entry fs.DirEntry,
+	walkErr error,
+) (workspaceFile, bool, error) {
+	if walkErr != nil {
+		return workspaceFile{}, false, walkErr
+	}
+	if ctx.Err() != nil {
+		return workspaceFile{}, false, ctx.Err()
+	}
+	if entry.IsDir() {
+		return workspaceFile{}, false, nil
+	}
+
+	info, err := entry.Info()
+	if err != nil {
+		return workspaceFile{}, false, err
+	}
+	if !info.Mode().IsRegular() {
+		return workspaceFile{}, false, nil
+	}
+
+	relative, err := filepath.Rel(area.root, current)
+	if err != nil {
+		return workspaceFile{}, false, err
+	}
+	relativePath := filepath.ToSlash(relative)
+
+	return workspaceFile{
+		virtualPath:  virtualPath(area.name, relativePath),
+		area:         area.name,
+		relativePath: relativePath,
+		sizeBytes:    info.Size(),
+	}, true, nil
+}
+
+func formatWorkspaceFiles(files []workspaceFile) string {
+	var builder strings.Builder
+	for _, file := range files {
+		builder.WriteString("- virtual_path: ")
+		builder.WriteString(file.virtualPath)
+		builder.WriteString("\n  area: ")
+		builder.WriteString(file.area)
+		builder.WriteString("\n  relative_path: ")
+		builder.WriteString(file.relativePath)
+		builder.WriteString("\n  size_bytes: ")
+		_, _ = fmt.Fprintf(&builder, "%d", file.sizeBytes)
+		builder.WriteString("\n")
+	}
+
+	return builder.String()
 }
 
 func (r *Runner) stat(areas []workspaceArea, relativePath string) outbound.ToolResult {

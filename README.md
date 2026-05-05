@@ -13,6 +13,8 @@ AgentPool is currently an early MVP scaffold.
 - The default sandbox provider is noop. A dev-only Docker sandbox can be enabled explicitly to verify sandbox-backed shell commands.
 - The default model client is noop.
 - Agent loop v1 supports a minimal JSON action protocol, a `workspace` metadata tool, and opt-in dev Docker `sandbox_exec`. The default runtime has no command-capable sandbox and does not expose `sandbox_exec`.
+- CLI uploads can expand selected files, directories, and small text archives into the run workspace for POC tasks.
+- Files generated under `/workspace/work` are captured as in-memory run artifacts before workspace cleanup.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -183,7 +185,7 @@ Failed runs can include partial `agent_turns` and `tool_calls` when the agent in
         "area": "all",
         "path": "."
       },
-      "result": "files:\n/workspace/input/README.md",
+      "result": "files:\n- virtual_path: /workspace/input/README.md\n  area: input\n  relative_path: README.md\n  size_bytes: 123\n",
       "is_error": false
     }
   ]
@@ -211,6 +213,8 @@ go run ./cmd/agentpool run --prompt "Use sandbox_exec to calculate 234 * 887123 
 go run ./cmd/agentpool get run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
 go run ./cmd/agentpool list
 go run ./cmd/agentpool cancel run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
+go run ./cmd/agentpool artifacts run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
+go run ./cmd/agentpool artifact run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1 report.md
 ```
 
 - `agentpool dev`: starts the HTTP API and an embedded worker in the same process.
@@ -221,6 +225,8 @@ go run ./cmd/agentpool cancel run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
 - `agentpool get`: fetches one run.
 - `agentpool list`: lists known runs.
 - `agentpool cancel`: cancels one run before it reaches a terminal state.
+- `agentpool artifacts`: lists captured `/workspace/work` artifacts for one run.
+- `agentpool artifact`: prints one captured artifact body.
 
 `server` and `worker` are separate process modes intended for future persistent infrastructure implementations. With the current in-memory repository and queue, separate processes do not share state.
 
@@ -228,7 +234,7 @@ The local testing CLI is an HTTP client. Start `dev` in one terminal so the serv
 
 ```sh
 AGENTPOOL_SANDBOX_PROVIDER=docker \
-AGENTPOOL_SANDBOX_IMAGE=alpine:3.20 \
+AGENTPOOL_SANDBOX_IMAGE=agentpool/poc-sandbox:latest \
 go run ./cmd/agentpool dev
 ```
 
@@ -245,6 +251,27 @@ Upload files with repeated `--file` flags:
 go run ./cmd/agentpool run \
   --prompt "Inspect README.md and summarize it" \
   --file README.md
+```
+
+Upload a small directory or archive for POC repo inspection:
+
+```sh
+go run ./cmd/agentpool run \
+  --prompt "Use workspace and sandbox_exec to inspect this project and summarize the Go packages." \
+  --dir .
+
+go run ./cmd/agentpool run \
+  --prompt "Inspect this archived project and write report.md under /workspace/work." \
+  --archive project.tar.gz
+```
+
+The CLI expands `--dir` and `.tar`, `.tar.gz`, `.tgz`, or `.zip` archives into multipart uploaded files. Paths are preserved relative to the selected directory or archive root. It skips `.git`, `.hg`, `.svn`, `node_modules`, `vendor`, `dist`, `build`, `target`, `.next`, `.turbo`, and `.cache`, and it does not follow symlinks.
+
+List or fetch artifacts after a run:
+
+```sh
+go run ./cmd/agentpool artifacts run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
+go run ./cmd/agentpool artifact run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1 report.md
 ```
 
 Debug output includes the recorded `agent_system_prompt`, full `agent_turns`, and full `tool_calls`:
@@ -272,6 +299,8 @@ GET  /healthz
 POST /v1/runs
 GET  /v1/runs
 GET  /v1/runs/{id}
+GET  /v1/runs/{id}/artifacts
+GET  /v1/runs/{id}/artifacts/{path...}
 POST /v1/runs/{id}/cancel
 ```
 
@@ -309,10 +338,10 @@ Override the address with:
 AGENTPOOL_HTTP_ADDR=127.0.0.1:9000 go run ./cmd/agentpool dev
 ```
 
-Agent loop turn limit defaults to `4` and can be overridden with:
+Agent loop turn limit defaults to `8` and can be overridden with:
 
 ```sh
-AGENTPOOL_AGENT_MAX_TURNS=6 go run ./cmd/agentpool dev
+AGENTPOOL_AGENT_MAX_TURNS=10 go run ./cmd/agentpool dev
 ```
 
 Sandbox provider defaults to `noop`. Local command sandbox verification can be enabled with:
@@ -322,6 +351,22 @@ AGENTPOOL_SANDBOX_PROVIDER=docker \
 AGENTPOOL_SANDBOX_IMAGE=alpine:3.20 \
 go run ./cmd/agentpool dev
 ```
+
+Build the richer POC sandbox image for real local tasks:
+
+```sh
+docker build -t agentpool/poc-sandbox:latest docker/poc-sandbox
+```
+
+Then run dev mode with:
+
+```sh
+AGENTPOOL_SANDBOX_PROVIDER=docker \
+AGENTPOOL_SANDBOX_IMAGE=agentpool/poc-sandbox:latest \
+go run ./cmd/agentpool dev
+```
+
+The alpine image remains useful as a minimal smoke test. Available commands inside `sandbox_exec` depend on `AGENTPOOL_SANDBOX_IMAGE`.
 
 ## Model Providers
 
@@ -389,7 +434,7 @@ Use `openai_compatible` with a local or internal endpoint for air-gapped environ
 
 ## Workspace And Files
 
-The current MVP supports prompt-only JSON runs and multipart runs with already-authorized uploaded text files. `repository_url` and `branch` are metadata only.
+The current MVP supports prompt-only JSON runs and multipart runs with already-authorized uploaded text files. The CLI can expand selected directories and common archives into multipart file uploads. `repository_url` and `branch` are metadata only.
 
 Product applications own file authorization, file selection, and product ACLs before submitting a run. AgentPool creates an ephemeral per-run temp workspace for every run. Prompt-only runs get an empty workspace; uploaded-file runs get a workspace populated with the selected files.
 
@@ -410,15 +455,35 @@ curl -sS -X POST http://localhost:8080/v1/runs \
   -F 'files=@internal/application/workflow/worker.go'
 ```
 
-Uploaded files are currently limited to UTF-8 text files with safe relative names, at most 10 files, 1 MiB per file, and 5 MiB total. Supported extensions are `.txt`, `.md`, `.json`, `.yaml`, `.yml`, `.go`, `.py`, `.js`, and `.ts`.
+Uploaded files are currently limited to UTF-8 text files with safe relative names, at most 500 files, 2 MiB per file, and 25 MiB total. The HTTP multipart body limit is 32 MiB. Supported names and extensions include `.txt`, `.md`, `.json`, `.yaml`, `.yml`, `.go`, `.py`, `.js`, `.ts`, `.tsx`, `.jsx`, `.html`, `.css`, `.sh`, `.toml`, `.mod`, `.sum`, `.env.example`, `.gitignore`, `.dockerignore`, `Makefile`, and `Dockerfile`.
 
-The runtime does not persist workspace contents beyond cleanup. AgentPool does not currently accept archive uploads, mounted directories, or git checkout as workspace input. AgentPool does not mutate run inputs or product files. The writable `/workspace/work` area is ephemeral run-local storage.
+AgentPool does not mutate run inputs or product files. The writable `/workspace/work` area is ephemeral run-local storage during execution. Before cleanup, AgentPool captures up to 100 regular files from `/workspace/work` as in-memory artifacts, with a 1 MiB per-file limit and 10 MiB total limit. Directories and symlinks are not captured.
+
+Artifact list response:
+
+```json
+{
+  "artifacts": [
+    {
+      "path": "report.md",
+      "size_bytes": 123,
+      "media_type": "text/markdown"
+    }
+  ]
+}
+```
+
+Artifact content is available as raw bytes:
+
+```sh
+curl -sS http://localhost:8080/v1/runs/run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1/artifacts/report.md
+```
 
 ## Tools
 
 AgentPool has an application-owned tool loop. Models can respond with a JSON `tool_call` action, the agent runner validates the requested tool against the tools advertised for that run, executes valid tools through the `ToolRunner` port, and feeds the tool result back to the model for a final JSON answer.
 
-The agent protocol accepts only `tool_call` and `final` JSON actions. Models should return exactly one JSON object with no markdown fences. For compatibility, AgentPool normalizes whole-response fenced JSON blocks and simple scalar values that can safely become strings, such as `{"type":"final","summary":true}` becoming summary `"true"` and numeric tool arguments becoming string arguments. AgentPool does not extract JSON from arbitrary prose. Unknown JSON action types, malformed JSON, unsupported fields, nested argument values, or multiple JSON objects are rejected as protocol errors with targeted correction feedback. Plain natural-language output is still accepted as a final summary for compatibility with local models.
+The agent protocol accepts only `tool_call` and `final` JSON actions. Models should return exactly one JSON object with no markdown fences. For compatibility, AgentPool normalizes whole-response fenced JSON blocks, accepts one JSON object embedded in otherwise harmless prose, and converts simple scalar values that can safely become strings, such as `{"type":"final","summary":true}` becoming summary `"true"` and numeric tool arguments becoming string arguments. Multiple JSON objects, arrays, unknown JSON action types, malformed JSON, unsupported fields, and nested argument values are rejected as protocol errors with targeted correction feedback. Plain natural-language output is still accepted as a final summary for compatibility with local models.
 
 AgentPool exposes exactly two model-facing tools:
 
@@ -432,7 +497,7 @@ Each run gets a workspace with two areas:
 /workspace/work   read-write agent working directory
 ```
 
-Run attachments are materialized under `/workspace/input` by default. `workspace` lists and stats paths only; file contents are inspected through `sandbox_exec`. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
+Run attachments are materialized under `/workspace/input` by default. `workspace` lists and stats paths only; file contents are inspected through `sandbox_exec`. `workspace` accepts either relative paths with an `area`, or full virtual paths such as `/workspace/input/README.md` and `/workspace/work/report.md`. It never returns host temp paths. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
 
 When `sandbox_exec` is available, exact or verifiable tasks should be checked through sandbox execution instead of guessed. That includes exact arithmetic, counting or searching files, transforming data, and running small scripts, tests, builds, or linters. Subjective discussion, design advice, brainstorming, and simple conversation can answer directly when no command is needed.
 
@@ -456,7 +521,7 @@ Available tools:
   Arguments:
   - operation (required): Operation to run. Supported values: "list" or "stat". Example: list
   - area (optional): Workspace area to inspect. Supported values: "input", "work", or "all". Example: input
-  - path (optional): Safe relative path inside the selected area. Example: README.md
+  - path (optional): Safe relative path inside the selected area, or a /workspace/input|work virtual path. Example: /workspace/input/README.md
 - sandbox_exec: Runs a command inside the sandbox from /workspace/work.
   Arguments:
   - command (required): Command to run inside the sandbox. Example: wc -l /workspace/input/README.md
@@ -559,7 +624,7 @@ Example prompt:
 Summarize the task and explain the next implementation step.
 ```
 
-There is still no write-back to run inputs, product files, Git, or external systems. Agents may write temporary/generated files only under `/workspace/work`, and workspace contents are cleaned up after the run. Shell commands are available only when the dev Docker sandbox is explicitly enabled.
+There is still no write-back to run inputs, product files, Git, or external systems. Agents may write temporary/generated files only under `/workspace/work`; bounded artifacts are captured before workspace contents are cleaned up after the run. Shell commands are available only when the dev Docker sandbox is explicitly enabled.
 
 ## Dev Docker Sandbox
 
@@ -567,11 +632,17 @@ Docker-backed shell execution is available only for local sandbox verification. 
 
 ```sh
 AGENTPOOL_SANDBOX_PROVIDER=docker \
-AGENTPOOL_SANDBOX_IMAGE=alpine:3.20 \
+AGENTPOOL_SANDBOX_IMAGE=agentpool/poc-sandbox:latest \
 go run ./cmd/agentpool dev
 ```
 
-The default dev image is intentionally minimal. Commands available inside `sandbox_exec` depend on `AGENTPOOL_SANDBOX_IMAGE`; use a richer image when tasks need Python, Go, Node.js, or other tooling.
+The default dev image is intentionally minimal. Build and use `agentpool/poc-sandbox:latest` when tasks need common CLI tools, `jq`, ripgrep, Git, Python 3, Node.js/npm, Go, or Make:
+
+```sh
+docker build -t agentpool/poc-sandbox:latest docker/poc-sandbox
+```
+
+Commands available inside `sandbox_exec` depend on `AGENTPOOL_SANDBOX_IMAGE`.
 
 Submit a prompt-only run that asks the agent to use sandbox execution:
 
@@ -599,6 +670,15 @@ docker run --rm --network none -v <input>:/workspace/input:ro -v <work>:/workspa
 
 Docker must be installed and running. Run inputs are mounted read-only at `/workspace/input`, agent work is mounted read-write at `/workspace/work`, networking is disabled with `--network none`, and no secrets are passed into the container. This provider is dev-only and does not provide persistent storage or production sandbox hardening.
 
+## Run Artifacts
+
+Completed and failed runs can expose in-memory artifacts captured from `/workspace/work` before workspace cleanup. This is POC-only storage, not persistent object storage.
+
+```sh
+curl -sS http://localhost:8080/v1/runs/run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1/artifacts
+curl -sS http://localhost:8080/v1/runs/run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1/artifacts/report.md
+```
+
 ## Run Lifecycle
 
 The happy path is:
@@ -619,7 +699,7 @@ Completed runs persist the agent result summary.
 
 ## Run Steps
 
-Run steps are coarse execution timeline entries. The current worker records `prepare` for policy, secrets, and source context preparation, and `agent` for model and tool-loop execution. Steps explain the broad phase outcome, but they are not full logs. Tool logs, artifacts, and streaming output are future features.
+Run steps are coarse execution timeline entries. The current worker records `prepare` for policy, secrets, and source context preparation, and `agent` for model and tool-loop execution. Steps explain the broad phase outcome, but they are not full logs. Tool logs and streaming output are future features.
 
 ## Architecture
 

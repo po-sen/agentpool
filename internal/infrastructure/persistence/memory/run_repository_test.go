@@ -41,6 +41,38 @@ func TestRunRepositoryListReturnsDetachedCopies(t *testing.T) {
 	}
 }
 
+func TestRunRepositoryStoresArtifactContentInMemory(t *testing.T) {
+	ctx := context.Background()
+	repo := NewRunRepository()
+	item, err := run.New("run_test", run.TaskSpec{Prompt: "do work"}, time.Unix(100, 0).UTC())
+	if err != nil {
+		t.Fatalf("new run: %v", err)
+	}
+	item.RecordArtifacts(time.Unix(101, 0).UTC(), []run.Artifact{
+		{Path: "report.md", Content: []byte("# Report\n"), SizeBytes: 9},
+	})
+	if err := repo.Save(ctx, item); err != nil {
+		t.Fatalf("save run: %v", err)
+	}
+
+	found, err := repo.FindByID(ctx, "run_test")
+	if err != nil {
+		t.Fatalf("find run: %v", err)
+	}
+	if string(found.Artifacts[0].Content) != "# Report\n" {
+		t.Fatalf("artifact content = %q, want report", string(found.Artifacts[0].Content))
+	}
+	found.Artifacts[0].Content[0] = 'X'
+
+	found, err = repo.FindByID(ctx, "run_test")
+	if err != nil {
+		t.Fatalf("find run again: %v", err)
+	}
+	if string(found.Artifacts[0].Content) != "# Report\n" {
+		t.Fatalf("artifact content after mutation = %q, want detached content", string(found.Artifacts[0].Content))
+	}
+}
+
 func TestRunRepositoryFindByIDReturnsNotFound(t *testing.T) {
 	repo := NewRunRepository()
 

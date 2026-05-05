@@ -147,6 +147,65 @@ func TestClientGetListCancelPaths(t *testing.T) {
 	}
 }
 
+func TestClientListArtifacts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != apiRunsPath+"/run_artifacts/"+apiArtifactsPath {
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+		writer.Header().Set(contentTypeHeader, jsonContentType)
+		if err := json.NewEncoder(writer).Encode(ArtifactsResponse{
+			Artifacts: []ArtifactResponse{{Path: "report.md", MediaType: "text/markdown", SizeBytes: 9}},
+		}); err != nil {
+			t.Fatalf("encode artifacts: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	artifacts, err := client.ListArtifacts(context.Background(), "run_artifacts")
+	if err != nil {
+		t.Fatalf("list artifacts: %v", err)
+	}
+	if len(artifacts.Artifacts) != 1 || artifacts.Artifacts[0].Path != "report.md" {
+		t.Fatalf("artifacts = %#v, want report", artifacts)
+	}
+}
+
+func TestClientGetArtifact(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet ||
+			request.URL.Path != apiRunsPath+"/run_artifacts/"+apiArtifactsPath+"/reports/report.md" {
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+		writer.Header().Set(contentTypeHeader, "text/markdown")
+		if _, err := writer.Write([]byte("# Report\n")); err != nil {
+			t.Fatalf("write artifact: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	artifact, err := client.GetArtifact(context.Background(), "run_artifacts", "reports/report.md")
+	if err != nil {
+		t.Fatalf("get artifact: %v", err)
+	}
+	if string(artifact.Content) != "# Report\n" {
+		t.Fatalf("artifact content = %q, want report", string(artifact.Content))
+	}
+	if artifact.MediaType != "text/markdown" {
+		t.Fatalf("artifact media type = %q, want text/markdown", artifact.MediaType)
+	}
+}
+
+func TestClientGetArtifactRejectsUnsafePath(t *testing.T) {
+	client := newTestClient(t, "http://example.test")
+
+	_, err := client.GetArtifact(context.Background(), "run_artifacts", "../secret.txt")
+	if err == nil {
+		t.Fatal("GetArtifact() error = nil, want unsafe path error")
+	}
+}
+
 func TestUploadFilenamePreservesSafeRelativePath(t *testing.T) {
 	got, err := uploadFilename("internal/application/workflow/worker.go")
 	if err != nil {

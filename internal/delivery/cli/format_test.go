@@ -11,6 +11,9 @@ func TestFormatRunCompletedIncludesSummary(t *testing.T) {
 		ID:     "run_done",
 		Status: statusCompleted,
 		Result: &RunResultResponse{Summary: "234 * 887123 = 207586782"},
+		Artifacts: []ArtifactResponse{
+			{Path: "report.md", MediaType: "text/markdown", SizeBytes: 9},
+		},
 		Steps: []StepResponse{
 			{Name: "prepare", Status: statusCompleted, Message: "Prepared policy"},
 			{Name: "agent", Status: statusCompleted, Message: "Agent generated result summary"},
@@ -18,7 +21,7 @@ func TestFormatRunCompletedIncludesSummary(t *testing.T) {
 		ToolCalls: []ToolCallResponse{{Name: "sandbox_exec"}},
 	}, OutputOptions{})
 
-	for _, want := range []string{"Run: run_done", "Status: completed", "234 * 887123", "Tool calls:", "- sandbox_exec: ok"} {
+	for _, want := range []string{"Run: run_done", "Status: completed", "234 * 887123", "Artifacts:", "- report.md (9 bytes, text/markdown)", "Tool calls:", "- sandbox_exec: ok"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}
@@ -90,5 +93,17 @@ func TestWriteRunOutputJSON(t *testing.T) {
 func TestFormatRunsEmpty(t *testing.T) {
 	if got := FormatRuns(nil, OutputOptions{}); got != "Runs: none\n" {
 		t.Fatalf("FormatRuns() = %q, want empty list output", got)
+	}
+}
+
+func TestFormatArtifacts(t *testing.T) {
+	output := FormatArtifacts(ArtifactsResponse{
+		Artifacts: []ArtifactResponse{{Path: "report.md", MediaType: "text/markdown", SizeBytes: 9}},
+	})
+	if !strings.Contains(output, "- report.md (9 bytes, text/markdown)") {
+		t.Fatalf("artifact output missing report: %s", output)
+	}
+	if got := FormatArtifacts(ArtifactsResponse{}); got != "Artifacts: none\n" {
+		t.Fatalf("empty artifact output = %q, want none", got)
 	}
 }

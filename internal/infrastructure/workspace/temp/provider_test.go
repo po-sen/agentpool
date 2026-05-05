@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
@@ -102,6 +103,62 @@ func TestCleanupWorkspaceRemovesDirectory(t *testing.T) {
 	}
 }
 
+func TestCollectArtifactsReadsWorkFiles(t *testing.T) {
+	provider := NewProvider(Config{BaseDir: t.TempDir()})
+	workspace, err := provider.PrepareWorkspace(context.Background(), outbound.WorkspacePrepareRequest{RunID: "run_test"})
+	if err != nil {
+		t.Fatalf("PrepareWorkspace() error = %v", err)
+	}
+	defer func() {
+		_ = provider.CleanupWorkspace(context.Background(), workspace)
+	}()
+	writeTempWorkspaceFile(t, filepath.Join(workspace.WorkPath, "report.md"), "# Report\n")
+	writeTempWorkspaceFile(t, filepath.Join(workspace.WorkPath, "nested", "data.json"), "{}\n")
+	if err := os.Symlink(filepath.Join(workspace.WorkPath, "report.md"), filepath.Join(workspace.WorkPath, "link.md")); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	artifacts, err := provider.CollectArtifacts(context.Background(), workspace)
+	if err != nil {
+		t.Fatalf("CollectArtifacts() error = %v", err)
+	}
+	if len(artifacts) != 2 {
+		t.Fatalf("len(artifacts) = %d, want 2: %#v", len(artifacts), artifacts)
+	}
+	if artifacts[0].Path != "nested/data.json" || artifacts[1].Path != "report.md" {
+		t.Fatalf("artifact paths = %#v, want sorted work-relative paths", artifacts)
+	}
+	if string(artifacts[1].Content) != "# Report\n" {
+		t.Fatalf("artifact content = %q, want report", string(artifacts[1].Content))
+	}
+	if artifacts[1].SizeBytes != 9 {
+		t.Fatalf("artifact size = %d, want 9", artifacts[1].SizeBytes)
+	}
+	if artifacts[1].MediaType != "text/markdown; charset=utf-8" {
+		t.Fatalf("artifact media type = %q, want markdown", artifacts[1].MediaType)
+	}
+}
+
+func TestCollectArtifactsSkipsOversizedFiles(t *testing.T) {
+	provider := NewProvider(Config{BaseDir: t.TempDir()})
+	workspace, err := provider.PrepareWorkspace(context.Background(), outbound.WorkspacePrepareRequest{RunID: "run_test"})
+	if err != nil {
+		t.Fatalf("PrepareWorkspace() error = %v", err)
+	}
+	defer func() {
+		_ = provider.CleanupWorkspace(context.Background(), workspace)
+	}()
+	writeTempWorkspaceFile(t, filepath.Join(workspace.WorkPath, "large.txt"), strings.Repeat("a", int(run.MaxArtifactSizeBytes)+1))
+
+	artifacts, err := provider.CollectArtifacts(context.Background(), workspace)
+	if err != nil {
+		t.Fatalf("CollectArtifacts() error = %v", err)
+	}
+	if len(artifacts) != 0 {
+		t.Fatalf("len(artifacts) = %d, want 0", len(artifacts))
+	}
+}
+
 func TestPrepareWorkspaceCreatesEmptyWorkspaceForNoAttachments(t *testing.T) {
 	baseDir := t.TempDir()
 	provider := NewProvider(Config{BaseDir: baseDir})
@@ -150,5 +207,16 @@ func assertPerm(t *testing.T, path string, want os.FileMode) {
 	}
 	if got := info.Mode().Perm(); got != want {
 		t.Fatalf("%s permissions = %v, want %v", path, got, want)
+	}
+}
+
+func writeTempWorkspaceFile(t *testing.T, path string, content string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), workspaceDirPerm); err != nil {
+		t.Fatalf("mkdir workspace file parent: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), workspaceFilePerm); err != nil {
+		t.Fatalf("write workspace file: %v", err)
 	}
 }

@@ -246,6 +246,95 @@ func TestWorkerPassesPromptOnlyWorkspaceContextToAgentTools(t *testing.T) {
 	}
 }
 
+func TestWorkerStoresCompletedRunArtifactsBeforeCleanup(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	workspace := &recordingWorkspaceProvider{
+		path: "/tmp/workspace",
+		artifacts: []run.Artifact{{
+			Path:      "report.md",
+			MediaType: "text/markdown",
+			Content:   []byte("# Report\n"),
+			SizeBytes: 9,
+		}},
+	}
+	now := time.Unix(100, 0).UTC()
+
+	queueRun(ctx, t, repo, queue, now)
+
+	worker := newWorkerWithWorkspace(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
+		workspace,
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored := findRun(ctx, t, repo, "run_test")
+	if stored.Status != run.StatusCompleted {
+		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCompleted)
+	}
+	assertStoredArtifacts(t, stored.Artifacts, []string{"report.md"})
+	if !workspace.collectArtifactsCalled {
+		t.Fatal("workspace artifacts were not collected")
+	}
+	if !workspace.collectBeforeCleanup {
+		t.Fatal("workspace artifacts were not collected before cleanup")
+	}
+	if !workspace.cleanupCalled {
+		t.Fatal("workspace cleanup was not called")
+	}
+}
+
+func TestWorkerStoresFailedRunArtifactsBeforeCleanup(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	workspace := &recordingWorkspaceProvider{
+		path: "/tmp/workspace",
+		artifacts: []run.Artifact{{
+			Path:      "partial.txt",
+			MediaType: "text/plain",
+			Content:   []byte("partial\n"),
+			SizeBytes: 8,
+		}},
+	}
+	now := time.Unix(100, 0).UTC()
+
+	queueRun(ctx, t, repo, queue, now)
+
+	worker := newWorkerWithWorkspace(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(failingModelClient{}, fakeToolRunner{}),
+		workspace,
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored := findRun(ctx, t, repo, "run_test")
+	if stored.Status != run.StatusFailed {
+		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusFailed)
+	}
+	assertStoredArtifacts(t, stored.Artifacts, []string{"partial.txt"})
+	if !workspace.collectArtifactsCalled {
+		t.Fatal("workspace artifacts were not collected")
+	}
+	if !workspace.cleanupCalled {
+		t.Fatal("workspace cleanup was not called")
+	}
+}
+
 func TestWorkerPreparesWorkspaceWithoutAttachments(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
@@ -1368,12 +1457,15 @@ func (b fakeSecretBroker) Resolve(context.Context, outbound.SecretRequest) (outb
 }
 
 type recordingWorkspaceProvider struct {
-	prepareCalled     bool
-	cleanupCalled     bool
-	cleanupContextErr error
-	path              string
-	runID             run.RunID
-	attachments       []run.TaskAttachment
+	prepareCalled          bool
+	collectArtifactsCalled bool
+	collectBeforeCleanup   bool
+	cleanupCalled          bool
+	cleanupContextErr      error
+	path                   string
+	runID                  run.RunID
+	attachments            []run.TaskAttachment
+	artifacts              []run.Artifact
 }
 
 func (p *recordingWorkspaceProvider) PrepareWorkspace(
@@ -1392,6 +1484,20 @@ func (p *recordingWorkspaceProvider) CleanupWorkspace(ctx context.Context, _ out
 	p.cleanupContextErr = ctx.Err()
 
 	return nil
+}
+
+func (p *recordingWorkspaceProvider) CollectArtifacts(context.Context, outbound.Workspace) ([]run.Artifact, error) {
+	p.collectArtifactsCalled = true
+	p.collectBeforeCleanup = !p.cleanupCalled
+
+	copied := make([]run.Artifact, 0, len(p.artifacts))
+	for _, artifact := range p.artifacts {
+		item := artifact
+		item.Content = append([]byte(nil), artifact.Content...)
+		copied = append(copied, item)
+	}
+
+	return copied, nil
 }
 
 func (p *recordingWorkspaceProvider) workspace(hasFiles bool) outbound.Workspace {
@@ -1564,6 +1670,22 @@ func assertAgentTurnStatuses(t *testing.T, got []run.AgentTurn, want []string) {
 		}
 		if got[i].Status != status {
 			t.Fatalf("AgentTurns[%d].Status = %q, want %q", i, got[i].Status, status)
+		}
+	}
+}
+
+func assertStoredArtifacts(t *testing.T, got []run.Artifact, wantPaths []string) {
+	t.Helper()
+
+	if len(got) != len(wantPaths) {
+		t.Fatalf("len(Artifacts) = %d, want %d: %#v", len(got), len(wantPaths), got)
+	}
+	for index, want := range wantPaths {
+		if got[index].Path != want {
+			t.Fatalf("Artifacts[%d].Path = %q, want %q", index, got[index].Path, want)
+		}
+		if len(got[index].Content) == 0 {
+			t.Fatalf("Artifacts[%d].Content is empty", index)
 		}
 	}
 }

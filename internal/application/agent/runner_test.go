@@ -53,6 +53,13 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 	}
 }
 
+func TestNewRunnerUsesEightDefaultMaxTurns(t *testing.T) {
+	runner := NewRunner(nil, newFakeToolRunner())
+	if runner.maxTurns != 8 {
+		t.Fatalf("maxTurns = %d, want 8", runner.maxTurns)
+	}
+}
+
 func TestRunnerExposesSandboxVerificationPolicyToModel(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{{Content: `{"type":"final","summary":"done"}`}},
@@ -80,8 +87,8 @@ func TestRunnerExposesSandboxVerificationPolicyToModel(t *testing.T) {
 	systemMessage := model.requests[0].Messages[0]
 	assertMessage(t, systemMessage, "system", "call sandbox_exec before final")
 	assertMessage(t, systemMessage, "system", "Do not guess exact answers when sandbox_exec can verify them.")
-	assertMessage(t, systemMessage, "system", "arithmetic, counts, hashes, encoding/decoding, file content inspection, grep/search")
-	if !strings.Contains(result.SystemPrompt, "otherwise verified by a command") {
+	assertMessage(t, systemMessage, "system", "arithmetic, counts, searches, file content inspection")
+	if !strings.Contains(result.SystemPrompt, "exact or verifiable answer") {
 		t.Fatalf("SystemPrompt = %q, want sandbox verification policy", result.SystemPrompt)
 	}
 }

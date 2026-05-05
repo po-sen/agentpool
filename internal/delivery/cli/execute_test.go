@@ -101,3 +101,56 @@ func TestExecuteGetWritesJSON(t *testing.T) {
 		t.Fatalf("json output missing run id: %s", output.String())
 	}
 }
+
+func TestExecuteArtifactsPrintsList(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != apiRunsPath+"/run_artifacts/"+apiArtifactsPath {
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+		writer.Header().Set(contentTypeHeader, jsonContentType)
+		if _, err := writer.Write([]byte(`{"artifacts":[{"path":"report.md","media_type":"text/markdown","size_bytes":9}]}`)); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var output bytes.Buffer
+	err := Execute(context.Background(), Command{
+		Kind:  CommandArtifacts,
+		Addr:  server.URL,
+		RunID: "run_artifacts",
+	}, &output)
+	if err != nil {
+		t.Fatalf("execute artifacts: %v", err)
+	}
+	if !strings.Contains(output.String(), "- report.md (9 bytes, text/markdown)") {
+		t.Fatalf("output missing artifact list: %s", output.String())
+	}
+}
+
+func TestExecuteArtifactWritesContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != apiRunsPath+"/run_artifacts/"+apiArtifactsPath+"/report.md" {
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+		writer.Header().Set(contentTypeHeader, "text/markdown")
+		if _, err := writer.Write([]byte("# Report\n")); err != nil {
+			t.Fatalf("write response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var output bytes.Buffer
+	err := Execute(context.Background(), Command{
+		Kind:  CommandArtifact,
+		Addr:  server.URL,
+		RunID: "run_artifacts",
+		Path:  "report.md",
+	}, &output)
+	if err != nil {
+		t.Fatalf("execute artifact: %v", err)
+	}
+	if output.String() != "# Report\n" {
+		t.Fatalf("artifact output = %q, want report", output.String())
+	}
+}

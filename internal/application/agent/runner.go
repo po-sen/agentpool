@@ -13,7 +13,7 @@ import (
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
-const defaultMaxTurns = 4
+const defaultMaxTurns = 8
 
 var errToolRunnerRequired = errors.New("tool runner is required")
 

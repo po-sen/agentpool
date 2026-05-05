@@ -78,7 +78,14 @@ type actionParseResult struct {
 func parseAction(content string) actionParseResult {
 	trimmed := strings.TrimSpace(content)
 	if !looksLikeProtocolResponse(trimmed) {
-		return actionParseResult{status: actionParseNaturalLanguage}
+		embedded, ok, parseErr := extractSingleEmbeddedJSONObject(trimmed)
+		if parseErr != nil {
+			return protocolError(*parseErr)
+		}
+		if !ok {
+			return actionParseResult{status: actionParseNaturalLanguage}
+		}
+		trimmed = embedded
 	}
 
 	normalized := normalizeProtocolResponse(trimmed)
@@ -359,4 +366,53 @@ func looksLikeProtocolResponse(content string) bool {
 	return strings.HasPrefix(content, "{") ||
 		strings.HasPrefix(content, "[") ||
 		strings.HasPrefix(content, "```")
+}
+
+func extractSingleEmbeddedJSONObject(content string) (string, bool, *actionParseError) {
+	var found string
+	count := 0
+	for offset := 0; offset < len(content); {
+		relativeStart := strings.Index(content[offset:], "{")
+		if relativeStart < 0 {
+			break
+		}
+		start := offset + relativeStart
+		candidate, consumed, ok := decodeJSONObjectPrefix(content[start:])
+		if !ok {
+			offset = start + 1
+			continue
+		}
+		count++
+		if count > 1 {
+			return "", false, newActionParseError(
+				actionParseCodeMultipleJSONValues,
+				"model response must contain exactly one JSON object",
+				`Return only one object, for example {"type":"final","summary":"..."}`,
+				nil,
+			)
+		}
+		found = candidate
+		offset = start + consumed
+	}
+	if count == 0 {
+		return "", false, nil
+	}
+
+	return found, true, nil
+}
+
+func decodeJSONObjectPrefix(content string) (string, int, bool) {
+	decoder := json.NewDecoder(strings.NewReader(content))
+	decoder.UseNumber()
+
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return "", 0, false
+	}
+	if _, ok := decoded.(map[string]any); !ok {
+		return "", 0, false
+	}
+	consumed := int(decoder.InputOffset())
+
+	return content[:consumed], consumed, true
 }

@@ -27,8 +27,8 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if cfg.LLM.Timeout != 30*time.Second {
 		t.Fatalf("LLM.Timeout = %s, want 30s", cfg.LLM.Timeout)
 	}
-	if cfg.Agent.MaxTurns != 4 {
-		t.Fatalf("Agent.MaxTurns = %d, want 4", cfg.Agent.MaxTurns)
+	if cfg.Agent.MaxTurns != 8 {
+		t.Fatalf("Agent.MaxTurns = %d, want 8", cfg.Agent.MaxTurns)
 	}
 	if cfg.Sandbox.Provider != SandboxProviderNoop {
 		t.Fatalf("Sandbox.Provider = %q, want %q", cfg.Sandbox.Provider, SandboxProviderNoop)
@@ -103,8 +103,8 @@ func TestLoadFallsBackForInvalidAgentMaxTurns(t *testing.T) {
 			t.Setenv("AGENTPOOL_AGENT_MAX_TURNS", value)
 
 			cfg := Load("dev")
-			if cfg.Agent.MaxTurns != 4 {
-				t.Fatalf("Agent.MaxTurns = %d, want 4", cfg.Agent.MaxTurns)
+			if cfg.Agent.MaxTurns != 8 {
+				t.Fatalf("Agent.MaxTurns = %d, want 8", cfg.Agent.MaxTurns)
 			}
 		})
 	}

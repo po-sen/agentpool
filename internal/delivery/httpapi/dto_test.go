@@ -60,6 +60,9 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 				EndedAt:         time.Unix(107, 0).UTC(),
 			},
 		},
+		Artifacts: []inbound.ArtifactView{
+			{Path: "report.md", MediaType: "text/markdown", SizeBytes: 9},
+		},
 		CreatedAt: time.Unix(100, 0).UTC(),
 		UpdatedAt: time.Unix(103, 0).UTC(),
 	}
@@ -105,7 +108,16 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	if response.ToolCalls[0].Arguments["command"] != "pwd" {
 		t.Fatalf("ToolCalls[0] command = %q, want pwd", response.ToolCalls[0].Arguments["command"])
 	}
+	assertArtifactResponse(t, response.Artifacts)
 	assertAgentTurnResponse(t, response.AgentTurns)
+}
+
+func assertArtifactResponse(t *testing.T, artifacts []artifactResponse) {
+	t.Helper()
+
+	if len(artifacts) != 1 || artifacts[0].Path != "report.md" {
+		t.Fatalf("Artifacts = %#v, want report metadata", artifacts)
+	}
 }
 
 func assertAgentTurnResponse(t *testing.T, turns []agentTurnResponse) {
@@ -309,6 +321,30 @@ func TestRunResponseJSONIncludesAttachmentMetadataOnly(t *testing.T) {
 	}
 	if strings.Contains(got, "# Demo") || strings.Contains(got, "content") {
 		t.Fatalf("response leaked attachment content: %s", got)
+	}
+}
+
+func TestRunResponseJSONIncludesArtifactMetadataOnly(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:     "run_test",
+		Status: "completed",
+		Artifacts: []inbound.ArtifactView{
+			{Path: "report.md", MediaType: "text/markdown", SizeBytes: 9},
+		},
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"artifacts":[{"path":"report.md","media_type":"text/markdown","size_bytes":9}]`) {
+		t.Fatalf("response does not contain artifact metadata: %s", got)
+	}
+	if strings.Contains(got, "# Report") || strings.Contains(got, "content") {
+		t.Fatalf("response leaked artifact content: %s", got)
 	}
 }
 

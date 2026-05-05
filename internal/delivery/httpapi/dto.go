@@ -24,6 +24,7 @@ type runResponse struct {
 	Steps             []stepResponse      `json:"steps"`
 	ToolCalls         []toolCallResponse  `json:"tool_calls,omitempty"`
 	AgentTurns        []agentTurnResponse `json:"agent_turns,omitempty"`
+	Artifacts         []artifactResponse  `json:"artifacts,omitempty"`
 	AgentSystemPrompt string              `json:"agent_system_prompt,omitempty"`
 	CreatedAt         time.Time           `json:"created_at"`
 	UpdatedAt         time.Time           `json:"updated_at"`
@@ -43,6 +44,16 @@ type taskResponse struct {
 
 type attachmentResponse struct {
 	Filename  string `json:"filename"`
+	MediaType string `json:"media_type,omitempty"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+type artifactsResponse struct {
+	Artifacts []artifactResponse `json:"artifacts"`
+}
+
+type artifactResponse struct {
+	Path      string `json:"path"`
 	MediaType string `json:"media_type,omitempty"`
 	SizeBytes int64  `json:"size_bytes"`
 }
@@ -122,6 +133,10 @@ func toRunResponse(item inbound.RunView) runResponse {
 			EndedAt:         turn.EndedAt,
 		})
 	}
+	artifacts := make([]artifactResponse, 0, len(item.Artifacts))
+	for _, artifact := range item.Artifacts {
+		artifacts = append(artifacts, toArtifactResponse(artifact))
+	}
 	response := runResponse{
 		ID:     item.ID,
 		Status: item.Status,
@@ -138,6 +153,7 @@ func toRunResponse(item inbound.RunView) runResponse {
 		Steps:             steps,
 		ToolCalls:         toolCalls,
 		AgentTurns:        agentTurns,
+		Artifacts:         artifacts,
 		AgentSystemPrompt: item.AgentSystemPrompt,
 		CreatedAt:         item.CreatedAt,
 		UpdatedAt:         item.UpdatedAt,
@@ -147,6 +163,23 @@ func toRunResponse(item inbound.RunView) runResponse {
 	}
 
 	return response
+}
+
+func toArtifactsResponse(artifacts []inbound.ArtifactView) artifactsResponse {
+	response := artifactsResponse{Artifacts: make([]artifactResponse, 0, len(artifacts))}
+	for _, artifact := range artifacts {
+		response.Artifacts = append(response.Artifacts, toArtifactResponse(artifact))
+	}
+
+	return response
+}
+
+func toArtifactResponse(artifact inbound.ArtifactView) artifactResponse {
+	return artifactResponse{
+		Path:      artifact.Path,
+		MediaType: artifact.MediaType,
+		SizeBytes: artifact.SizeBytes,
+	}
 }
 
 func toolCallArgumentsResponse(arguments map[string]string) map[string]string {

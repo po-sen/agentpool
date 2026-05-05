@@ -12,6 +12,7 @@ import (
 const (
 	sectionAgentSystemPrompt = "Agent system prompt:"
 	sectionAgentTurns        = "Agent turns:"
+	sectionArtifacts         = "Artifacts:"
 	sectionFailure           = "Failure:"
 	sectionResult            = "Result:"
 	sectionSteps             = "Steps:"
@@ -40,6 +41,16 @@ func WriteRunsOutput(writer io.Writer, responses []RunResponse, options OutputOp
 	return err
 }
 
+// WriteArtifactsOutput writes artifact metadata in JSON or human-readable form.
+func WriteArtifactsOutput(writer io.Writer, response ArtifactsResponse, options OutputOptions) error {
+	if options.JSON {
+		return writeJSON(writer, response)
+	}
+	_, err := writer.Write([]byte(FormatArtifacts(response)))
+
+	return err
+}
+
 // FormatRun returns a human-readable run summary.
 func FormatRun(response RunResponse, options OutputOptions) string {
 	var buffer bytes.Buffer
@@ -47,12 +58,33 @@ func FormatRun(response RunResponse, options OutputOptions) string {
 	fmt.Fprintf(&buffer, formatTwoValuesLine, statusLabel, response.Status)
 	writeFailure(&buffer, response)
 	writeResult(&buffer, response)
+	writeArtifacts(&buffer, response.Artifacts)
 	writeSteps(&buffer, response.Steps)
 	writeAgentTurns(&buffer, response.AgentTurns, options.Debug)
 	writeToolCalls(&buffer, response.ToolCalls, options.Debug)
 	if options.Debug && response.AgentSystemPrompt != "" {
 		writeSectionHeader(&buffer, sectionAgentSystemPrompt)
 		fmt.Fprintf(&buffer, "%s\n", response.AgentSystemPrompt)
+	}
+
+	return buffer.String()
+}
+
+// FormatArtifacts returns a human-readable artifact list.
+func FormatArtifacts(response ArtifactsResponse) string {
+	if len(response.Artifacts) == 0 {
+		return "Artifacts: none\n"
+	}
+
+	var buffer bytes.Buffer
+	buffer.WriteString(sectionArtifacts)
+	buffer.WriteString("\n")
+	for _, artifact := range response.Artifacts {
+		if artifact.MediaType != "" {
+			fmt.Fprintf(&buffer, "- %s (%d bytes, %s)\n", artifact.Path, artifact.SizeBytes, artifact.MediaType)
+			continue
+		}
+		fmt.Fprintf(&buffer, "- %s (%d bytes)\n", artifact.Path, artifact.SizeBytes)
 	}
 
 	return buffer.String()
@@ -133,6 +165,21 @@ func writeSteps(buffer *bytes.Buffer, steps []StepResponse) {
 			line += " - " + step.Message
 		}
 		fmt.Fprintf(buffer, "- %s\n", line)
+	}
+}
+
+func writeArtifacts(buffer *bytes.Buffer, artifacts []ArtifactResponse) {
+	if len(artifacts) == 0 {
+		return
+	}
+
+	writeSectionHeader(buffer, sectionArtifacts)
+	for _, artifact := range artifacts {
+		if artifact.MediaType != "" {
+			fmt.Fprintf(buffer, "- %s (%d bytes, %s)\n", artifact.Path, artifact.SizeBytes, artifact.MediaType)
+			continue
+		}
+		fmt.Fprintf(buffer, "- %s (%d bytes)\n", artifact.Path, artifact.SizeBytes)
 	}
 }
 

@@ -3,12 +3,16 @@ package temp
 import (
 	"context"
 	"errors"
+	"io"
+	"mime"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
+	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
 const (
@@ -86,6 +90,39 @@ func (p *Provider) CleanupWorkspace(_ context.Context, workspace outbound.Worksp
 	return os.RemoveAll(workspace.RootPath)
 }
 
+// CollectArtifacts captures bounded regular files from /workspace/work before cleanup.
+func (p *Provider) CollectArtifacts(ctx context.Context, workspace outbound.Workspace) ([]run.Artifact, error) {
+	ok, err := workspaceWorkPathAvailable(workspace.WorkPath)
+	if err != nil || !ok {
+		return nil, err
+	}
+
+	collector := artifactCollector{root: workspace.WorkPath}
+	err = filepath.WalkDir(workspace.WorkPath, func(current string, entry os.DirEntry, err error) error {
+		return collector.addEntry(ctx, current, entry, err)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return collector.artifacts, nil
+}
+
+func workspaceWorkPathAvailable(workPath string) (bool, error) {
+	if strings.TrimSpace(workPath) == "" {
+		return false, nil
+	}
+	if _, err := os.Stat(workPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+
+		return false, err
+	}
+
+	return true, nil
+}
+
 func createWorkspaceDir(path string) error {
 	if err := os.Mkdir(path, workspaceDirPerm); err != nil {
 		return err
@@ -157,4 +194,108 @@ func safeRunID(id string) string {
 	}
 
 	return builder.String()
+}
+
+type artifactCollector struct {
+	root      string
+	artifacts []run.Artifact
+	totalSize int64
+}
+
+func (c *artifactCollector) addEntry(ctx context.Context, current string, entry os.DirEntry, walkErr error) error {
+	if walkErr != nil {
+		return walkErr
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if current == c.root || entry.IsDir() {
+		return nil
+	}
+	if entry.Type()&os.ModeSymlink != 0 {
+		return nil
+	}
+	info, err := entry.Info()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+
+	return c.add(current, info.Size())
+}
+
+func (c *artifactCollector) add(pathValue string, size int64) error {
+	if len(c.artifacts) >= run.MaxArtifactCount ||
+		size < 0 ||
+		size > run.MaxArtifactSizeBytes ||
+		c.totalSize+size > run.MaxTotalArtifactSizeBytes {
+		return nil
+	}
+
+	relative, err := filepath.Rel(c.root, pathValue)
+	if err != nil {
+		return err
+	}
+	artifactPath := filepath.ToSlash(relative)
+	if !safeArtifactPath(artifactPath) {
+		return nil
+	}
+
+	content, err := readArtifactFile(pathValue, size)
+	if err != nil {
+		return err
+	}
+	c.artifacts = append(c.artifacts, run.Artifact{
+		Path:      artifactPath,
+		MediaType: artifactMediaType(artifactPath, content),
+		Content:   content,
+		SizeBytes: int64(len(content)),
+	})
+	c.totalSize += int64(len(content))
+
+	return nil
+}
+
+func safeArtifactPath(path string) bool {
+	return run.ValidateArtifactPath(path) == nil
+}
+
+func readArtifactFile(pathValue string, size int64) ([]byte, error) {
+	source, err := os.Open(pathValue) //nolint:gosec // workspace path is created by the workspace provider.
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = source.Close()
+	}()
+
+	content, err := io.ReadAll(io.LimitReader(source, run.MaxArtifactSizeBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(content) > int(run.MaxArtifactSizeBytes) ||
+		(size > 0 && int64(len(content)) != size) {
+		return nil, errors.New("artifact file size changed while reading")
+	}
+
+	return content, nil
+}
+
+func artifactMediaType(artifactPath string, content []byte) string {
+	switch strings.ToLower(path.Ext(artifactPath)) {
+	case ".md":
+		return "text/markdown; charset=utf-8"
+	case ".txt", ".go", ".py", ".js", ".ts", ".tsx", ".jsx", ".sh", ".toml", ".yaml", ".yml", ".mod", ".sum":
+		return "text/plain; charset=utf-8"
+	}
+	if mediaType := mime.TypeByExtension(path.Ext(artifactPath)); mediaType != "" {
+		return mediaType
+	}
+	if len(content) > 0 {
+		return http.DetectContentType(content)
+	}
+
+	return "application/octet-stream"
 }

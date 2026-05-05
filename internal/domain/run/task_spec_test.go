@@ -93,7 +93,9 @@ func TestTaskSpecValidateRejectsLargeAttachment(t *testing.T) {
 
 func TestTaskSpecValidateRejectsTotalAttachmentSize(t *testing.T) {
 	task := TaskSpec{Prompt: "do work"}
-	for _, filename := range []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt"} {
+	count := int(MaxTotalAttachmentSizeBytes/MaxAttachmentSizeBytes) + 1
+	for index := 0; index < count; index++ {
+		filename := "file" + string(rune('a'+index)) + ".txt"
 		task.Attachments = append(task.Attachments, textAttachment(filename, strings.Repeat("a", int(MaxAttachmentSizeBytes))))
 	}
 

@@ -431,6 +431,105 @@ func TestGetRunIncludesFailureDiagnosticsAndPartialToolCalls(t *testing.T) {
 	}
 }
 
+func TestGetRunIncludesArtifactMetadata(t *testing.T) {
+	get := &getRunStub{
+		view: inbound.RunView{
+			ID:     "run_test",
+			Status: "completed",
+			Artifacts: []inbound.ArtifactView{
+				{Path: "report.md", MediaType: "text/markdown", SizeBytes: 9},
+			},
+			Steps:     []inbound.StepView{},
+			CreatedAt: time.Unix(100, 0).UTC(),
+			UpdatedAt: time.Unix(101, 0).UTC(),
+		},
+	}
+	router := NewRouter(Dependencies{
+		CreateRun: &createRunStub{},
+		ListRuns:  &listRunsStub{},
+		GetRun:    get,
+		CancelRun: &cancelRunStub{},
+	})
+	request := httptest.NewRequest(http.MethodGet, "/v1/runs/run_test", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"artifacts":[{"path":"report.md","media_type":"text/markdown","size_bytes":9}]`) {
+		t.Fatalf("response missing artifact metadata: %s", response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "# Report") {
+		t.Fatalf("response leaked artifact content: %s", response.Body.String())
+	}
+}
+
+func TestListArtifacts(t *testing.T) {
+	listArtifacts := &listArtifactsStub{
+		artifacts: []inbound.ArtifactView{
+			{Path: "report.md", MediaType: "text/markdown", SizeBytes: 9},
+		},
+	}
+	router := NewRouter(Dependencies{
+		CreateRun:        &createRunStub{},
+		ListRuns:         &listRunsStub{},
+		GetRun:           &getRunStub{},
+		CancelRun:        &cancelRunStub{},
+		ListRunArtifacts: listArtifacts,
+	})
+	request := httptest.NewRequest(http.MethodGet, "/v1/runs/run_test/artifacts", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if listArtifacts.query.RunID != "run_test" {
+		t.Fatalf("artifact list run id = %q, want run_test", listArtifacts.query.RunID)
+	}
+	if !strings.Contains(response.Body.String(), `"artifacts":[{"path":"report.md","media_type":"text/markdown","size_bytes":9}]`) {
+		t.Fatalf("response missing artifact metadata: %s", response.Body.String())
+	}
+}
+
+func TestGetArtifactContent(t *testing.T) {
+	getArtifact := &getArtifactStub{
+		artifact: inbound.ArtifactContentView{
+			Path:      "reports/report.md",
+			MediaType: "text/markdown",
+			Content:   []byte("# Report\n"),
+			SizeBytes: 9,
+		},
+	}
+	router := NewRouter(Dependencies{
+		CreateRun:      &createRunStub{},
+		ListRuns:       &listRunsStub{},
+		GetRun:         &getRunStub{},
+		CancelRun:      &cancelRunStub{},
+		GetRunArtifact: getArtifact,
+	})
+	request := httptest.NewRequest(http.MethodGet, "/v1/runs/run_test/artifacts/reports/report.md", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if getArtifact.query.RunID != "run_test" || getArtifact.query.Path != "reports/report.md" {
+		t.Fatalf("artifact query = %#v, want run_test reports/report.md", getArtifact.query)
+	}
+	if response.Header().Get(headerContentType) != "text/markdown" {
+		t.Fatalf("content type = %q, want text/markdown", response.Header().Get(headerContentType))
+	}
+	if response.Body.String() != "# Report\n" {
+		t.Fatalf("artifact body = %q, want report", response.Body.String())
+	}
+}
+
 type createRunStub struct {
 	called   bool
 	command  inbound.CreateRunCommand
@@ -477,6 +576,42 @@ type cancelRunStub struct{}
 
 func (s *cancelRunStub) CancelRun(context.Context, inbound.CancelRunCommand) (inbound.RunView, error) {
 	return inbound.RunView{}, nil
+}
+
+type listArtifactsStub struct {
+	query     inbound.GetRunArtifactsQuery
+	artifacts []inbound.ArtifactView
+	err       error
+}
+
+func (s *listArtifactsStub) ListRunArtifacts(
+	_ context.Context,
+	query inbound.GetRunArtifactsQuery,
+) ([]inbound.ArtifactView, error) {
+	s.query = query
+	if s.err != nil {
+		return nil, s.err
+	}
+
+	return s.artifacts, nil
+}
+
+type getArtifactStub struct {
+	query    inbound.GetRunArtifactQuery
+	artifact inbound.ArtifactContentView
+	err      error
+}
+
+func (s *getArtifactStub) GetRunArtifact(
+	_ context.Context,
+	query inbound.GetRunArtifactQuery,
+) (inbound.ArtifactContentView, error) {
+	s.query = query
+	if s.err != nil {
+		return inbound.ArtifactContentView{}, s.err
+	}
+
+	return s.artifact, nil
 }
 
 type uploadFile struct {

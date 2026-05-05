@@ -29,6 +29,7 @@ type Run struct {
 	Steps             []Step
 	ToolCalls         []ToolCall
 	AgentTurns        []AgentTurn
+	Artifacts         []Artifact
 	AgentSystemPrompt string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
@@ -65,6 +66,7 @@ func (r *Run) Clone() *Run {
 	}
 	clone.ToolCalls = copyToolCalls(r.ToolCalls)
 	clone.AgentTurns = copyAgentTurns(r.AgentTurns)
+	clone.Artifacts = copyArtifacts(r.Artifacts)
 
 	return &clone
 }
@@ -154,6 +156,26 @@ func (r *Run) RecordAgentTurns(now time.Time, turns []AgentTurn) {
 func (r *Run) RecordAgentSystemPrompt(now time.Time, prompt string) {
 	r.AgentSystemPrompt = truncateUTF8Text(prompt, MaxAgentSystemPromptLength)
 	r.UpdatedAt = now
+}
+
+// RecordArtifacts replaces stored run artifacts with detached bounded records.
+func (r *Run) RecordArtifacts(now time.Time, artifacts []Artifact) {
+	r.Artifacts = copyArtifacts(artifacts)
+	r.UpdatedAt = now
+}
+
+// ArtifactByPath returns one detached artifact by its workspace-relative path.
+func (r *Run) ArtifactByPath(path string) (Artifact, bool) {
+	if r == nil {
+		return Artifact{}, false
+	}
+	for _, artifact := range r.Artifacts {
+		if artifact.Path == path {
+			return artifact.Clone(), true
+		}
+	}
+
+	return Artifact{}, false
 }
 
 // Fail marks the run as failed.

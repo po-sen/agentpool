@@ -5,6 +5,8 @@ import "errors"
 var (
 	// ErrRunNotFound means the requested run does not exist.
 	ErrRunNotFound = errors.New("run not found")
+	// ErrArtifactNotFound means the requested run artifact does not exist.
+	ErrArtifactNotFound = errors.New("artifact not found")
 	// ErrInvalidInput means a use case command or query failed validation.
 	ErrInvalidInput = errors.New("invalid input")
 	// ErrConflict means the requested operation conflicts with current state.

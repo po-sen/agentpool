@@ -31,6 +31,13 @@ func TestWorkspaceProviderContract(t *testing.T) {
 	if !workspace.HasFiles {
 		t.Fatal("workspace HasFiles = false, want true")
 	}
+	artifacts, err := provider.CollectArtifacts(context.Background(), workspace)
+	if err != nil {
+		t.Fatalf("CollectArtifacts() error = %v", err)
+	}
+	if len(artifacts) != 1 || artifacts[0].Path != "report.md" {
+		t.Fatalf("artifacts = %#v, want report.md", artifacts)
+	}
 	if err := provider.CleanupWorkspace(context.Background(), workspace); err != nil {
 		t.Fatalf("CleanupWorkspace() error = %v", err)
 	}
@@ -49,4 +56,8 @@ func (contractWorkspaceProvider) PrepareWorkspace(context.Context, WorkspacePrep
 
 func (contractWorkspaceProvider) CleanupWorkspace(context.Context, Workspace) error {
 	return nil
+}
+
+func (contractWorkspaceProvider) CollectArtifacts(context.Context, Workspace) ([]run.Artifact, error) {
+	return []run.Artifact{{Path: "report.md", Content: []byte("# Report\n"), SizeBytes: 9}}, nil
 }

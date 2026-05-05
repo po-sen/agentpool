@@ -10,17 +10,21 @@ import (
 )
 
 const (
-	commandServerName  = "server"
-	commandWorkerName  = "worker"
-	commandDevName     = "dev"
-	commandVersionName = "version"
-	commandRunName     = "run"
-	commandGetName     = "get"
-	commandListName    = "list"
-	commandCancelName  = "cancel"
+	commandServerName    = "server"
+	commandWorkerName    = "worker"
+	commandDevName       = "dev"
+	commandVersionName   = "version"
+	commandRunName       = "run"
+	commandGetName       = "get"
+	commandListName      = "list"
+	commandCancelName    = "cancel"
+	commandArtifactsName = "artifacts"
+	commandArtifactName  = "artifact"
 
 	flagAddr         = "addr"
+	flagArchive      = "archive"
 	flagDebug        = "debug"
+	flagDir          = "dir"
 	flagFile         = "file"
 	flagJSON         = "json"
 	flagNoWait       = "no-wait"
@@ -57,6 +61,10 @@ const (
 	CommandList CommandKind = commandListName
 	// CommandCancel cancels one run through the HTTP API.
 	CommandCancel CommandKind = commandCancelName
+	// CommandArtifacts lists run artifacts through the HTTP API.
+	CommandArtifacts CommandKind = commandArtifactsName
+	// CommandArtifact fetches one run artifact through the HTTP API.
+	CommandArtifact CommandKind = commandArtifactName
 )
 
 // Command is the parsed CLI command and its command-specific options.
@@ -64,6 +72,7 @@ type Command struct {
 	Kind   CommandKind
 	Addr   string
 	RunID  string
+	Path   string
 	Run    RunOptions
 	Output OutputOptions
 }
@@ -72,6 +81,8 @@ type Command struct {
 type RunOptions struct {
 	Prompt       string
 	Files        []string
+	Dirs         []string
+	Archives     []string
 	Wait         bool
 	Timeout      time.Duration
 	PollInterval time.Duration
@@ -110,6 +121,10 @@ func Parse(args []string) (Command, error) {
 		return parseListCommand(args[1:])
 	case commandCancelName:
 		return parseRunIDCommand(CommandCancel, args[1:])
+	case commandArtifactsName:
+		return parseRunIDCommand(CommandArtifacts, args[1:])
+	case commandArtifactName:
+		return parseArtifactCommand(args[1:])
 	default:
 		return Command{}, ErrUsage
 	}
@@ -120,7 +135,9 @@ func (c Command) UsesHTTPClient() bool {
 	return c.Kind == CommandRun ||
 		c.Kind == CommandGet ||
 		c.Kind == CommandList ||
-		c.Kind == CommandCancel
+		c.Kind == CommandCancel ||
+		c.Kind == CommandArtifacts ||
+		c.Kind == CommandArtifact
 }
 
 // Usage returns the short CLI usage text.
@@ -131,10 +148,12 @@ usage:
   agentpool worker
   agentpool dev
   agentpool version
-  agentpool run --prompt "..." [--file PATH ...] [--addr URL] [--json|--pretty] [--debug]
+  agentpool run --prompt "..." [--file PATH ...] [--dir PATH ...] [--archive PATH ...] [--addr URL] [--json|--pretty] [--debug]
   agentpool get <run_id> [--addr URL] [--json|--pretty] [--debug]
   agentpool list [--addr URL] [--json|--pretty] [--debug]
   agentpool cancel <run_id> [--addr URL] [--json|--pretty] [--debug]
+  agentpool artifacts <run_id> [--addr URL] [--json|--pretty]
+  agentpool artifact <run_id> <path> [--addr URL]
 `) + "\n"
 }
 
@@ -149,10 +168,14 @@ func parseNoArgCommand(kind CommandKind, args []string) (Command, error) {
 func parseRunCommand(args []string) (Command, error) {
 	command := newClientCommand(CommandRun)
 	files := fileListFlag{}
+	dirs := fileListFlag{}
+	archives := fileListFlag{}
 	noWait := false
 	flags := newFlagSet(commandRunName)
 	flags.StringVar(&command.Run.Prompt, flagPrompt, "", "run prompt")
 	flags.Var(&files, flagFile, "file to upload")
+	flags.Var(&dirs, flagDir, "directory to upload")
+	flags.Var(&archives, flagArchive, "archive to expand and upload")
 	flags.BoolVar(&command.Run.Wait, flagWait, true, "wait for terminal run status")
 	flags.BoolVar(&noWait, flagNoWait, false, "submit and return without polling")
 	flags.DurationVar(&command.Run.Timeout, flagTimeout, defaultRunTimeout, "maximum wait duration")
@@ -169,6 +192,8 @@ func parseRunCommand(args []string) (Command, error) {
 		command.Run.Wait = false
 	}
 	command.Run.Files = append([]string(nil), files...)
+	command.Run.Dirs = append([]string(nil), dirs...)
+	command.Run.Archives = append([]string(nil), archives...)
 
 	return command, nil
 }
@@ -208,6 +233,29 @@ func parseListCommand(args []string) (Command, error) {
 	return command, nil
 }
 
+func parseArtifactCommand(args []string) (Command, error) {
+	command := newClientCommand(CommandArtifact)
+	flags := newFlagSet(commandArtifactName)
+	addArtifactClientFlags(flags, &command)
+
+	flagArgs, positionals, err := splitPositionalArgs(args, 2)
+	if err != nil {
+		return Command{}, ErrUsage
+	}
+	if err := flags.Parse(flagArgs); err != nil {
+		return Command{}, ErrUsage
+	}
+	if flags.NArg() != 0 || len(positionals) != 2 ||
+		strings.TrimSpace(positionals[0]) == "" ||
+		strings.TrimSpace(positionals[1]) == "" {
+		return Command{}, ErrUsage
+	}
+	command.RunID = positionals[0]
+	command.Path = positionals[1]
+
+	return command, nil
+}
+
 func newClientCommand(kind CommandKind) Command {
 	return Command{
 		Kind: kind,
@@ -242,9 +290,25 @@ func addClientFlags(flags *flag.FlagSet, command *Command) {
 	flags.BoolVar(&command.Output.Debug, flagDebug, false, "include debug diagnostics")
 }
 
+func addArtifactClientFlags(flags *flag.FlagSet, command *Command) {
+	flags.StringVar(&command.Addr, flagAddr, command.Addr, "AgentPool HTTP API address")
+}
+
 func splitRunIDArgs(args []string) ([]string, string, error) {
+	flagArgs, positionals, err := splitPositionalArgs(args, 1)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(positionals) == 0 {
+		return flagArgs, "", nil
+	}
+
+	return flagArgs, positionals[0], nil
+}
+
+func splitPositionalArgs(args []string, maxPositionals int) ([]string, []string, error) {
 	flagArgs := make([]string, 0, len(args))
-	runID := ""
+	positionals := make([]string, 0, maxPositionals)
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
 		if isFlagArg(arg) {
@@ -252,19 +316,19 @@ func splitRunIDArgs(args []string) ([]string, string, error) {
 			if flagName(arg) == flagAddr && !strings.Contains(arg, "=") {
 				index++
 				if index >= len(args) {
-					return nil, "", ErrUsage
+					return nil, nil, ErrUsage
 				}
 				flagArgs = append(flagArgs, args[index])
 			}
 			continue
 		}
-		if runID != "" {
-			return nil, "", ErrUsage
+		if len(positionals) >= maxPositionals {
+			return nil, nil, ErrUsage
 		}
-		runID = arg
+		positionals = append(positionals, arg)
 	}
 
-	return flagArgs, runID, nil
+	return flagArgs, positionals, nil
 }
 
 func isFlagArg(arg string) bool {

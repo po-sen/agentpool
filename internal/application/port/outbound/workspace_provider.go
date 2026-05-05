@@ -23,5 +23,6 @@ type Workspace struct {
 // WorkspaceProvider prepares and cleans up ephemeral run workspaces.
 type WorkspaceProvider interface {
 	PrepareWorkspace(context.Context, WorkspacePrepareRequest) (Workspace, error)
+	CollectArtifacts(context.Context, Workspace) ([]run.Artifact, error)
 	CleanupWorkspace(context.Context, Workspace) error
 }

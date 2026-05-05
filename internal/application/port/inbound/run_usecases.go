@@ -31,6 +31,17 @@ type GetRunQuery struct {
 	RunID string
 }
 
+// GetRunArtifactsQuery contains application-level input for listing run artifacts.
+type GetRunArtifactsQuery struct {
+	RunID string
+}
+
+// GetRunArtifactQuery contains application-level input for fetching one run artifact.
+type GetRunArtifactQuery struct {
+	RunID string
+	Path  string
+}
+
 // ApproveRunCommand contains application-level input for an approval decision.
 type ApproveRunCommand struct {
 	RunID    string
@@ -50,6 +61,16 @@ type GetRunUseCase interface {
 // ListRunsUseCase retrieves submitted runs.
 type ListRunsUseCase interface {
 	ListRuns(context.Context) ([]RunView, error)
+}
+
+// ListRunArtifactsUseCase retrieves metadata for artifacts captured from a run workspace.
+type ListRunArtifactsUseCase interface {
+	ListRunArtifacts(context.Context, GetRunArtifactsQuery) ([]ArtifactView, error)
+}
+
+// GetRunArtifactUseCase retrieves one captured run artifact.
+type GetRunArtifactUseCase interface {
+	GetRunArtifact(context.Context, GetRunArtifactQuery) (ArtifactContentView, error)
 }
 
 // ApproveRunUseCase records a human approval decision.

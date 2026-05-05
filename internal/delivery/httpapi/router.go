@@ -7,32 +7,38 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"strings"
 
 	"github.com/po-sen/agentpool/internal/application/port/inbound"
 )
 
 const (
 	maxJSONRequestBodyBytes      = 1 << 20
-	maxMultipartRequestBodyBytes = 8 << 20
+	maxMultipartRequestBodyBytes = 32 << 20
 
-	headerContentType = "Content-Type"
+	headerContentType    = "Content-Type"
+	messageRunIDRequired = "run id is required"
 )
 
 // Dependencies contains use cases required by the HTTP API.
 type Dependencies struct {
-	CreateRun inbound.CreateRunUseCase
-	GetRun    inbound.GetRunUseCase
-	ListRuns  inbound.ListRunsUseCase
-	CancelRun inbound.CancelRunUseCase
+	CreateRun        inbound.CreateRunUseCase
+	GetRun           inbound.GetRunUseCase
+	ListRuns         inbound.ListRunsUseCase
+	CancelRun        inbound.CancelRunUseCase
+	ListRunArtifacts inbound.ListRunArtifactsUseCase
+	GetRunArtifact   inbound.GetRunArtifactUseCase
 }
 
 // NewRouter creates the AgentPool HTTP router.
 func NewRouter(deps Dependencies) http.Handler {
 	handler := &Handler{
-		createRun: deps.CreateRun,
-		getRun:    deps.GetRun,
-		listRuns:  deps.ListRuns,
-		cancelRun: deps.CancelRun,
+		createRun:        deps.CreateRun,
+		getRun:           deps.GetRun,
+		listRuns:         deps.ListRuns,
+		cancelRun:        deps.CancelRun,
+		listRunArtifacts: deps.ListRunArtifacts,
+		getRunArtifact:   deps.GetRunArtifact,
 	}
 
 	mux := http.NewServeMux()
@@ -40,6 +46,8 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc("POST /v1/runs", handler.create)
 	mux.HandleFunc("GET /v1/runs", handler.list)
 	mux.HandleFunc("GET /v1/runs/{id}", handler.get)
+	mux.HandleFunc("GET /v1/runs/{id}/artifacts", handler.listArtifacts)
+	mux.HandleFunc("GET /v1/runs/{id}/artifacts/{path...}", handler.getArtifact)
 	mux.HandleFunc("POST /v1/runs/{id}/cancel", handler.cancel)
 
 	return mux
@@ -47,10 +55,12 @@ func NewRouter(deps Dependencies) http.Handler {
 
 // Handler owns HTTP request handling.
 type Handler struct {
-	createRun inbound.CreateRunUseCase
-	getRun    inbound.GetRunUseCase
-	listRuns  inbound.ListRunsUseCase
-	cancelRun inbound.CancelRunUseCase
+	createRun        inbound.CreateRunUseCase
+	getRun           inbound.GetRunUseCase
+	listRuns         inbound.ListRunsUseCase
+	cancelRun        inbound.CancelRunUseCase
+	listRunArtifacts inbound.ListRunArtifactsUseCase
+	getRunArtifact   inbound.GetRunArtifactUseCase
 }
 
 func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
@@ -95,7 +105,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "run id is required")
+		writeError(w, http.StatusBadRequest, messageRunIDRequired)
 		return
 	}
 
@@ -111,7 +121,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeError(w, http.StatusBadRequest, "run id is required")
+		writeError(w, http.StatusBadRequest, messageRunIDRequired)
 		return
 	}
 
@@ -124,10 +134,68 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toRunResponse(cancelled))
 }
 
+func (h *Handler) listArtifacts(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, messageRunIDRequired)
+		return
+	}
+	if h.listRunArtifacts == nil {
+		writeError(w, http.StatusInternalServerError, "artifact API is not configured")
+		return
+	}
+
+	artifacts, err := h.listRunArtifacts.ListRunArtifacts(r.Context(), inbound.GetRunArtifactsQuery{RunID: id})
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toArtifactsResponse(artifacts))
+}
+
+func (h *Handler) getArtifact(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	artifactPath := strings.TrimPrefix(r.PathValue("path"), "/")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, messageRunIDRequired)
+		return
+	}
+	if artifactPath == "" {
+		writeError(w, http.StatusBadRequest, "artifact path is required")
+		return
+	}
+	if h.getRunArtifact == nil {
+		writeError(w, http.StatusInternalServerError, "artifact API is not configured")
+		return
+	}
+
+	artifact, err := h.getRunArtifact.GetRunArtifact(r.Context(), inbound.GetRunArtifactQuery{
+		RunID: id,
+		Path:  artifactPath,
+	})
+	if err != nil {
+		writeApplicationError(w, err)
+		return
+	}
+
+	contentType := artifact.MediaType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set(headerContentType, contentType)
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(artifact.Content); err != nil {
+		return
+	}
+}
+
 func writeApplicationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, inbound.ErrRunNotFound):
 		writeError(w, http.StatusNotFound, "run not found")
+	case errors.Is(err, inbound.ErrArtifactNotFound):
+		writeError(w, http.StatusNotFound, "artifact not found")
 	case errors.Is(err, inbound.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, inbound.ErrConflict):

@@ -66,12 +66,15 @@ func New(version string, logOutput io.Writer) (*App, error) {
 	)
 	getRunHandler := query.NewGetRunHandler(runRepo)
 	listRunsHandler := query.NewListRunsHandler(runRepo)
+	runArtifactsHandler := query.NewRunArtifactsHandler(runRepo)
 
 	router := httpapi.NewRouter(httpapi.Dependencies{
-		CreateRun: createRunHandler,
-		GetRun:    getRunHandler,
-		ListRuns:  listRunsHandler,
-		CancelRun: cancelRunHandler,
+		CreateRun:        createRunHandler,
+		GetRun:           getRunHandler,
+		ListRuns:         listRunsHandler,
+		CancelRun:        cancelRunHandler,
+		ListRunArtifacts: runArtifactsHandler,
+		GetRunArtifact:   runArtifactsHandler,
 	})
 
 	return &App{

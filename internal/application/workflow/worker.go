@@ -154,21 +154,24 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 func (w *Worker) processRun(ctx context.Context, item *run.Run) error {
 	workspace, err := w.prepareRun(ctx, item)
 	if err != nil {
-		return w.failUnlessStateChanged(ctx, item, agent.RunResult{}, err)
+		return w.failUnlessStateChanged(ctx, item, agent.RunResult{}, nil, err)
 	}
 	defer w.cleanupWorkspace(ctx, workspace)
 
 	sandbox, err := w.prepareSandbox(ctx, item, workspace)
 	if err != nil {
-		return w.failUnlessStateChanged(ctx, item, agent.RunResult{}, err)
+		artifacts := w.collectArtifacts(ctx, workspace)
+
+		return w.failUnlessStateChanged(ctx, item, agent.RunResult{}, artifacts, err)
 	}
 	defer w.cleanupSandbox(ctx, sandbox)
 
 	result, err := w.startRun(ctx, item, workspace, sandbox)
+	artifacts := w.collectArtifacts(ctx, workspace)
 	if err != nil {
-		return w.failUnlessStateChanged(ctx, item, result, err)
+		return w.failUnlessStateChanged(ctx, item, result, artifacts, err)
 	}
-	if err := w.completeRun(ctx, item, result); err != nil {
+	if err := w.completeRun(ctx, item, result, artifacts); err != nil {
 		return ignoreRunStateChanged(err)
 	}
 
@@ -179,13 +182,14 @@ func (w *Worker) failUnlessStateChanged(
 	ctx context.Context,
 	item *run.Run,
 	result agent.RunResult,
+	artifacts []run.Artifact,
 	err error,
 ) error {
 	if errors.Is(err, errRunStateChanged) {
 		return nil
 	}
 
-	return w.failRun(ctx, item, result, err)
+	return w.failRun(ctx, item, result, artifacts, err)
 }
 
 func ignoreRunStateChanged(err error) error {
@@ -328,6 +332,22 @@ func (w *Worker) cleanupWorkspace(ctx context.Context, workspace outbound.Worksp
 	_ = w.workspace.CleanupWorkspace(cleanupCtx, workspace)
 }
 
+func (w *Worker) collectArtifacts(ctx context.Context, workspace outbound.Workspace) []run.Artifact {
+	if w.workspace == nil || workspace.WorkPath == "" {
+		return nil
+	}
+
+	collectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceCleanupTimeout)
+	defer cancel()
+
+	artifacts, err := w.workspace.CollectArtifacts(collectCtx, workspace)
+	if err != nil {
+		return nil
+	}
+
+	return artifacts
+}
+
 func (w *Worker) prepareSandbox(
 	ctx context.Context,
 	item *run.Run,
@@ -368,11 +388,13 @@ func (w *Worker) completeRun(
 	ctx context.Context,
 	item *run.Run,
 	result agent.RunResult,
+	artifacts []run.Artifact,
 ) error {
 	now := w.clock()
 	expectedStatus := item.Status
 	item.RecordToolCalls(now, toDomainToolCalls(result.ToolCalls))
 	item.RecordAgentTurns(now, toDomainAgentTurns(result.AgentTurns))
+	item.RecordArtifacts(now, artifacts)
 	if result.SystemPrompt != "" {
 		item.RecordAgentSystemPrompt(now, result.SystemPrompt)
 	}
@@ -386,11 +408,18 @@ func (w *Worker) completeRun(
 	return w.publish(ctx, outbound.EventRunCompleted, item.ID, now)
 }
 
-func (w *Worker) failRun(ctx context.Context, item *run.Run, result agent.RunResult, cause error) error {
+func (w *Worker) failRun(
+	ctx context.Context,
+	item *run.Run,
+	result agent.RunResult,
+	artifacts []run.Artifact,
+	cause error,
+) error {
 	now := w.clock()
 	expectedStatus := item.Status
 	item.RecordToolCalls(now, toDomainToolCalls(result.ToolCalls))
 	item.RecordAgentTurns(now, toDomainAgentTurns(result.AgentTurns))
+	item.RecordArtifacts(now, artifacts)
 	if result.SystemPrompt != "" {
 		item.RecordAgentSystemPrompt(now, result.SystemPrompt)
 	}
