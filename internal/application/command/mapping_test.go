@@ -32,6 +32,7 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	item.FailureReason = "model failed"
 	item.FailureCode = run.FailureCodeModelGenerateFailed
 	item.FailureMessage = "model generation failed"
+	item.AgentSystemPrompt = "system prompt"
 	item.ToolCalls = []run.ToolCall{
 		{
 			Name:      "run_shell",
@@ -89,6 +90,7 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	if view.FailureMessage != item.FailureMessage {
 		t.Fatalf("FailureMessage = %q, want %q", view.FailureMessage, item.FailureMessage)
 	}
+	assertMappedAgentSystemPrompt(t, view, item)
 	if len(view.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(view.Steps))
 	}
@@ -116,6 +118,14 @@ func assertMappedAgentTurn(t *testing.T, turns []inbound.AgentTurnView) {
 	}
 	if turns[0].ToolName != "run_shell" {
 		t.Fatalf("AgentTurns[0].ToolName = %q, want run_shell", turns[0].ToolName)
+	}
+}
+
+func assertMappedAgentSystemPrompt(t *testing.T, view inbound.RunView, item *run.Run) {
+	t.Helper()
+
+	if view.AgentSystemPrompt != item.AgentSystemPrompt {
+		t.Fatalf("AgentSystemPrompt = %q, want %q", view.AgentSystemPrompt, item.AgentSystemPrompt)
 	}
 }
 

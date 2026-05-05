@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestRunStatusTransitions(t *testing.T) {
@@ -179,6 +180,52 @@ func TestRunCloneCopiesFailureDiagnostics(t *testing.T) {
 	}
 	if clone.FailureMessage != item.FailureMessage {
 		t.Fatalf("clone FailureMessage = %q, want %q", clone.FailureMessage, item.FailureMessage)
+	}
+}
+
+func TestRunRecordAgentSystemPromptStoresBoundedPrompt(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	item := newRun(t, now)
+	prompt := strings.Repeat("a", MaxAgentSystemPromptLength+10)
+
+	item.RecordAgentSystemPrompt(now.Add(time.Second), prompt)
+
+	if len(item.AgentSystemPrompt) != MaxAgentSystemPromptLength {
+		t.Fatalf("len(AgentSystemPrompt) = %d, want %d", len(item.AgentSystemPrompt), MaxAgentSystemPromptLength)
+	}
+	if !strings.HasSuffix(item.AgentSystemPrompt, toolCallResultTruncatedMarker) {
+		t.Fatalf("AgentSystemPrompt does not contain truncation marker: %q", item.AgentSystemPrompt)
+	}
+	if !item.UpdatedAt.Equal(now.Add(time.Second)) {
+		t.Fatalf("UpdatedAt = %v, want %v", item.UpdatedAt, now.Add(time.Second))
+	}
+}
+
+func TestRunRecordAgentSystemPromptTruncatesWithoutBreakingUTF8(t *testing.T) {
+	item := newRun(t, time.Unix(100, 0).UTC())
+
+	item.RecordAgentSystemPrompt(time.Unix(101, 0).UTC(), strings.Repeat("界", MaxAgentSystemPromptLength))
+
+	if len(item.AgentSystemPrompt) > MaxAgentSystemPromptLength {
+		t.Fatalf("len(AgentSystemPrompt) = %d, want <= %d", len(item.AgentSystemPrompt), MaxAgentSystemPromptLength)
+	}
+	if !utf8.ValidString(item.AgentSystemPrompt) {
+		t.Fatalf("AgentSystemPrompt is not valid UTF-8: %q", item.AgentSystemPrompt)
+	}
+	if !strings.HasSuffix(item.AgentSystemPrompt, toolCallResultTruncatedMarker) {
+		t.Fatalf("AgentSystemPrompt does not contain truncation marker: %q", item.AgentSystemPrompt)
+	}
+}
+
+func TestRunCloneCopiesAgentSystemPrompt(t *testing.T) {
+	item := newRun(t, time.Unix(100, 0).UTC())
+	item.RecordAgentSystemPrompt(time.Unix(101, 0).UTC(), "system prompt")
+
+	clone := item.Clone()
+	clone.AgentSystemPrompt = "changed"
+
+	if item.AgentSystemPrompt != "system prompt" {
+		t.Fatalf("original AgentSystemPrompt = %q, want system prompt", item.AgentSystemPrompt)
 	}
 }
 

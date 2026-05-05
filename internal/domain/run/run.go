@@ -2,6 +2,11 @@ package run
 
 import "time"
 
+const (
+	// MaxAgentSystemPromptLength bounds the stored agent system prompt exposed for debugging.
+	MaxAgentSystemPromptLength = 16 << 10
+)
+
 // RunID identifies an AgentPool run.
 //
 //nolint:revive // RunID is part of the domain ubiquitous language.
@@ -14,18 +19,19 @@ func (id RunID) String() string {
 
 // Run is the aggregate root for a submitted agent task.
 type Run struct {
-	ID             RunID
-	Task           TaskSpec
-	Status         Status
-	ResultSummary  string
-	FailureReason  string
-	FailureCode    string
-	FailureMessage string
-	Steps          []Step
-	ToolCalls      []ToolCall
-	AgentTurns     []AgentTurn
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                RunID
+	Task              TaskSpec
+	Status            Status
+	ResultSummary     string
+	FailureReason     string
+	FailureCode       string
+	FailureMessage    string
+	Steps             []Step
+	ToolCalls         []ToolCall
+	AgentTurns        []AgentTurn
+	AgentSystemPrompt string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // New creates a queued run.
@@ -141,6 +147,12 @@ func (r *Run) RecordToolCalls(now time.Time, calls []ToolCall) {
 // RecordAgentTurns replaces the stored model-loop diagnostics with detached bounded records.
 func (r *Run) RecordAgentTurns(now time.Time, turns []AgentTurn) {
 	r.AgentTurns = copyAgentTurns(turns)
+	r.UpdatedAt = now
+}
+
+// RecordAgentSystemPrompt stores the bounded provider-neutral system prompt used by the agent.
+func (r *Run) RecordAgentSystemPrompt(now time.Time, prompt string) {
+	r.AgentSystemPrompt = truncateUTF8Text(prompt, MaxAgentSystemPromptLength)
 	r.UpdatedAt = now
 }
 

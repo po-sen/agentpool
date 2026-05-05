@@ -26,9 +26,10 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 		Result: inbound.RunResultView{
 			Summary: "model output",
 		},
-		FailureReason:  "model failed",
-		FailureCode:    "model_generate_failed",
-		FailureMessage: "model generation failed",
+		FailureReason:     "model failed",
+		FailureCode:       "model_generate_failed",
+		FailureMessage:    "model generation failed",
+		AgentSystemPrompt: "system prompt",
 		Steps: []inbound.StepView{
 			{
 				Name:      "execute",
@@ -88,6 +89,9 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	}
 	if response.FailureMessage != view.FailureMessage {
 		t.Fatalf("FailureMessage = %q, want %q", response.FailureMessage, view.FailureMessage)
+	}
+	if response.AgentSystemPrompt != view.AgentSystemPrompt {
+		t.Fatalf("AgentSystemPrompt = %q, want %q", response.AgentSystemPrompt, view.AgentSystemPrompt)
 	}
 	if len(response.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(response.Steps))
@@ -384,6 +388,43 @@ func TestRunResponseJSONIncludesAgentTurns(t *testing.T) {
 	}
 	if !strings.Contains(got, `"response_preview":"{bad}"`) {
 		t.Fatalf("response does not contain response preview: %s", got)
+	}
+}
+
+func TestRunResponseJSONIncludesAgentSystemPrompt(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:                "run_test",
+		Status:            "completed",
+		AgentSystemPrompt: "AgentPool is running a task.\nAvailable tools:\n- none\n",
+		Steps:             []inbound.StepView{},
+		CreatedAt:         time.Unix(100, 0).UTC(),
+		UpdatedAt:         time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"agent_system_prompt":"AgentPool is running a task.\nAvailable tools:\n- none\n"`) {
+		t.Fatalf("response does not contain agent_system_prompt: %s", got)
+	}
+}
+
+func TestRunResponseJSONOmitsAgentSystemPromptWhenEmpty(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:        "run_test",
+		Status:    "queued",
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if strings.Contains(got, `"agent_system_prompt"`) {
+		t.Fatalf("response contains empty agent_system_prompt: %s", got)
 	}
 }
 

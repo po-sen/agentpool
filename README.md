@@ -363,7 +363,7 @@ The runtime does not persist uploaded files beyond the run workspace cleanup. Ag
 
 ## Tools
 
-AgentPool has an application-owned tool loop. Models can respond with a JSON `tool_call` action, the agent runner executes the tool through the `ToolRunner` port, and the tool result is fed back to the model for a final JSON answer.
+AgentPool has an application-owned tool loop. Models can respond with a JSON `tool_call` action, the agent runner validates the requested tool against the tools advertised for that run, executes valid tools through the `ToolRunner` port, and feeds the tool result back to the model for a final JSON answer.
 
 The agent protocol accepts only `tool_call` and `final` JSON actions. Models should return exactly one JSON object with no markdown fences. For compatibility, AgentPool normalizes whole-response fenced JSON blocks and simple scalar values that can safely become strings, such as `{"type":"final","summary":true}` becoming summary `"true"` and numeric tool arguments becoming string arguments. AgentPool does not extract JSON from arbitrary prose. Unknown JSON action types, malformed JSON, unsupported fields, nested argument values, or multiple JSON objects are rejected as protocol errors with targeted correction feedback. Plain natural-language output is still accepted as a final summary for compatibility with local models.
 
@@ -392,7 +392,17 @@ Final answers use:
 }
 ```
 
-Tools are dynamically advertised. Runs without the required context do not expose unavailable tools to the model. Workspace path is separate from sandbox state, and sandbox execution is reserved for future side-effectful tools.
+Tools are dynamically advertised. Runs without the required context do not expose unavailable tools to the model. The model may only call tools listed under `Available tools`; unknown or unadvertised tool names are rejected by the agent runtime before `ToolRunner` dispatch. Those requests appear in `agent_turns` as invalid tool-call diagnostics, not in `tool_calls`.
+
+The run response includes bounded `agent_system_prompt` debug metadata after an agent session starts. It shows the exact provider-neutral system prompt used for the run, including the advertised tools:
+
+```json
+{
+  "agent_system_prompt": "AgentPool is running a task.\nAvailable tools:\n- none\n..."
+}
+```
+
+Workspace path is separate from sandbox state, and sandbox execution is reserved for future side-effectful tools.
 
 ## Agent Turn Diagnostics
 

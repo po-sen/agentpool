@@ -14,18 +14,19 @@ type createRunRequest struct {
 }
 
 type runResponse struct {
-	ID             string              `json:"id"`
-	Status         string              `json:"status"`
-	Task           taskResponse        `json:"task"`
-	Result         *runResultResponse  `json:"result,omitempty"`
-	FailureReason  string              `json:"failure_reason,omitempty"`
-	FailureCode    string              `json:"failure_code,omitempty"`
-	FailureMessage string              `json:"failure_message,omitempty"`
-	Steps          []stepResponse      `json:"steps"`
-	ToolCalls      []toolCallResponse  `json:"tool_calls,omitempty"`
-	AgentTurns     []agentTurnResponse `json:"agent_turns,omitempty"`
-	CreatedAt      time.Time           `json:"created_at"`
-	UpdatedAt      time.Time           `json:"updated_at"`
+	ID                string              `json:"id"`
+	Status            string              `json:"status"`
+	Task              taskResponse        `json:"task"`
+	Result            *runResultResponse  `json:"result,omitempty"`
+	FailureReason     string              `json:"failure_reason,omitempty"`
+	FailureCode       string              `json:"failure_code,omitempty"`
+	FailureMessage    string              `json:"failure_message,omitempty"`
+	Steps             []stepResponse      `json:"steps"`
+	ToolCalls         []toolCallResponse  `json:"tool_calls,omitempty"`
+	AgentTurns        []agentTurnResponse `json:"agent_turns,omitempty"`
+	AgentSystemPrompt string              `json:"agent_system_prompt,omitempty"`
+	CreatedAt         time.Time           `json:"created_at"`
+	UpdatedAt         time.Time           `json:"updated_at"`
 }
 
 type runResultResponse struct {
@@ -131,14 +132,15 @@ func toRunResponse(item inbound.RunView) runResponse {
 			Branch:        item.Task.Branch,
 			Attachments:   attachments,
 		},
-		FailureReason:  item.FailureReason,
-		FailureCode:    item.FailureCode,
-		FailureMessage: item.FailureMessage,
-		Steps:          steps,
-		ToolCalls:      toolCalls,
-		AgentTurns:     agentTurns,
-		CreatedAt:      item.CreatedAt,
-		UpdatedAt:      item.UpdatedAt,
+		FailureReason:     item.FailureReason,
+		FailureCode:       item.FailureCode,
+		FailureMessage:    item.FailureMessage,
+		Steps:             steps,
+		ToolCalls:         toolCalls,
+		AgentTurns:        agentTurns,
+		AgentSystemPrompt: item.AgentSystemPrompt,
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
 	}
 	if item.Result.Summary != "" {
 		response.Result = &runResultResponse{Summary: item.Result.Summary}

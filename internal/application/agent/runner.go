@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,6 +18,12 @@ const defaultMaxTurns = 4
 var errToolRunnerRequired = errors.New("tool runner is required")
 
 const agentTurnPreviewTruncatedMarker = "\n... [truncated]"
+
+const (
+	modelRoleSystem    = "system"
+	modelRoleUser      = "user"
+	modelRoleAssistant = "assistant"
+)
 
 // Runner owns AgentPool's application-level agent behavior.
 type Runner struct {
@@ -42,6 +49,7 @@ type RunResult struct {
 	ToolCallCount int
 	ToolCalls     []ToolCallRecord
 	AgentTurns    []TurnRecord
+	SystemPrompt  string
 }
 
 // ToolCallRecord captures one tool execution observed by the agent loop.
@@ -67,12 +75,15 @@ type TurnRecord struct {
 }
 
 type runSession struct {
-	request       RunRequest
-	messages      []outbound.ModelMessage
-	turnIndex     int
-	toolCallCount int
-	toolCalls     []ToolCallRecord
-	turns         []TurnRecord
+	request            RunRequest
+	systemPrompt       string
+	availableTools     map[string]outbound.ToolDefinition
+	availableToolNames []string
+	messages           []outbound.ModelMessage
+	turnIndex          int
+	toolCallCount      int
+	toolCalls          []ToolCallRecord
+	turns              []TurnRecord
 }
 
 // NewRunner creates an application agent runner.
@@ -158,11 +169,15 @@ func (r *Runner) newRunSession(ctx context.Context, request RunRequest) (*runSes
 		return nil, newAgentError(ErrorCodeToolListFailed, "", err)
 	}
 
+	systemPrompt := buildSystemPrompt(tools)
 	return &runSession{
-		request: request,
+		request:            request,
+		systemPrompt:       systemPrompt,
+		availableTools:     availableToolMap(tools),
+		availableToolNames: availableToolNames(tools),
 		messages: []outbound.ModelMessage{
-			{Role: "system", Content: buildSystemPrompt(tools)},
-			{Role: "user", Content: request.Task.Prompt},
+			{Role: modelRoleSystem, Content: systemPrompt},
+			{Role: modelRoleUser, Content: request.Task.Prompt},
 		},
 	}, nil
 }
@@ -227,8 +242,8 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 			EndedAt:         endedAt,
 		})
 		session.messages = append(session.messages,
-			outbound.ModelMessage{Role: "assistant", Content: response.Content},
-			outbound.ModelMessage{Role: "user", Content: protocolCorrectionMessage(parsed.parseErr)},
+			outbound.ModelMessage{Role: modelRoleAssistant, Content: response.Content},
+			outbound.ModelMessage{Role: modelRoleUser, Content: protocolCorrectionMessage(parsed.parseErr)},
 		)
 
 		return RunResult{}, false, nil
@@ -288,6 +303,10 @@ func (r *Runner) handleAction(
 
 		return session.finalResult(parsed.Summary), true, nil
 	case actionTypeToolCall:
+		if !session.toolIsAvailable(parsed.Tool) {
+			return handleUnavailableToolCall(session, content, parsed, turnIndex, startedAt, endedAt)
+		}
+
 		session.recordTurn(TurnRecord{
 			Index:           turnIndex,
 			Status:          run.AgentTurnStatusToolCall,
@@ -324,6 +343,7 @@ func (s *runSession) finalResult(summary string) RunResult {
 		ToolCallCount: s.toolCallCount,
 		ToolCalls:     copyToolCallRecords(s.toolCalls),
 		AgentTurns:    copyTurnRecords(s.turns),
+		SystemPrompt:  s.systemPrompt,
 	}
 }
 
@@ -332,6 +352,7 @@ func (s *runSession) partialResult() RunResult {
 		ToolCallCount: s.toolCallCount,
 		ToolCalls:     copyToolCallRecords(s.toolCalls),
 		AgentTurns:    copyTurnRecords(s.turns),
+		SystemPrompt:  s.systemPrompt,
 	}
 }
 
@@ -363,11 +384,38 @@ Examples:
 Do not return tool_result. Do not return multiple JSON objects. Do not use markdown fences.`
 }
 
+func handleUnavailableToolCall(
+	session *runSession,
+	content string,
+	parsed action,
+	turnIndex int,
+	startedAt time.Time,
+	endedAt time.Time,
+) (RunResult, bool, error) {
+	message := "tool is not available: " + parsed.Tool
+	session.recordTurn(TurnRecord{
+		Index:           turnIndex,
+		Status:          run.AgentTurnStatusInvalidToolCall,
+		ActionType:      run.AgentTurnActionTypeToolCall,
+		ToolName:        parsed.Tool,
+		Message:         message,
+		ResponsePreview: previewModelResponse(content),
+		StartedAt:       startedAt,
+		EndedAt:         endedAt,
+	})
+	session.messages = append(session.messages,
+		outbound.ModelMessage{Role: modelRoleAssistant, Content: content},
+		outbound.ModelMessage{Role: modelRoleUser, Content: unavailableToolCorrectionMessage(parsed.Tool, session.availableToolNames)},
+	)
+
+	return RunResult{}, false, nil
+}
+
 func (r *Runner) handleToolCall(ctx context.Context, session *runSession, content string, parsed action) (RunResult, bool, error) {
-	session.messages = append(session.messages, outbound.ModelMessage{Role: "assistant", Content: content})
+	session.messages = append(session.messages, outbound.ModelMessage{Role: modelRoleAssistant, Content: content})
 	if strings.TrimSpace(parsed.Tool) == "" {
 		session.messages = append(session.messages, outbound.ModelMessage{
-			Role:    "user",
+			Role:    modelRoleUser,
 			Content: "Tool error:\nmissing tool name",
 		})
 		return RunResult{}, false, nil
@@ -391,11 +439,21 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 	session.recordToolCall(parsed.Tool, parsed.Arguments, result.Content, result.IsError, startedAt, endedAt)
 
 	session.messages = append(session.messages, outbound.ModelMessage{
-		Role:    "user",
+		Role:    modelRoleUser,
 		Content: toolObservation(parsed.Tool, result),
 	})
 
 	return RunResult{}, false, nil
+}
+
+func (s *runSession) toolIsAvailable(name string) bool {
+	if s.availableTools == nil {
+		return false
+	}
+
+	_, ok := s.availableTools[name]
+
+	return ok
 }
 
 func (s *runSession) recordToolCall(
@@ -476,6 +534,49 @@ func toolObservation(tool string, result outbound.ToolResult) string {
 	}
 
 	return fmt.Sprintf("Tool result for %s:\n%s", tool, result.Content)
+}
+
+func unavailableToolCorrectionMessage(name string, available []string) string {
+	availableText := "none"
+	if len(available) > 0 {
+		availableText = strings.Join(available, ", ")
+	}
+
+	return fmt.Sprintf(`Tool call error:
+The tool %q is not available.
+Available tools: %s
+
+You may only call tools listed in Available tools.
+Do not invent tool names.
+Tool names are exact and case-sensitive.
+If no tools are available, return a final answer directly.`, name, availableText)
+}
+
+func availableToolMap(tools []outbound.ToolDefinition) map[string]outbound.ToolDefinition {
+	if len(tools) == 0 {
+		return map[string]outbound.ToolDefinition{}
+	}
+
+	indexed := make(map[string]outbound.ToolDefinition, len(tools))
+	for _, tool := range tools {
+		indexed[tool.Name] = tool
+	}
+
+	return indexed
+}
+
+func availableToolNames(tools []outbound.ToolDefinition) []string {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Name)
+	}
+	sort.Strings(names)
+
+	return names
 }
 
 func previewModelResponse(content string) string {

@@ -19,6 +19,8 @@ const (
 	AgentTurnStatusToolCall = "tool_call"
 	// AgentTurnStatusProtocolError identifies a model response protocol error.
 	AgentTurnStatusProtocolError = "protocol_error"
+	// AgentTurnStatusInvalidToolCall identifies a tool call for a non-advertised tool.
+	AgentTurnStatusInvalidToolCall = "invalid_tool_call"
 	// AgentTurnStatusModelError identifies a model generation or model-output error.
 	AgentTurnStatusModelError = "model_error"
 	// AgentTurnStatusToolError identifies a tool execution error following a tool-call turn.

@@ -48,6 +48,9 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 	assertMessage(t, model.requests[0].Messages[0], "system", "list_files: Lists files")
 	assertMessage(t, model.requests[0].Messages[0], "system", "read_file: Reads text files")
 	assertMessage(t, model.requests[0].Messages[1], "user", "do work")
+	if !strings.Contains(result.SystemPrompt, "Available tools") {
+		t.Fatalf("SystemPrompt = %q, want available tools", result.SystemPrompt)
+	}
 }
 
 func TestRunnerReturnsJSONFinalActionSummary(t *testing.T) {
@@ -140,14 +143,14 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	}
 }
 
-func TestRunnerFeedsUnknownToolResultBackToModel(t *testing.T) {
+func TestRunnerRejectsUnavailableToolBeforeToolRunner(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
-			{Content: `{"type":"tool_call","tool":"missing","arguments":{}}`},
-			{Content: `{"type":"final","summary":"handled tool error"}`},
+			{Content: `{"type":"tool_call","tool":"sh_script","arguments":{"script":"echo hi"}}`},
+			{Content: `{"type":"final","summary":"answered without tool"}`},
 		},
 	}
-	tools := newFakeToolRunner()
+	tools := newFakeToolRunnerWithTools(nil)
 	runner := NewRunner(model, tools)
 
 	result, err := runner.Run(context.Background(), RunRequest{
@@ -157,29 +160,25 @@ func TestRunnerFeedsUnknownToolResultBackToModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	if result.Summary != "handled tool error" {
-		t.Fatalf("summary = %q, want handled tool error", result.Summary)
+	if result.Summary != "answered without tool" {
+		t.Fatalf("summary = %q, want answered without tool", result.Summary)
 	}
-	if result.ToolCallCount != 1 {
-		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
+	if result.ToolCallCount != 0 {
+		t.Fatalf("ToolCallCount = %d, want 0", result.ToolCallCount)
 	}
-	if len(result.ToolCalls) != 1 {
-		t.Fatalf("len(ToolCalls) = %d, want 1", len(result.ToolCalls))
+	if len(result.ToolCalls) != 0 {
+		t.Fatalf("len(ToolCalls) = %d, want 0", len(result.ToolCalls))
 	}
-	if result.ToolCalls[0].Name != "missing" {
-		t.Fatalf("tool record name = %q, want missing", result.ToolCalls[0].Name)
-	}
-	if result.ToolCalls[0].Result != "unknown tool: missing" {
-		t.Fatalf("tool record result = %q, want unknown tool", result.ToolCalls[0].Result)
-	}
-	if !result.ToolCalls[0].IsError {
-		t.Fatal("tool record IsError = false, want true")
+	if len(tools.calls) != 0 {
+		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
 	}
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
-		index:      1,
-		status:     run.AgentTurnStatusToolCall,
-		actionType: run.AgentTurnActionTypeToolCall,
-		toolName:   "missing",
+		index:           1,
+		status:          run.AgentTurnStatusInvalidToolCall,
+		actionType:      run.AgentTurnActionTypeToolCall,
+		toolName:        "sh_script",
+		message:         "tool is not available: sh_script",
+		responsePreview: `{"type":"tool_call","tool":"sh_script","arguments":{"script":"echo hi"}}`,
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
 		index:      2,
@@ -187,7 +186,96 @@ func TestRunnerFeedsUnknownToolResultBackToModel(t *testing.T) {
 		actionType: run.AgentTurnActionTypeFinal,
 	})
 	lastMessages := model.requests[1].Messages
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool error for missing:\nunknown tool: missing")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", `The tool "sh_script" is not available.`)
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Available tools: none")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not invent tool names.")
+	if !strings.Contains(result.SystemPrompt, "Available tools:\n- none") {
+		t.Fatalf("SystemPrompt = %q, want no available tools", result.SystemPrompt)
+	}
+}
+
+func TestRunnerRecordsExistingToolResultError(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"read_file","arguments":{"path":"missing.md"}}`},
+			{Content: `{"type":"final","summary":"handled tool error"}`},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "read_file", Description: "Reads text files"},
+	})
+	tools.results = map[string]outbound.ToolResult{
+		"read_file": {Content: "file not found", IsError: true},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.ToolCallCount != 1 {
+		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(result.ToolCalls))
+	}
+	if result.ToolCalls[0].Name != "read_file" {
+		t.Fatalf("tool record name = %q, want read_file", result.ToolCalls[0].Name)
+	}
+	if result.ToolCalls[0].Result != "file not found" {
+		t.Fatalf("tool record result = %q, want file not found", result.ToolCalls[0].Result)
+	}
+	if !result.ToolCalls[0].IsError {
+		t.Fatal("tool record IsError = false, want true")
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	}
+	lastMessages := model.requests[1].Messages
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool error for read_file:\nfile not found")
+}
+
+func TestRunnerAllowsAdvertisedRunShellTool(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"run_shell","arguments":{"command":"pwd"}}`},
+			{Content: `{"type":"final","summary":"shell ran"}`},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "run_shell", Description: "Runs shell commands"},
+	})
+	tools.results = map[string]outbound.ToolResult{
+		"run_shell": {Content: "exit_code: 0\nstdout:\n/workspace\n"},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+		Context: outbound.ToolContext{
+			WorkspacePath: "/tmp/workspace",
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	}
+	if tools.calls[0].Name != "run_shell" {
+		t.Fatalf("tool name = %q, want run_shell", tools.calls[0].Name)
+	}
+	if len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "run_shell" {
+		t.Fatalf("ToolCalls = %#v, want run_shell record", result.ToolCalls)
+	}
 }
 
 func TestRunnerRejectsUnknownJSONActionTypeAndContinues(t *testing.T) {
@@ -491,6 +579,47 @@ func TestRunnerReturnsErrorWhenProtocolErrorsExceedMaxTurns(t *testing.T) {
 	})
 }
 
+func TestRunnerReturnsMaxTurnsForRepeatedUnavailableToolCalls(t *testing.T) {
+	model := &repeatingModelClient{
+		response: outbound.ModelResponse{
+			Content: `{"type":"tool_call","tool":"sh_script","arguments":{"script":"echo hi"}}`,
+		},
+	}
+	tools := newFakeToolRunnerWithTools(nil)
+	runner := NewRunner(model, tools, WithMaxTurns(2))
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	assertAgentErrorCode(t, err, ErrorCodeAgentMaxTurns)
+	if len(tools.calls) != 0 {
+		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
+	}
+	if len(result.ToolCalls) != 0 {
+		t.Fatalf("len(ToolCalls) = %d, want 0", len(result.ToolCalls))
+	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusInvalidToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sh_script",
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusInvalidToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sh_script",
+	})
+	assertTurn(t, result.AgentTurns, 2, wantTurn{
+		index:  3,
+		status: run.AgentTurnStatusMaxTurns,
+	})
+	if !strings.Contains(result.SystemPrompt, "Available tools:\n- none") {
+		t.Fatalf("SystemPrompt = %q, want no available tools", result.SystemPrompt)
+	}
+}
+
 func TestRunnerPropagatesModelErrors(t *testing.T) {
 	model := &recordingModelClient{err: errModelFailed}
 	runner := NewRunner(model, newFakeToolRunner())
@@ -694,6 +823,20 @@ type failingAfterToolModelClient struct {
 	calls int
 }
 
+type repeatingModelClient struct {
+	response outbound.ModelResponse
+	requests []outbound.ModelRequest
+}
+
+func (c *repeatingModelClient) Generate(
+	_ context.Context,
+	request outbound.ModelRequest,
+) (outbound.ModelResponse, error) {
+	c.requests = append(c.requests, request)
+
+	return c.response, nil
+}
+
 func (c *failingAfterToolModelClient) Generate(
 	context.Context,
 	outbound.ModelRequest,
@@ -723,6 +866,9 @@ func (c *recordingModelClient) Generate(_ context.Context, request outbound.Mode
 type fakeToolRunner struct {
 	listErr      error
 	runErr       error
+	tools        []outbound.ToolDefinition
+	toolsSet     bool
+	results      map[string]outbound.ToolResult
 	listRequests []outbound.ToolListRequest
 	calls        []outbound.ToolCall
 }
@@ -731,16 +877,24 @@ func newFakeToolRunner() *fakeToolRunner {
 	return &fakeToolRunner{}
 }
 
+func newFakeToolRunnerWithTools(tools []outbound.ToolDefinition) *fakeToolRunner {
+	return &fakeToolRunner{tools: tools, toolsSet: true}
+}
+
 func (r *fakeToolRunner) ListTools(_ context.Context, request outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
 	if r.listErr != nil {
 		return nil, r.listErr
 	}
 	r.listRequests = append(r.listRequests, request)
+	if r.toolsSet {
+		return r.tools, nil
+	}
 
 	return []outbound.ToolDefinition{
 		{Name: "echo", Description: "Returns text"},
 		{Name: "list_files", Description: "Lists files"},
 		{Name: "read_file", Description: "Reads text files"},
+		{Name: "run_shell", Description: "Runs a shell command"},
 	}, nil
 }
 
@@ -748,6 +902,9 @@ func (r *fakeToolRunner) RunTool(_ context.Context, call outbound.ToolCall) (out
 	r.calls = append(r.calls, call)
 	if r.runErr != nil {
 		return outbound.ToolResult{}, r.runErr
+	}
+	if result, ok := r.results[call.Name]; ok {
+		return result, nil
 	}
 	if call.Name != "echo" {
 		return outbound.ToolResult{Content: "unknown tool: " + call.Name, IsError: true}, nil

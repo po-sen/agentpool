@@ -70,14 +70,15 @@ func toRunView(item *run.Run) inbound.RunView {
 		Result: inbound.RunResultView{
 			Summary: item.ResultSummary,
 		},
-		FailureReason:  item.FailureReason,
-		FailureCode:    item.FailureCode,
-		FailureMessage: item.FailureMessage,
-		Steps:          steps,
-		ToolCalls:      toolCalls,
-		AgentTurns:     agentTurns,
-		CreatedAt:      item.CreatedAt,
-		UpdatedAt:      item.UpdatedAt,
+		FailureReason:     item.FailureReason,
+		FailureCode:       item.FailureCode,
+		FailureMessage:    item.FailureMessage,
+		Steps:             steps,
+		ToolCalls:         toolCalls,
+		AgentTurns:        agentTurns,
+		AgentSystemPrompt: item.AgentSystemPrompt,
+		CreatedAt:         item.CreatedAt,
+		UpdatedAt:         item.UpdatedAt,
 	}
 }
 

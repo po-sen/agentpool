@@ -20,6 +20,9 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		`{"type":"tool_call","tool":"<tool_name>","arguments":{"key":"value"}}`,
 		"Call tools when they are useful",
 		"Do not call tools when the task can be answered directly.",
+		"Only call tools listed under Available tools.",
+		"Never invent tool names.",
+		"Tool names are exact and case-sensitive.",
 		"echo: Returns text",
 		"list_files: Lists files",
 		"read_file: Reads text files",
@@ -37,7 +40,13 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 
 func TestBuildSystemPromptHandlesNoTools(t *testing.T) {
 	prompt := buildSystemPrompt(nil)
-	if !strings.Contains(prompt, "- none") {
+	if !strings.Contains(prompt, "Available tools:\n- none") {
 		t.Fatalf("prompt does not contain no-tools marker:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "do not call any tool") {
+		t.Fatalf("prompt does not forbid tools when none are available:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, `Return {"type":"final","summary":"..."} directly`) {
+		t.Fatalf("prompt does not require direct final response:\n%s", prompt)
 	}
 }

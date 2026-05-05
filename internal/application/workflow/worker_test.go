@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +35,12 @@ func TestWorkerProcessOneCompletesQueuedRun(t *testing.T) {
 	}
 	if stored.FailureReason != "" {
 		t.Fatalf("stored failure reason = %q, want empty", stored.FailureReason)
+	}
+	if stored.AgentSystemPrompt == "" {
+		t.Fatal("stored agent system prompt is empty")
+	}
+	if !strings.Contains(stored.AgentSystemPrompt, "Available tools:") {
+		t.Fatalf("stored agent system prompt = %q, want available tools", stored.AgentSystemPrompt)
 	}
 	assertAgentTurnStatuses(t, stored.AgentTurns, []string{run.AgentTurnStatusNaturalLanguageFinal})
 	assertSteps(t, stored.Steps, []wantStep{
@@ -170,6 +177,15 @@ func TestWorkerStoresFileAndShellToolCallHistory(t *testing.T) {
 	}
 	if stored.ToolCalls[2].Result != "exit_code: 0\nstdout:\n/workspace\n" {
 		t.Fatalf("run_shell result = %q, want shell output", stored.ToolCalls[2].Result)
+	}
+	if !strings.Contains(stored.AgentSystemPrompt, "list_files: Lists files") {
+		t.Fatalf("AgentSystemPrompt = %q, want list_files", stored.AgentSystemPrompt)
+	}
+	if !strings.Contains(stored.AgentSystemPrompt, "read_file: Reads text files") {
+		t.Fatalf("AgentSystemPrompt = %q, want read_file", stored.AgentSystemPrompt)
+	}
+	if !strings.Contains(stored.AgentSystemPrompt, "run_shell: Runs shell commands") {
+		t.Fatalf("AgentSystemPrompt = %q, want run_shell", stored.AgentSystemPrompt)
 	}
 	assertAgentTurnStatuses(t, stored.AgentTurns, []string{
 		run.AgentTurnStatusToolCall,
@@ -522,6 +538,9 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 	if stored.FailureMessage == errModelGenerationFailed.Error() {
 		t.Fatalf("stored failure message exposes raw error: %q", stored.FailureMessage)
 	}
+	if stored.AgentSystemPrompt == "" {
+		t.Fatal("stored failed-run agent system prompt is empty")
+	}
 	if stored.ResultSummary != "" {
 		t.Fatalf("stored result summary = %q, want empty", stored.ResultSummary)
 	}
@@ -658,6 +677,9 @@ func TestWorkerProcessOneStoresMaxTurnsFailureCode(t *testing.T) {
 	}
 	if stored.FailureMessage != "agent reached max turns" {
 		t.Fatalf("stored failure message = %q, want agent reached max turns", stored.FailureMessage)
+	}
+	if stored.AgentSystemPrompt == "" {
+		t.Fatal("stored max-turns agent system prompt is empty")
 	}
 	if len(stored.ToolCalls) != 1 {
 		t.Fatalf("len(ToolCalls) = %d, want 1", len(stored.ToolCalls))
@@ -1355,7 +1377,12 @@ func (p *recordingSandboxProvider) Cleanup(ctx context.Context, _ outbound.Sandb
 type fakeToolRunner struct{}
 
 func (r fakeToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
-	return []outbound.ToolDefinition{{Name: "echo", Description: "Returns text"}}, nil
+	return []outbound.ToolDefinition{
+		{Name: "echo", Description: "Returns text"},
+		{Name: "list_files", Description: "Lists files"},
+		{Name: "read_file", Description: "Reads text files"},
+		{Name: "run_shell", Description: "Runs shell commands"},
+	}, nil
 }
 
 func (r fakeToolRunner) RunTool(_ context.Context, call outbound.ToolCall) (outbound.ToolResult, error) {

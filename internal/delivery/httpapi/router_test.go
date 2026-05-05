@@ -339,6 +339,36 @@ func TestGetRunIncludesAgentTurns(t *testing.T) {
 	}
 }
 
+func TestGetRunIncludesAgentSystemPrompt(t *testing.T) {
+	get := &getRunStub{
+		view: inbound.RunView{
+			ID:                "run_test",
+			Status:            "failed",
+			AgentSystemPrompt: "AgentPool is running a task.\nAvailable tools:\n- none\n",
+			Steps:             []inbound.StepView{},
+			CreatedAt:         time.Unix(100, 0).UTC(),
+			UpdatedAt:         time.Unix(101, 0).UTC(),
+		},
+	}
+	router := NewRouter(Dependencies{
+		CreateRun: &createRunStub{},
+		ListRuns:  &listRunsStub{},
+		GetRun:    get,
+		CancelRun: &cancelRunStub{},
+	})
+	request := httptest.NewRequest(http.MethodGet, "/v1/runs/run_test", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"agent_system_prompt":"AgentPool is running a task.\nAvailable tools:\n- none\n"`) {
+		t.Fatalf("response missing agent_system_prompt: %s", response.Body.String())
+	}
+}
+
 func TestGetRunIncludesFailureDiagnosticsAndPartialToolCalls(t *testing.T) {
 	get := &getRunStub{
 		view: inbound.RunView{
