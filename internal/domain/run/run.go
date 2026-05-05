@@ -20,6 +20,7 @@ type Run struct {
 	ResultSummary string
 	FailureReason string
 	Steps         []Step
+	ToolCalls     []ToolCall
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -53,6 +54,7 @@ func (r *Run) Clone() *Run {
 	if len(r.Steps) > 0 {
 		clone.Steps = append([]Step(nil), r.Steps...)
 	}
+	clone.ToolCalls = copyToolCalls(r.ToolCalls)
 
 	return &clone
 }
@@ -122,6 +124,12 @@ func (r *Run) CompleteWithResult(now time.Time, summary string) error {
 	r.FailureReason = ""
 
 	return nil
+}
+
+// RecordToolCalls replaces the stored tool call history with detached bounded records.
+func (r *Run) RecordToolCalls(now time.Time, calls []ToolCall) {
+	r.ToolCalls = copyToolCalls(calls)
+	r.UpdatedAt = now
 }
 
 // Fail marks the run as failed.

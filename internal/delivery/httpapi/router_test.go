@@ -254,6 +254,47 @@ func TestRunResponseOmitsZeroEndedAt(t *testing.T) {
 	}
 }
 
+func TestGetRunIncludesToolCalls(t *testing.T) {
+	get := &getRunStub{
+		view: inbound.RunView{
+			ID:     "run_test",
+			Status: "completed",
+			ToolCalls: []inbound.ToolCallView{
+				{
+					Name:      "read_file",
+					Arguments: map[string]string{"path": "README.md"},
+					Result:    "# Demo\n",
+					StartedAt: time.Unix(101, 0).UTC(),
+					EndedAt:   time.Unix(102, 0).UTC(),
+				},
+			},
+			Steps:     []inbound.StepView{},
+			CreatedAt: time.Unix(100, 0).UTC(),
+			UpdatedAt: time.Unix(103, 0).UTC(),
+		},
+	}
+	router := NewRouter(Dependencies{
+		CreateRun: &createRunStub{},
+		ListRuns:  &listRunsStub{},
+		GetRun:    get,
+		CancelRun: &cancelRunStub{},
+	})
+	request := httptest.NewRequest(http.MethodGet, "/v1/runs/run_test", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"tool_calls":[{"name":"read_file"`) {
+		t.Fatalf("response missing tool_calls: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"path":"README.md"`) {
+		t.Fatalf("response missing tool arguments: %s", response.Body.String())
+	}
+}
+
 type createRunStub struct {
 	called   bool
 	command  inbound.CreateRunCommand
@@ -283,10 +324,17 @@ func (s *listRunsStub) ListRuns(context.Context) ([]inbound.RunView, error) {
 	return nil, nil
 }
 
-type getRunStub struct{}
+type getRunStub struct {
+	view inbound.RunView
+	err  error
+}
 
 func (s *getRunStub) GetRun(context.Context, inbound.GetRunQuery) (inbound.RunView, error) {
-	return inbound.RunView{}, nil
+	if s.err != nil {
+		return inbound.RunView{}, s.err
+	}
+
+	return s.view, nil
 }
 
 type cancelRunStub struct{}

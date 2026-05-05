@@ -29,6 +29,15 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	item.Status = run.StatusRunning
 	item.ResultSummary = "model output"
 	item.FailureReason = "model failed"
+	item.ToolCalls = []run.ToolCall{
+		{
+			Name:      "run_shell",
+			Arguments: map[string]string{"command": "pwd"},
+			Result:    "exit_code: 0",
+			StartedAt: time.Unix(104, 0).UTC(),
+			EndedAt:   time.Unix(105, 0).UTC(),
+		},
+	}
 	item.Steps = []run.Step{
 		{
 			Name:      "execute",
@@ -61,6 +70,16 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	}
 	if len(view.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(view.Steps))
+	}
+	if len(view.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(view.ToolCalls))
+	}
+	if view.ToolCalls[0].Arguments["command"] != "pwd" {
+		t.Fatalf("ToolCalls[0] command = %q, want pwd", view.ToolCalls[0].Arguments["command"])
+	}
+	view.ToolCalls[0].Arguments["command"] = "changed"
+	if item.ToolCalls[0].Arguments["command"] != "pwd" {
+		t.Fatalf("domain tool call command = %q, want pwd", item.ToolCalls[0].Arguments["command"])
 	}
 	if view.Steps[0].EndedAt == nil || !view.Steps[0].EndedAt.Equal(endedAt) {
 		t.Fatalf("EndedAt = %v, want %v", view.Steps[0].EndedAt, endedAt)

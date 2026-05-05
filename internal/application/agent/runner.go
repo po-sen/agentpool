@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
@@ -17,6 +18,7 @@ type Runner struct {
 	model    outbound.ModelClient
 	tools    outbound.ToolRunner
 	maxTurns int
+	clock    func() time.Time
 }
 
 // RunnerOption configures a Runner.
@@ -33,12 +35,24 @@ type RunRequest struct {
 type RunResult struct {
 	Summary       string
 	ToolCallCount int
+	ToolCalls     []ToolCallRecord
+}
+
+// ToolCallRecord captures one tool execution observed by the agent loop.
+type ToolCallRecord struct {
+	Name      string
+	Arguments map[string]string
+	Result    string
+	IsError   bool
+	StartedAt time.Time
+	EndedAt   time.Time
 }
 
 type runSession struct {
 	request       RunRequest
 	messages      []outbound.ModelMessage
 	toolCallCount int
+	toolCalls     []ToolCallRecord
 }
 
 // NewRunner creates an application agent runner.
@@ -47,6 +61,9 @@ func NewRunner(model outbound.ModelClient, tools outbound.ToolRunner, options ..
 		model:    model,
 		tools:    tools,
 		maxTurns: defaultMaxTurns,
+		clock: func() time.Time {
+			return time.Now().UTC()
+		},
 	}
 
 	for _, option := range options {
@@ -54,6 +71,15 @@ func NewRunner(model outbound.ModelClient, tools outbound.ToolRunner, options ..
 	}
 
 	return runner
+}
+
+// WithClock injects a time source for tests.
+func WithClock(clock func() time.Time) RunnerOption {
+	return func(runner *Runner) {
+		if clock != nil {
+			runner.clock = clock
+		}
+	}
 }
 
 // WithMaxTurns configures the maximum number of model turns per run.
@@ -119,7 +145,7 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 	parsed := parseAction(response.Content)
 	switch parsed.status {
 	case actionParseNaturalLanguage:
-		return RunResult{Summary: response.Content, ToolCallCount: session.toolCallCount}, true, nil
+		return session.finalResult(response.Content), true, nil
 	case actionParseProtocolError:
 		session.messages = append(session.messages,
 			outbound.ModelMessage{Role: "assistant", Content: response.Content},
@@ -137,7 +163,11 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 func (r *Runner) handleAction(ctx context.Context, session *runSession, content string, parsed action) (RunResult, bool, error) {
 	switch parsed.Type {
 	case actionTypeFinal:
-		return finalResult(parsed.Summary, session.toolCallCount)
+		if err := validateFinalSummary(parsed.Summary); err != nil {
+			return RunResult{}, false, err
+		}
+
+		return session.finalResult(parsed.Summary), true, nil
 	case actionTypeToolCall:
 		return r.handleToolCall(ctx, session, content, parsed)
 	default:
@@ -145,12 +175,20 @@ func (r *Runner) handleAction(ctx context.Context, session *runSession, content 
 	}
 }
 
-func finalResult(summary string, toolCallCount int) (RunResult, bool, error) {
+func (s *runSession) finalResult(summary string) RunResult {
+	return RunResult{
+		Summary:       summary,
+		ToolCallCount: s.toolCallCount,
+		ToolCalls:     copyToolCallRecords(s.toolCalls),
+	}
+}
+
+func validateFinalSummary(summary string) error {
 	if strings.TrimSpace(summary) == "" {
-		return RunResult{}, false, errors.New("agent final summary is required")
+		return errors.New("agent final summary is required")
 	}
 
-	return RunResult{Summary: summary, ToolCallCount: toolCallCount}, true, nil
+	return nil
 }
 
 func protocolCorrectionMessage() string {
@@ -173,16 +211,22 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 		return RunResult{}, false, nil
 	}
 
-	result, err := r.tools.RunTool(ctx, outbound.ToolCall{
+	startedAt := r.clock()
+	call := outbound.ToolCall{
 		RunID:     session.request.RunID,
 		Context:   session.request.Context,
 		Name:      parsed.Tool,
 		Arguments: parsed.Arguments,
-	})
+	}
+	result, err := r.tools.RunTool(ctx, call)
+	endedAt := r.clock()
 	if err != nil {
+		session.recordToolCall(parsed.Tool, parsed.Arguments, "tool execution failed", true, startedAt, endedAt)
+
 		return RunResult{}, false, err
 	}
 	session.toolCallCount++
+	session.recordToolCall(parsed.Tool, parsed.Arguments, result.Content, result.IsError, startedAt, endedAt)
 
 	session.messages = append(session.messages, outbound.ModelMessage{
 		Role:    "user",
@@ -190,6 +234,52 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 	})
 
 	return RunResult{}, false, nil
+}
+
+func (s *runSession) recordToolCall(
+	name string,
+	arguments map[string]string,
+	result string,
+	isError bool,
+	startedAt time.Time,
+	endedAt time.Time,
+) {
+	s.toolCalls = append(s.toolCalls, ToolCallRecord{
+		Name:      name,
+		Arguments: copyArguments(arguments),
+		Result:    result,
+		IsError:   isError,
+		StartedAt: startedAt,
+		EndedAt:   endedAt,
+	})
+}
+
+func copyToolCallRecords(records []ToolCallRecord) []ToolCallRecord {
+	if len(records) == 0 {
+		return nil
+	}
+
+	copied := make([]ToolCallRecord, 0, len(records))
+	for _, record := range records {
+		item := record
+		item.Arguments = copyArguments(record.Arguments)
+		copied = append(copied, item)
+	}
+
+	return copied
+}
+
+func copyArguments(arguments map[string]string) map[string]string {
+	if len(arguments) == 0 {
+		return nil
+	}
+
+	copied := make(map[string]string, len(arguments))
+	for key, value := range arguments {
+		copied[key] = value
+	}
+
+	return copied
 }
 
 func toolObservation(tool string, result outbound.ToolResult) string {

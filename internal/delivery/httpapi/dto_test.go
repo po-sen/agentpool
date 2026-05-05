@@ -36,6 +36,15 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 				EndedAt:   &endedAt,
 			},
 		},
+		ToolCalls: []inbound.ToolCallView{
+			{
+				Name:      "run_shell",
+				Arguments: map[string]string{"command": "pwd"},
+				Result:    "exit_code: 0",
+				StartedAt: time.Unix(104, 0).UTC(),
+				EndedAt:   time.Unix(105, 0).UTC(),
+			},
+		},
 		CreatedAt: time.Unix(100, 0).UTC(),
 		UpdatedAt: time.Unix(103, 0).UTC(),
 	}
@@ -65,6 +74,12 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	}
 	if response.Steps[0].EndedAt == nil || !response.Steps[0].EndedAt.Equal(endedAt) {
 		t.Fatalf("EndedAt = %v, want %v", response.Steps[0].EndedAt, endedAt)
+	}
+	if len(response.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(response.ToolCalls))
+	}
+	if response.ToolCalls[0].Arguments["command"] != "pwd" {
+		t.Fatalf("ToolCalls[0] command = %q, want pwd", response.ToolCalls[0].Arguments["command"])
 	}
 }
 
@@ -250,5 +265,84 @@ func TestRunResponseJSONIncludesAttachmentMetadataOnly(t *testing.T) {
 	}
 	if strings.Contains(got, "# Demo") || strings.Contains(got, "content") {
 		t.Fatalf("response leaked attachment content: %s", got)
+	}
+}
+
+func TestRunResponseJSONIncludesToolCalls(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:     "run_test",
+		Status: "completed",
+		ToolCalls: []inbound.ToolCallView{
+			{
+				Name: "run_shell",
+				Arguments: map[string]string{
+					"command": "pwd && ls -la",
+				},
+				Result:    "exit_code: 0\nstdout:\n/workspace\n",
+				StartedAt: time.Unix(101, 0).UTC(),
+				EndedAt:   time.Unix(102, 0).UTC(),
+			},
+		},
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(103, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"tool_calls":[{"name":"run_shell"`) {
+		t.Fatalf("response does not contain tool_calls: %s", got)
+	}
+	if !strings.Contains(got, `"command":"pwd \u0026\u0026 ls -la"`) {
+		t.Fatalf("response does not contain tool arguments: %s", got)
+	}
+	if !strings.Contains(got, `"result":"exit_code: 0\nstdout:\n/workspace\n"`) {
+		t.Fatalf("response does not contain tool result: %s", got)
+	}
+}
+
+func TestRunResponseJSONOmitsToolCallsWhenEmpty(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:        "run_test",
+		Status:    "completed",
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if strings.Contains(got, `"tool_calls"`) {
+		t.Fatalf("response contains empty tool_calls: %s", got)
+	}
+}
+
+func TestRunResponseJSONIncludesEmptyToolArgumentsObject(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:     "run_test",
+		Status: "completed",
+		ToolCalls: []inbound.ToolCallView{
+			{
+				Name:      "list_files",
+				Result:    "files:\nREADME.md",
+				StartedAt: time.Unix(101, 0).UTC(),
+				EndedAt:   time.Unix(102, 0).UTC(),
+			},
+		},
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(103, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"arguments":{}`) {
+		t.Fatalf("response does not contain empty arguments object: %s", got)
 	}
 }

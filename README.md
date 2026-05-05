@@ -349,6 +349,31 @@ Final answers use:
 
 Tools are dynamically advertised. Runs without the required context do not expose unavailable tools to the model. Workspace path is separate from sandbox state, and sandbox execution is reserved for future side-effectful tools.
 
+## Tool Call History
+
+Completed runs expose in-memory `tool_calls` so users can inspect what the agent actually did. Each record includes the tool name, arguments, bounded result content, error flag, and start/end timestamps.
+
+Example response snippet:
+
+```json
+{
+  "tool_calls": [
+    {
+      "name": "run_shell",
+      "arguments": {
+        "command": "pwd && ls -la"
+      },
+      "result": "exit_code: 0\nstdout:\n/workspace\n...",
+      "is_error": false,
+      "started_at": "2026-05-04T16:59:50Z",
+      "ended_at": "2026-05-04T17:00:22Z"
+    }
+  ]
+}
+```
+
+This is useful for verifying `list_files`, `read_file`, and dev Docker `run_shell` execution. Shell stdout, stderr, timeout, and exit code are included because the shell tool formats them into the tool result. Tool call history is stored only in the current in-memory run state for now, and each result is truncated before it is stored.
+
 Example prompt:
 
 ```text

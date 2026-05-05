@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
@@ -29,6 +30,9 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 	}
 	if result.ToolCallCount != 0 {
 		t.Fatalf("ToolCallCount = %d, want 0", result.ToolCallCount)
+	}
+	if len(result.ToolCalls) != 0 {
+		t.Fatalf("len(ToolCalls) = %d, want 0", len(result.ToolCalls))
 	}
 	if model.requests[0].RunID != "run_test" {
 		t.Fatalf("model RunID = %s, want run_test", model.requests[0].RunID)
@@ -65,7 +69,10 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunner()
-	runner := NewRunner(model, tools)
+	runner := NewRunner(model, tools, WithClock(sequenceClock(
+		timeUnix(101),
+		timeUnix(102),
+	)))
 
 	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
@@ -84,33 +91,18 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	if result.ToolCallCount != 1 {
 		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
 	}
-	if len(tools.listRequests) != 1 {
-		t.Fatalf("len(list requests) = %d, want 1", len(tools.listRequests))
-	}
-	if tools.listRequests[0].Context.WorkspacePath != "/tmp/workspace" {
-		t.Fatalf("list tools workspace path = %q, want /tmp/workspace", tools.listRequests[0].Context.WorkspacePath)
-	}
-	if len(tools.calls) != 1 {
-		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
-	}
-	if tools.calls[0].Name != "echo" {
-		t.Fatalf("tool name = %q, want echo", tools.calls[0].Name)
-	}
-	if tools.calls[0].Arguments["text"] != "hello" {
-		t.Fatalf("tool text = %q, want hello", tools.calls[0].Arguments["text"])
-	}
-	if tools.calls[0].Context.Sandbox.ID != "sandbox_test" {
-		t.Fatalf("tool sandbox = %q, want sandbox_test", tools.calls[0].Context.Sandbox.ID)
-	}
-	if tools.calls[0].Context.WorkspacePath != "/tmp/workspace" {
-		t.Fatalf("tool workspace path = %q, want /tmp/workspace", tools.calls[0].Context.WorkspacePath)
-	}
+	assertEchoToolRecord(t, result.ToolCalls)
+	assertEchoToolInvocation(t, tools)
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
 	}
 	lastMessages := model.requests[1].Messages
 	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", `"type":"tool_call"`)
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool result for echo:\nhello")
+	tools.calls[0].Arguments["text"] = "changed"
+	if result.ToolCalls[0].Arguments["text"] != "hello" {
+		t.Fatalf("record text after mutation = %q, want hello", result.ToolCalls[0].Arguments["text"])
+	}
 }
 
 func TestRunnerFeedsUnknownToolResultBackToModel(t *testing.T) {
@@ -135,6 +127,18 @@ func TestRunnerFeedsUnknownToolResultBackToModel(t *testing.T) {
 	}
 	if result.ToolCallCount != 1 {
 		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(result.ToolCalls))
+	}
+	if result.ToolCalls[0].Name != "missing" {
+		t.Fatalf("tool record name = %q, want missing", result.ToolCalls[0].Name)
+	}
+	if result.ToolCalls[0].Result != "unknown tool: missing" {
+		t.Fatalf("tool record result = %q, want unknown tool", result.ToolCalls[0].Result)
+	}
+	if !result.ToolCalls[0].IsError {
+		t.Fatal("tool record IsError = false, want true")
 	}
 	lastMessages := model.requests[1].Messages
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool error for missing:\nunknown tool: missing")
@@ -353,6 +357,25 @@ func TestRunnerPropagatesListToolsErrors(t *testing.T) {
 var errModelFailed = errors.New("model failed")
 var errListToolsFailed = errors.New("list tools failed")
 
+func timeUnix(seconds int64) time.Time {
+	return time.Unix(seconds, 0).UTC()
+}
+
+func sequenceClock(times ...time.Time) func() time.Time {
+	index := 0
+
+	return func() time.Time {
+		if index >= len(times) {
+			return times[len(times)-1]
+		}
+
+		value := times[index]
+		index++
+
+		return value
+	}
+}
+
 type recordingModelClient struct {
 	requests  []outbound.ModelRequest
 	responses []outbound.ModelResponse
@@ -411,5 +434,58 @@ func assertMessage(t *testing.T, message outbound.ModelMessage, role string, con
 	}
 	if !strings.Contains(message.Content, contentContains) {
 		t.Fatalf("Content = %q, want to contain %q", message.Content, contentContains)
+	}
+}
+
+func assertEchoToolRecord(t *testing.T, records []ToolCallRecord) {
+	t.Helper()
+
+	if len(records) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(records))
+	}
+	record := records[0]
+	if record.Name != "echo" {
+		t.Fatalf("record name = %q, want echo", record.Name)
+	}
+	if record.Arguments["text"] != "hello" {
+		t.Fatalf("record text = %q, want hello", record.Arguments["text"])
+	}
+	if record.Result != "hello" {
+		t.Fatalf("record result = %q, want hello", record.Result)
+	}
+	if record.IsError {
+		t.Fatal("record IsError = true, want false")
+	}
+	if !record.StartedAt.Equal(timeUnix(101)) {
+		t.Fatalf("StartedAt = %v, want %v", record.StartedAt, timeUnix(101))
+	}
+	if !record.EndedAt.Equal(timeUnix(102)) {
+		t.Fatalf("EndedAt = %v, want %v", record.EndedAt, timeUnix(102))
+	}
+}
+
+func assertEchoToolInvocation(t *testing.T, tools *fakeToolRunner) {
+	t.Helper()
+
+	if len(tools.listRequests) != 1 {
+		t.Fatalf("len(list requests) = %d, want 1", len(tools.listRequests))
+	}
+	if tools.listRequests[0].Context.WorkspacePath != "/tmp/workspace" {
+		t.Fatalf("list tools workspace path = %q, want /tmp/workspace", tools.listRequests[0].Context.WorkspacePath)
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	}
+	if tools.calls[0].Name != "echo" {
+		t.Fatalf("tool name = %q, want echo", tools.calls[0].Name)
+	}
+	if tools.calls[0].Arguments["text"] != "hello" {
+		t.Fatalf("tool text = %q, want hello", tools.calls[0].Arguments["text"])
+	}
+	if tools.calls[0].Context.Sandbox.ID != "sandbox_test" {
+		t.Fatalf("tool sandbox = %q, want sandbox_test", tools.calls[0].Context.Sandbox.ID)
+	}
+	if tools.calls[0].Context.WorkspacePath != "/tmp/workspace" {
+		t.Fatalf("tool workspace path = %q, want /tmp/workspace", tools.calls[0].Context.WorkspacePath)
 	}
 }

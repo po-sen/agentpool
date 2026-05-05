@@ -89,6 +89,18 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 	if stored.ResultSummary != "done with tool" {
 		t.Fatalf("stored result summary = %q, want done with tool", stored.ResultSummary)
 	}
+	if len(stored.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(stored.ToolCalls))
+	}
+	if stored.ToolCalls[0].Name != "echo" {
+		t.Fatalf("tool call name = %q, want echo", stored.ToolCalls[0].Name)
+	}
+	if stored.ToolCalls[0].Arguments["text"] != "hello" {
+		t.Fatalf("tool call text = %q, want hello", stored.ToolCalls[0].Arguments["text"])
+	}
+	if stored.ToolCalls[0].Result != "tool result" {
+		t.Fatalf("tool call result = %q, want tool result", stored.ToolCalls[0].Result)
+	}
 	assertSteps(t, stored.Steps, []wantStep{
 		{
 			name:    "prepare",
@@ -103,6 +115,54 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 			ended:   true,
 		},
 	})
+}
+
+func TestWorkerStoresFileAndShellToolCallHistory(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	workspace := &recordingWorkspaceProvider{path: "/tmp/workspace"}
+	sandbox := &recordingSandboxProvider{
+		supportsCommands: true,
+		sandbox:          outbound.Sandbox{ID: "sandbox_test", SupportsCommands: true},
+	}
+	now := time.Unix(100, 0).UTC()
+
+	queueRunWithTask(ctx, t, repo, queue, textAttachmentTask(), now)
+
+	worker := newWorkerWithWorkspaceAndSandbox(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(&fileAndShellToolCallingModelClient{}, fakeToolRunner{}),
+		workspace,
+		sandbox,
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored := findRun(ctx, t, repo, "run_test")
+	if len(stored.ToolCalls) != 3 {
+		t.Fatalf("len(ToolCalls) = %d, want 3", len(stored.ToolCalls))
+	}
+	wantNames := []string{"list_files", "read_file", "run_shell"}
+	for i, want := range wantNames {
+		if stored.ToolCalls[i].Name != want {
+			t.Fatalf("ToolCalls[%d].Name = %q, want %q", i, stored.ToolCalls[i].Name, want)
+		}
+	}
+	if stored.ToolCalls[1].Arguments["path"] != "README.md" {
+		t.Fatalf("read_file path = %q, want README.md", stored.ToolCalls[1].Arguments["path"])
+	}
+	if stored.ToolCalls[2].Arguments["command"] != "pwd && ls -la" {
+		t.Fatalf("run_shell command = %q, want pwd && ls -la", stored.ToolCalls[2].Arguments["command"])
+	}
+	if stored.ToolCalls[2].Result != "exit_code: 0\nstdout:\n/workspace\n" {
+		t.Fatalf("run_shell result = %q, want shell output", stored.ToolCalls[2].Result)
+	}
 }
 
 func TestWorkerPassesEmptyRuntimeContextToAgentTools(t *testing.T) {
@@ -889,6 +949,31 @@ func (c *toolCallingModelClient) Generate(context.Context, outbound.ModelRequest
 	return outbound.ModelResponse{Content: `{"type":"final","summary":"done with tool"}`}, nil
 }
 
+type fileAndShellToolCallingModelClient struct {
+	calls int
+}
+
+func (c *fileAndShellToolCallingModelClient) Generate(
+	context.Context,
+	outbound.ModelRequest,
+) (outbound.ModelResponse, error) {
+	c.calls++
+	switch c.calls {
+	case 1:
+		return outbound.ModelResponse{Content: `{"type":"tool_call","tool":"list_files","arguments":{}}`}, nil
+	case 2:
+		return outbound.ModelResponse{
+			Content: `{"type":"tool_call","tool":"read_file","arguments":{"path":"README.md"}}`,
+		}, nil
+	case 3:
+		return outbound.ModelResponse{
+			Content: `{"type":"tool_call","tool":"run_shell","arguments":{"command":"pwd && ls -la"}}`,
+		}, nil
+	default:
+		return outbound.ModelResponse{Content: `{"type":"final","summary":"done with tools"}`}, nil
+	}
+}
+
 type cancellingModelClient struct {
 	repo *fakeRunRepository
 	id   run.RunID
@@ -1049,8 +1134,17 @@ func (r fakeToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]
 	return []outbound.ToolDefinition{{Name: "echo", Description: "Returns text"}}, nil
 }
 
-func (r fakeToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound.ToolResult, error) {
-	return outbound.ToolResult{Content: "tool result"}, nil
+func (r fakeToolRunner) RunTool(_ context.Context, call outbound.ToolCall) (outbound.ToolResult, error) {
+	switch call.Name {
+	case "list_files":
+		return outbound.ToolResult{Content: "files:\nREADME.md"}, nil
+	case "read_file":
+		return outbound.ToolResult{Content: "# Demo\n"}, nil
+	case "run_shell":
+		return outbound.ToolResult{Content: "exit_code: 0\nstdout:\n/workspace\n"}, nil
+	default:
+		return outbound.ToolResult{Content: "tool result"}, nil
+	}
 }
 
 type recordingWorkflowToolRunner struct {

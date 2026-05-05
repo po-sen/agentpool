@@ -369,6 +369,7 @@ func (w *Worker) completeRun(
 ) error {
 	now := w.clock()
 	expectedStatus := item.Status
+	item.RecordToolCalls(now, toDomainToolCalls(result.ToolCalls))
 	if err := item.CompleteWithResult(now, result.Summary); err != nil {
 		return err
 	}
@@ -451,4 +452,37 @@ func agentCompletedMessage(toolCallCount int) string {
 	}
 
 	return fmt.Sprintf("Agent generated result summary after %d tool call(s)", toolCallCount)
+}
+
+func toDomainToolCalls(records []agent.ToolCallRecord) []run.ToolCall {
+	if len(records) == 0 {
+		return nil
+	}
+
+	calls := make([]run.ToolCall, 0, len(records))
+	for _, record := range records {
+		calls = append(calls, run.ToolCall{
+			Name:      record.Name,
+			Arguments: copyToolArguments(record.Arguments),
+			Result:    record.Result,
+			IsError:   record.IsError,
+			StartedAt: record.StartedAt,
+			EndedAt:   record.EndedAt,
+		})
+	}
+
+	return calls
+}
+
+func copyToolArguments(arguments map[string]string) map[string]string {
+	if len(arguments) == 0 {
+		return nil
+	}
+
+	copied := make(map[string]string, len(arguments))
+	for key, value := range arguments {
+		copied[key] = value
+	}
+
+	return copied
 }

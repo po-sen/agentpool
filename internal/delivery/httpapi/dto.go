@@ -20,6 +20,7 @@ type runResponse struct {
 	Result        *runResultResponse `json:"result,omitempty"`
 	FailureReason string             `json:"failure_reason,omitempty"`
 	Steps         []stepResponse     `json:"steps"`
+	ToolCalls     []toolCallResponse `json:"tool_calls,omitempty"`
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
 }
@@ -50,6 +51,15 @@ type stepResponse struct {
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
 }
 
+type toolCallResponse struct {
+	Name      string            `json:"name"`
+	Arguments map[string]string `json:"arguments"`
+	Result    string            `json:"result"`
+	IsError   bool              `json:"is_error"`
+	StartedAt time.Time         `json:"started_at"`
+	EndedAt   time.Time         `json:"ended_at"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -73,6 +83,17 @@ func toRunResponse(item inbound.RunView) runResponse {
 			SizeBytes: attachment.SizeBytes,
 		})
 	}
+	toolCalls := make([]toolCallResponse, 0, len(item.ToolCalls))
+	for _, call := range item.ToolCalls {
+		toolCalls = append(toolCalls, toolCallResponse{
+			Name:      call.Name,
+			Arguments: toolCallArgumentsResponse(call.Arguments),
+			Result:    call.Result,
+			IsError:   call.IsError,
+			StartedAt: call.StartedAt,
+			EndedAt:   call.EndedAt,
+		})
+	}
 	response := runResponse{
 		ID:     item.ID,
 		Status: item.Status,
@@ -85,6 +106,7 @@ func toRunResponse(item inbound.RunView) runResponse {
 		},
 		FailureReason: item.FailureReason,
 		Steps:         steps,
+		ToolCalls:     toolCalls,
 		CreatedAt:     item.CreatedAt,
 		UpdatedAt:     item.UpdatedAt,
 	}
@@ -93,4 +115,12 @@ func toRunResponse(item inbound.RunView) runResponse {
 	}
 
 	return response
+}
+
+func toolCallArgumentsResponse(arguments map[string]string) map[string]string {
+	if arguments != nil {
+		return arguments
+	}
+
+	return map[string]string{}
 }

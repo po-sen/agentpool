@@ -12,6 +12,7 @@ type RunView struct {
 	Result        RunResultView
 	FailureReason string
 	Steps         []StepView
+	ToolCalls     []ToolCallView
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -35,6 +36,16 @@ type AttachmentView struct {
 	Filename  string
 	MediaType string
 	SizeBytes int64
+}
+
+// ToolCallView is the application-level representation of a tool execution.
+type ToolCallView struct {
+	Name      string
+	Arguments map[string]string
+	Result    string
+	IsError   bool
+	StartedAt time.Time
+	EndedAt   time.Time
 }
 
 // StepView is the application-level representation of a run step.

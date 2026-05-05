@@ -33,6 +33,15 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 				EndedAt:   &endedAt,
 			},
 		},
+		ToolCalls: []ToolCallView{
+			{
+				Name:      "read_file",
+				Arguments: map[string]string{"path": "README.md"},
+				Result:    "# Demo\n",
+				StartedAt: time.Unix(104, 0).UTC(),
+				EndedAt:   time.Unix(105, 0).UTC(),
+			},
+		},
 		CreatedAt: time.Unix(100, 0).UTC(),
 		UpdatedAt: time.Unix(103, 0).UTC(),
 	}
@@ -54,5 +63,8 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	}
 	if view.Steps[0].EndedAt == nil || !view.Steps[0].EndedAt.Equal(endedAt) {
 		t.Fatalf("EndedAt = %v, want %v", view.Steps[0].EndedAt, endedAt)
+	}
+	if view.ToolCalls[0].Arguments["path"] != "README.md" {
+		t.Fatalf("ToolCalls[0] path = %q, want README.md", view.ToolCalls[0].Arguments["path"])
 	}
 }
