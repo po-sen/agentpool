@@ -154,19 +154,19 @@ func (w *Worker) ProcessOne(ctx context.Context) error {
 func (w *Worker) processRun(ctx context.Context, item *run.Run) error {
 	workspace, err := w.prepareRun(ctx, item)
 	if err != nil {
-		return w.failUnlessStateChanged(ctx, item, err)
+		return w.failUnlessStateChanged(ctx, item, agent.RunResult{}, err)
 	}
 	defer w.cleanupWorkspace(ctx, workspace)
 
 	sandbox, err := w.prepareSandbox(ctx, item, workspace)
 	if err != nil {
-		return w.failUnlessStateChanged(ctx, item, err)
+		return w.failUnlessStateChanged(ctx, item, agent.RunResult{}, err)
 	}
 	defer w.cleanupSandbox(ctx, sandbox)
 
 	result, err := w.startRun(ctx, item, workspace, sandbox)
 	if err != nil {
-		return w.failUnlessStateChanged(ctx, item, err)
+		return w.failUnlessStateChanged(ctx, item, result, err)
 	}
 	if err := w.completeRun(ctx, item, result); err != nil {
 		return ignoreRunStateChanged(err)
@@ -175,12 +175,17 @@ func (w *Worker) processRun(ctx context.Context, item *run.Run) error {
 	return nil
 }
 
-func (w *Worker) failUnlessStateChanged(ctx context.Context, item *run.Run, err error) error {
+func (w *Worker) failUnlessStateChanged(
+	ctx context.Context,
+	item *run.Run,
+	result agent.RunResult,
+	err error,
+) error {
 	if errors.Is(err, errRunStateChanged) {
 		return nil
 	}
 
-	return w.failRun(ctx, item, err)
+	return w.failRun(ctx, item, result, err)
 }
 
 func ignoreRunStateChanged(err error) error {
@@ -286,7 +291,7 @@ func (w *Worker) startRun(
 	})
 
 	if err != nil {
-		return agent.RunResult{}, err
+		return result, err
 	}
 
 	now = w.clock()
@@ -380,15 +385,17 @@ func (w *Worker) completeRun(
 	return w.publish(ctx, outbound.EventRunCompleted, item.ID, now)
 }
 
-func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error {
+func (w *Worker) failRun(ctx context.Context, item *run.Run, result agent.RunResult, cause error) error {
 	now := w.clock()
 	expectedStatus := item.Status
+	item.RecordToolCalls(now, toDomainToolCalls(result.ToolCalls))
+	code, message := failureDiagnosticsFor(item, cause)
 	if name, ok := latestRunningStepName(item); ok {
 		if err := item.FailStep(name, failedStepMessage(name), now); err != nil {
 			return errors.Join(cause, err)
 		}
 	}
-	if err := item.FailWithReason(now, publicFailureReason); err != nil {
+	if err := item.FailWithDiagnostics(now, publicFailureReason, code, message); err != nil {
 		return errors.Join(cause, err)
 	}
 	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
@@ -403,6 +410,47 @@ func (w *Worker) failRun(ctx context.Context, item *run.Run, cause error) error 
 	}
 
 	return nil
+}
+
+func failureDiagnosticsFor(item *run.Run, cause error) (string, string) {
+	var agentErr agent.Error
+	if errors.As(cause, &agentErr) {
+		return domainFailureCode(agentErr.Code), agentErr.Message
+	}
+	if item.Status == run.StatusPreparing || stepWasRunning(item, prepareStepName) {
+		return run.FailureCodePreparationFailed, "preparation failed"
+	}
+
+	return run.FailureCodeUnknown, publicFailureReason
+}
+
+func domainFailureCode(code agent.ErrorCode) string {
+	switch code {
+	case agent.ErrorCodeModelGenerateFailed:
+		return run.FailureCodeModelGenerateFailed
+	case agent.ErrorCodeToolListFailed:
+		return run.FailureCodeToolListFailed
+	case agent.ErrorCodeToolExecutionFailed:
+		return run.FailureCodeToolExecutionFailed
+	case agent.ErrorCodeAgentMaxTurns:
+		return run.FailureCodeAgentMaxTurns
+	case agent.ErrorCodeFinalSummaryInvalid:
+		return run.FailureCodeFinalSummaryInvalid
+	case agent.ErrorCodeAgentProtocolError:
+		return run.FailureCodeAgentProtocolError
+	default:
+		return run.FailureCodeUnknown
+	}
+}
+
+func stepWasRunning(item *run.Run, name string) bool {
+	for _, step := range item.Steps {
+		if step.Name == name && step.Status == run.StatusRunning {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (w *Worker) publish(ctx context.Context, eventType string, id run.RunID, occurredAt time.Time) error {

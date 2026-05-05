@@ -29,6 +29,8 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	item.Status = run.StatusRunning
 	item.ResultSummary = "model output"
 	item.FailureReason = "model failed"
+	item.FailureCode = run.FailureCodeToolExecutionFailed
+	item.FailureMessage = "tool execution failed"
 	item.ToolCalls = []run.ToolCall{
 		{
 			Name:      "read_file",
@@ -67,6 +69,12 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	}
 	if view.FailureReason != item.FailureReason {
 		t.Fatalf("FailureReason = %q, want %q", view.FailureReason, item.FailureReason)
+	}
+	if view.FailureCode != item.FailureCode {
+		t.Fatalf("FailureCode = %q, want %q", view.FailureCode, item.FailureCode)
+	}
+	if view.FailureMessage != item.FailureMessage {
+		t.Fatalf("FailureMessage = %q, want %q", view.FailureMessage, item.FailureMessage)
 	}
 	if len(view.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(view.Steps))

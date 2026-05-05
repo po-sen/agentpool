@@ -111,7 +111,7 @@ Completed runs include the one-shot model response summary:
 }
 ```
 
-Failed runs may include the failure reason:
+Failed runs keep the public `failure_reason` sanitized and may include safe diagnostics:
 
 ```json
 {
@@ -122,6 +122,8 @@ Failed runs may include the failure reason:
     "prompt": "Summarize the current task"
   },
   "failure_reason": "run failed",
+  "failure_code": "agent_max_turns",
+  "failure_message": "agent reached max turns",
   "steps": [
     {
       "name": "prepare",
@@ -142,6 +144,31 @@ Failed runs may include the failure reason:
   "updated_at": "2026-04-30T08:00:01Z"
 }
 ```
+
+## Failed Run Diagnostics
+
+`failure_code` is a safe machine-readable code, and `failure_message` is a short safe explanation. Raw provider errors, stack traces, API keys, and hidden provider details are intentionally not exposed through the API.
+
+Failed runs can include partial `tool_calls` when the agent invoked tools before failing:
+
+```json
+{
+  "status": "failed",
+  "failure_reason": "run failed",
+  "failure_code": "agent_max_turns",
+  "failure_message": "agent reached max turns",
+  "tool_calls": [
+    {
+      "name": "list_files",
+      "arguments": {},
+      "result": "files:\nREADME.md",
+      "is_error": false
+    }
+  ]
+}
+```
+
+Diagnostics are stored only in the current in-memory run state for now. There is no streaming, persistent database, or raw internal/provider error log in the HTTP API.
 
 Cancel a run:
 
@@ -351,7 +378,7 @@ Tools are dynamically advertised. Runs without the required context do not expos
 
 ## Tool Call History
 
-Completed runs expose in-memory `tool_calls` so users can inspect what the agent actually did. Each record includes the tool name, arguments, bounded result content, error flag, and start/end timestamps.
+Completed runs, and failed runs with available partial history, expose in-memory `tool_calls` so users can inspect what the agent actually did. Each record includes the tool name, arguments, bounded result content, error flag, and start/end timestamps.
 
 Example response snippet:
 

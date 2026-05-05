@@ -44,6 +44,8 @@ func TestRunCompleteWithResultStoresSummary(t *testing.T) {
 		t.Fatalf("start running: %v", err)
 	}
 	item.FailureReason = "previous failure"
+	item.FailureCode = FailureCodeModelGenerateFailed
+	item.FailureMessage = "model generation failed"
 
 	err := item.CompleteWithResult(now.Add(2*time.Second), "model output")
 	if err != nil {
@@ -56,6 +58,12 @@ func TestRunCompleteWithResultStoresSummary(t *testing.T) {
 	}
 	if item.FailureReason != "" {
 		t.Fatalf("FailureReason = %q, want empty", item.FailureReason)
+	}
+	if item.FailureCode != "" {
+		t.Fatalf("FailureCode = %q, want empty", item.FailureCode)
+	}
+	if item.FailureMessage != "" {
+		t.Fatalf("FailureMessage = %q, want empty", item.FailureMessage)
 	}
 }
 
@@ -75,6 +83,39 @@ func TestRunFailWithReasonStoresFailureReason(t *testing.T) {
 	assertStatus(t, item, StatusFailed)
 	if item.FailureReason != "model failed" {
 		t.Fatalf("FailureReason = %q, want %q", item.FailureReason, "model failed")
+	}
+	if item.ResultSummary != "" {
+		t.Fatalf("ResultSummary = %q, want empty", item.ResultSummary)
+	}
+}
+
+func TestRunFailWithDiagnosticsStoresSafeFailureDetails(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	item := newRun(t, now)
+	if err := item.StartRunning(now.Add(time.Second)); err != nil {
+		t.Fatalf("start running: %v", err)
+	}
+	item.ResultSummary = "stale result"
+
+	err := item.FailWithDiagnostics(
+		now.Add(2*time.Second),
+		"run failed",
+		FailureCodeAgentMaxTurns,
+		"agent reached max turns",
+	)
+	if err != nil {
+		t.Fatalf("fail with diagnostics: %v", err)
+	}
+
+	assertStatus(t, item, StatusFailed)
+	if item.FailureReason != "run failed" {
+		t.Fatalf("FailureReason = %q, want run failed", item.FailureReason)
+	}
+	if item.FailureCode != FailureCodeAgentMaxTurns {
+		t.Fatalf("FailureCode = %q, want %q", item.FailureCode, FailureCodeAgentMaxTurns)
+	}
+	if item.FailureMessage != "agent reached max turns" {
+		t.Fatalf("FailureMessage = %q, want agent reached max turns", item.FailureMessage)
 	}
 	if item.ResultSummary != "" {
 		t.Fatalf("ResultSummary = %q, want empty", item.ResultSummary)
@@ -112,6 +153,32 @@ func TestRunResultMethodsRejectInvalidTransitionsWithoutMutatingOutput(t *testin
 	}
 	if item.FailureReason != "" {
 		t.Fatalf("FailureReason = %q, want empty", item.FailureReason)
+	}
+	if item.FailureCode != "" {
+		t.Fatalf("FailureCode = %q, want empty", item.FailureCode)
+	}
+	if item.FailureMessage != "" {
+		t.Fatalf("FailureMessage = %q, want empty", item.FailureMessage)
+	}
+}
+
+func TestRunCloneCopiesFailureDiagnostics(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	item := newRun(t, now)
+	item.FailureReason = "run failed"
+	item.FailureCode = FailureCodeToolExecutionFailed
+	item.FailureMessage = "tool execution failed"
+
+	clone := item.Clone()
+
+	if clone.FailureReason != item.FailureReason {
+		t.Fatalf("clone FailureReason = %q, want %q", clone.FailureReason, item.FailureReason)
+	}
+	if clone.FailureCode != item.FailureCode {
+		t.Fatalf("clone FailureCode = %q, want %q", clone.FailureCode, item.FailureCode)
+	}
+	if clone.FailureMessage != item.FailureMessage {
+		t.Fatalf("clone FailureMessage = %q, want %q", clone.FailureMessage, item.FailureMessage)
 	}
 }
 

@@ -291,18 +291,20 @@ func TestRunnerReturnsErrorWhenMaxTurnsExceeded(t *testing.T) {
 		responses: []outbound.ModelResponse{{Content: `{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}`}},
 	}
 	tools := newFakeToolRunner()
-	runner := NewRunner(model, tools, WithMaxTurns(1))
+	runner := NewRunner(model, tools, WithMaxTurns(1), WithClock(sequenceClock(
+		timeUnix(101),
+		timeUnix(102),
+	)))
 
-	_, err := runner.Run(context.Background(), RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "max turns") {
-		t.Fatalf("Run() error = %v, want max turns error", err)
-	}
+	assertAgentErrorCode(t, err, ErrorCodeAgentMaxTurns)
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
+	assertEchoToolRecord(t, result.ToolCalls)
 }
 
 func TestRunnerReturnsErrorWhenProtocolErrorsExceedMaxTurns(t *testing.T) {
@@ -316,9 +318,7 @@ func TestRunnerReturnsErrorWhenProtocolErrorsExceedMaxTurns(t *testing.T) {
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "max turns") {
-		t.Fatalf("Run() error = %v, want max turns error", err)
-	}
+	assertAgentErrorCode(t, err, ErrorCodeAgentMaxTurns)
 	if len(tools.calls) != 0 {
 		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
 	}
@@ -335,6 +335,29 @@ func TestRunnerPropagatesModelErrors(t *testing.T) {
 	if !errors.Is(err, errModelFailed) {
 		t.Fatalf("Run() error = %v, want %v", err, errModelFailed)
 	}
+	assertAgentErrorCode(t, err, ErrorCodeModelGenerateFailed)
+}
+
+func TestRunnerReturnsPartialToolCallsWhenModelFailsAfterToolCall(t *testing.T) {
+	model := &failingAfterToolModelClient{}
+	tools := newFakeToolRunner()
+	runner := NewRunner(model, tools, WithClock(sequenceClock(
+		timeUnix(101),
+		timeUnix(102),
+	)))
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if !errors.Is(err, errModelFailed) {
+		t.Fatalf("Run() error = %v, want %v", err, errModelFailed)
+	}
+	assertAgentErrorCode(t, err, ErrorCodeModelGenerateFailed)
+	if result.ToolCallCount != 1 {
+		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
+	}
+	assertEchoToolRecord(t, result.ToolCalls)
 }
 
 func TestRunnerPropagatesListToolsErrors(t *testing.T) {
@@ -349,13 +372,67 @@ func TestRunnerPropagatesListToolsErrors(t *testing.T) {
 	if !errors.Is(err, errListToolsFailed) {
 		t.Fatalf("Run() error = %v, want %v", err, errListToolsFailed)
 	}
+	assertAgentErrorCode(t, err, ErrorCodeToolListFailed)
 	if len(model.requests) != 0 {
 		t.Fatalf("len(model requests) = %d, want 0", len(model.requests))
 	}
 }
 
+func TestRunnerRecordsToolExecutionErrorAndReturnsPartialResult(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}`},
+		},
+	}
+	tools := &fakeToolRunner{runErr: errToolRunFailed}
+	runner := NewRunner(model, tools, WithClock(sequenceClock(
+		timeUnix(101),
+		timeUnix(102),
+	)))
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if !errors.Is(err, errToolRunFailed) {
+		t.Fatalf("Run() error = %v, want %v", err, errToolRunFailed)
+	}
+	assertAgentErrorCode(t, err, ErrorCodeToolExecutionFailed)
+	if result.ToolCallCount != 0 {
+		t.Fatalf("ToolCallCount = %d, want 0", result.ToolCallCount)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(result.ToolCalls))
+	}
+	record := result.ToolCalls[0]
+	if record.Result != "tool execution failed" {
+		t.Fatalf("record result = %q, want tool execution failed", record.Result)
+	}
+	if !record.IsError {
+		t.Fatal("record IsError = false, want true")
+	}
+	if !record.StartedAt.Equal(timeUnix(101)) || !record.EndedAt.Equal(timeUnix(102)) {
+		t.Fatalf("record timestamps = %v/%v, want deterministic clock", record.StartedAt, record.EndedAt)
+	}
+}
+
+func TestRunnerReturnsFinalSummaryInvalidForEmptyNaturalLanguageOutput(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{{Content: "   "}},
+	}
+	runner := NewRunner(model, newFakeToolRunner())
+
+	_, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+
+	assertAgentErrorCode(t, err, ErrorCodeFinalSummaryInvalid)
+}
+
 var errModelFailed = errors.New("model failed")
 var errListToolsFailed = errors.New("list tools failed")
+var errToolRunFailed = errors.New("tool failed")
 
 func timeUnix(seconds int64) time.Time {
 	return time.Unix(seconds, 0).UTC()
@@ -382,6 +459,24 @@ type recordingModelClient struct {
 	err       error
 }
 
+type failingAfterToolModelClient struct {
+	calls int
+}
+
+func (c *failingAfterToolModelClient) Generate(
+	context.Context,
+	outbound.ModelRequest,
+) (outbound.ModelResponse, error) {
+	c.calls++
+	if c.calls == 1 {
+		return outbound.ModelResponse{
+			Content: `{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}`,
+		}, nil
+	}
+
+	return outbound.ModelResponse{}, errModelFailed
+}
+
 func (c *recordingModelClient) Generate(_ context.Context, request outbound.ModelRequest) (outbound.ModelResponse, error) {
 	c.requests = append(c.requests, request)
 	if c.err != nil {
@@ -396,6 +491,7 @@ func (c *recordingModelClient) Generate(_ context.Context, request outbound.Mode
 
 type fakeToolRunner struct {
 	listErr      error
+	runErr       error
 	listRequests []outbound.ToolListRequest
 	calls        []outbound.ToolCall
 }
@@ -419,11 +515,26 @@ func (r *fakeToolRunner) ListTools(_ context.Context, request outbound.ToolListR
 
 func (r *fakeToolRunner) RunTool(_ context.Context, call outbound.ToolCall) (outbound.ToolResult, error) {
 	r.calls = append(r.calls, call)
+	if r.runErr != nil {
+		return outbound.ToolResult{}, r.runErr
+	}
 	if call.Name != "echo" {
 		return outbound.ToolResult{Content: "unknown tool: " + call.Name, IsError: true}, nil
 	}
 
 	return outbound.ToolResult{Content: call.Arguments["text"]}, nil
+}
+
+func assertAgentErrorCode(t *testing.T, err error, code ErrorCode) {
+	t.Helper()
+
+	var agentErr Error
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("Run() error = %T %v, want agent Error", err, err)
+	}
+	if agentErr.Code != code {
+		t.Fatalf("agent Error.Code = %q, want %q", agentErr.Code, code)
+	}
 }
 
 func assertMessage(t *testing.T, message outbound.ModelMessage, role string, contentContains string) {

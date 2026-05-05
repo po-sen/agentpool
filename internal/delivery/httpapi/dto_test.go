@@ -26,7 +26,9 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 		Result: inbound.RunResultView{
 			Summary: "model output",
 		},
-		FailureReason: "model failed",
+		FailureReason:  "model failed",
+		FailureCode:    "model_generate_failed",
+		FailureMessage: "model generation failed",
 		Steps: []inbound.StepView{
 			{
 				Name:      "execute",
@@ -68,6 +70,12 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	}
 	if response.FailureReason != view.FailureReason {
 		t.Fatalf("FailureReason = %q, want %q", response.FailureReason, view.FailureReason)
+	}
+	if response.FailureCode != view.FailureCode {
+		t.Fatalf("FailureCode = %q, want %q", response.FailureCode, view.FailureCode)
+	}
+	if response.FailureMessage != view.FailureMessage {
+		t.Fatalf("FailureMessage = %q, want %q", response.FailureMessage, view.FailureMessage)
 	}
 	if len(response.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(response.Steps))
@@ -165,20 +173,28 @@ func TestRunResponseJSONIncludesCompletedSteps(t *testing.T) {
 
 func TestRunResponseJSONIncludesFailureReason(t *testing.T) {
 	payload, err := json.Marshal(toRunResponse(inbound.RunView{
-		ID:            "run_test",
-		Status:        "failed",
-		FailureReason: "model generation failed",
-		Steps:         []inbound.StepView{},
-		CreatedAt:     time.Unix(100, 0).UTC(),
-		UpdatedAt:     time.Unix(101, 0).UTC(),
+		ID:             "run_test",
+		Status:         "failed",
+		FailureReason:  "run failed",
+		FailureCode:    "model_generate_failed",
+		FailureMessage: "model generation failed",
+		Steps:          []inbound.StepView{},
+		CreatedAt:      time.Unix(100, 0).UTC(),
+		UpdatedAt:      time.Unix(101, 0).UTC(),
 	}))
 	if err != nil {
 		t.Fatalf("marshal response: %v", err)
 	}
 
 	got := string(payload)
-	if !strings.Contains(got, `"failure_reason":"model generation failed"`) {
+	if !strings.Contains(got, `"failure_reason":"run failed"`) {
 		t.Fatalf("response does not contain failure reason: %s", got)
+	}
+	if !strings.Contains(got, `"failure_code":"model_generate_failed"`) {
+		t.Fatalf("response does not contain failure code: %s", got)
+	}
+	if !strings.Contains(got, `"failure_message":"model generation failed"`) {
+		t.Fatalf("response does not contain failure message: %s", got)
 	}
 }
 

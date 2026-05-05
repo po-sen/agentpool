@@ -52,3 +52,22 @@ var ErrStepAlreadyEnded = errors.New("run step already ended")
 
 // ErrInvalidStepName is returned when a run step name is empty.
 var ErrInvalidStepName = errors.New("run step name is required")
+
+const (
+	// FailureCodeUnknown is used when the failure source is not safely classified.
+	FailureCodeUnknown = "unknown"
+	// FailureCodeModelGenerateFailed identifies a model generation failure.
+	FailureCodeModelGenerateFailed = "model_generate_failed"
+	// FailureCodeAgentMaxTurns identifies an agent loop max-turns failure.
+	FailureCodeAgentMaxTurns = "agent_max_turns"
+	// FailureCodeAgentProtocolError identifies an unrecoverable agent protocol failure.
+	FailureCodeAgentProtocolError = "agent_protocol_error"
+	// FailureCodeFinalSummaryInvalid identifies an invalid final summary failure.
+	FailureCodeFinalSummaryInvalid = "final_summary_invalid"
+	// FailureCodeToolExecutionFailed identifies a tool execution failure.
+	FailureCodeToolExecutionFailed = "tool_execution_failed"
+	// FailureCodeToolListFailed identifies a tool discovery failure.
+	FailureCodeToolListFailed = "tool_list_failed"
+	// FailureCodePreparationFailed identifies a run preparation failure.
+	FailureCodePreparationFailed = "preparation_failed"
+)

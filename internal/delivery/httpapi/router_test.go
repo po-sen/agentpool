@@ -295,6 +295,55 @@ func TestGetRunIncludesToolCalls(t *testing.T) {
 	}
 }
 
+func TestGetRunIncludesFailureDiagnosticsAndPartialToolCalls(t *testing.T) {
+	get := &getRunStub{
+		view: inbound.RunView{
+			ID:             "run_test",
+			Status:         "failed",
+			FailureReason:  "run failed",
+			FailureCode:    "tool_execution_failed",
+			FailureMessage: "tool execution failed",
+			ToolCalls: []inbound.ToolCallView{
+				{
+					Name:      "run_shell",
+					Arguments: map[string]string{"command": "pwd"},
+					Result:    "tool execution failed",
+					IsError:   true,
+					StartedAt: time.Unix(101, 0).UTC(),
+					EndedAt:   time.Unix(102, 0).UTC(),
+				},
+			},
+			Steps:     []inbound.StepView{},
+			CreatedAt: time.Unix(100, 0).UTC(),
+			UpdatedAt: time.Unix(103, 0).UTC(),
+		},
+	}
+	router := NewRouter(Dependencies{
+		CreateRun: &createRunStub{},
+		ListRuns:  &listRunsStub{},
+		GetRun:    get,
+		CancelRun: &cancelRunStub{},
+	})
+	request := httptest.NewRequest(http.MethodGet, "/v1/runs/run_test", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"failure_code":"tool_execution_failed"`) {
+		t.Fatalf("response missing failure_code: %s", body)
+	}
+	if !strings.Contains(body, `"failure_message":"tool execution failed"`) {
+		t.Fatalf("response missing failure_message: %s", body)
+	}
+	if !strings.Contains(body, `"tool_calls":[{"name":"run_shell"`) {
+		t.Fatalf("response missing partial tool_calls: %s", body)
+	}
+}
+
 type createRunStub struct {
 	called   bool
 	command  inbound.CreateRunCommand

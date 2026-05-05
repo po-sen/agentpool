@@ -13,6 +13,8 @@ import (
 
 const defaultMaxTurns = 4
 
+var errToolRunnerRequired = errors.New("tool runner is required")
+
 // Runner owns AgentPool's application-level agent behavior.
 type Runner struct {
 	model    outbound.ModelClient
@@ -94,7 +96,11 @@ func WithMaxTurns(maxTurns int) RunnerOption {
 // Run executes the minimal application agent behavior for a run.
 func (r *Runner) Run(ctx context.Context, request RunRequest) (RunResult, error) {
 	if r.tools == nil {
-		return RunResult{}, errors.New("tool runner is required")
+		return RunResult{}, newAgentError(
+			ErrorCodeUnknown,
+			errToolRunnerRequired.Error(),
+			errToolRunnerRequired,
+		)
 	}
 
 	session, err := r.newRunSession(ctx, request)
@@ -105,14 +111,14 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (RunResult, error)
 	for range r.maxTurns {
 		result, done, err := r.runTurn(ctx, session)
 		if err != nil {
-			return RunResult{}, err
+			return result, err
 		}
 		if done {
 			return result, nil
 		}
 	}
 
-	return RunResult{}, errors.New("agent reached max turns")
+	return session.partialResult(), newAgentError(ErrorCodeAgentMaxTurns, "", nil)
 }
 
 func (r *Runner) newRunSession(ctx context.Context, request RunRequest) (*runSession, error) {
@@ -121,7 +127,7 @@ func (r *Runner) newRunSession(ctx context.Context, request RunRequest) (*runSes
 		Context: request.Context,
 	})
 	if err != nil {
-		return nil, err
+		return nil, newAgentError(ErrorCodeToolListFailed, "", err)
 	}
 
 	return &runSession{
@@ -139,12 +145,16 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 		Messages: session.messages,
 	})
 	if err != nil {
-		return RunResult{}, false, err
+		return session.partialResult(), false, newAgentError(ErrorCodeModelGenerateFailed, "", err)
 	}
 
 	parsed := parseAction(response.Content)
 	switch parsed.status {
 	case actionParseNaturalLanguage:
+		if err := validateFinalSummary(response.Content); err != nil {
+			return session.partialResult(), false, newAgentError(ErrorCodeFinalSummaryInvalid, "", err)
+		}
+
 		return session.finalResult(response.Content), true, nil
 	case actionParseProtocolError:
 		session.messages = append(session.messages,
@@ -156,7 +166,11 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 	case actionParseValid:
 		return r.handleAction(ctx, session, response.Content, parsed.action)
 	default:
-		return RunResult{}, false, errors.New("unknown agent action parse status")
+		return session.partialResult(), false, newAgentError(
+			ErrorCodeAgentProtocolError,
+			"",
+			errors.New("unknown agent action parse status"),
+		)
 	}
 }
 
@@ -164,20 +178,31 @@ func (r *Runner) handleAction(ctx context.Context, session *runSession, content 
 	switch parsed.Type {
 	case actionTypeFinal:
 		if err := validateFinalSummary(parsed.Summary); err != nil {
-			return RunResult{}, false, err
+			return session.partialResult(), false, newAgentError(ErrorCodeFinalSummaryInvalid, "", err)
 		}
 
 		return session.finalResult(parsed.Summary), true, nil
 	case actionTypeToolCall:
 		return r.handleToolCall(ctx, session, content, parsed)
 	default:
-		return RunResult{}, false, errors.New("unknown agent action type")
+		return session.partialResult(), false, newAgentError(
+			ErrorCodeAgentProtocolError,
+			"",
+			errors.New("unknown agent action type"),
+		)
 	}
 }
 
 func (s *runSession) finalResult(summary string) RunResult {
 	return RunResult{
 		Summary:       summary,
+		ToolCallCount: s.toolCallCount,
+		ToolCalls:     copyToolCallRecords(s.toolCalls),
+	}
+}
+
+func (s *runSession) partialResult() RunResult {
+	return RunResult{
 		ToolCallCount: s.toolCallCount,
 		ToolCalls:     copyToolCallRecords(s.toolCalls),
 	}
@@ -223,7 +248,7 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 	if err != nil {
 		session.recordToolCall(parsed.Tool, parsed.Arguments, "tool execution failed", true, startedAt, endedAt)
 
-		return RunResult{}, false, err
+		return session.partialResult(), false, newAgentError(ErrorCodeToolExecutionFailed, "", err)
 	}
 	session.toolCallCount++
 	session.recordToolCall(parsed.Tool, parsed.Arguments, result.Content, result.IsError, startedAt, endedAt)

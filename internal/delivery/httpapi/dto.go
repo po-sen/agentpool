@@ -14,15 +14,17 @@ type createRunRequest struct {
 }
 
 type runResponse struct {
-	ID            string             `json:"id"`
-	Status        string             `json:"status"`
-	Task          taskResponse       `json:"task"`
-	Result        *runResultResponse `json:"result,omitempty"`
-	FailureReason string             `json:"failure_reason,omitempty"`
-	Steps         []stepResponse     `json:"steps"`
-	ToolCalls     []toolCallResponse `json:"tool_calls,omitempty"`
-	CreatedAt     time.Time          `json:"created_at"`
-	UpdatedAt     time.Time          `json:"updated_at"`
+	ID             string             `json:"id"`
+	Status         string             `json:"status"`
+	Task           taskResponse       `json:"task"`
+	Result         *runResultResponse `json:"result,omitempty"`
+	FailureReason  string             `json:"failure_reason,omitempty"`
+	FailureCode    string             `json:"failure_code,omitempty"`
+	FailureMessage string             `json:"failure_message,omitempty"`
+	Steps          []stepResponse     `json:"steps"`
+	ToolCalls      []toolCallResponse `json:"tool_calls,omitempty"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
 }
 
 type runResultResponse struct {
@@ -104,11 +106,13 @@ func toRunResponse(item inbound.RunView) runResponse {
 			Branch:        item.Task.Branch,
 			Attachments:   attachments,
 		},
-		FailureReason: item.FailureReason,
-		Steps:         steps,
-		ToolCalls:     toolCalls,
-		CreatedAt:     item.CreatedAt,
-		UpdatedAt:     item.UpdatedAt,
+		FailureReason:  item.FailureReason,
+		FailureCode:    item.FailureCode,
+		FailureMessage: item.FailureMessage,
+		Steps:          steps,
+		ToolCalls:      toolCalls,
+		CreatedAt:      item.CreatedAt,
+		UpdatedAt:      item.UpdatedAt,
 	}
 	if item.Result.Summary != "" {
 		response.Result = &runResultResponse{Summary: item.Result.Summary}

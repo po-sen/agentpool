@@ -23,7 +23,9 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 		Result: RunResultView{
 			Summary: "model output",
 		},
-		FailureReason: "model failed",
+		FailureReason:  "model failed",
+		FailureCode:    "model_generate_failed",
+		FailureMessage: "model generation failed",
 		Steps: []StepView{
 			{
 				Name:      "execute",
@@ -60,6 +62,12 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	}
 	if view.FailureReason != "model failed" {
 		t.Fatalf("FailureReason = %q, want model failed", view.FailureReason)
+	}
+	if view.FailureCode != "model_generate_failed" {
+		t.Fatalf("FailureCode = %q, want model_generate_failed", view.FailureCode)
+	}
+	if view.FailureMessage != "model generation failed" {
+		t.Fatalf("FailureMessage = %q, want model generation failed", view.FailureMessage)
 	}
 	if view.Steps[0].EndedAt == nil || !view.Steps[0].EndedAt.Equal(endedAt) {
 		t.Fatalf("EndedAt = %v, want %v", view.Steps[0].EndedAt, endedAt)

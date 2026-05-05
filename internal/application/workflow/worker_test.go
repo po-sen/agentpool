@@ -498,6 +498,15 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 	if stored.FailureReason == errModelGenerationFailed.Error() {
 		t.Fatalf("stored failure reason exposes raw error: %q", stored.FailureReason)
 	}
+	if stored.FailureCode != run.FailureCodeModelGenerateFailed {
+		t.Fatalf("stored failure code = %q, want %q", stored.FailureCode, run.FailureCodeModelGenerateFailed)
+	}
+	if stored.FailureMessage != "model generation failed" {
+		t.Fatalf("stored failure message = %q, want model generation failed", stored.FailureMessage)
+	}
+	if stored.FailureMessage == errModelGenerationFailed.Error() {
+		t.Fatalf("stored failure message exposes raw error: %q", stored.FailureMessage)
+	}
 	if stored.ResultSummary != "" {
 		t.Fatalf("stored result summary = %q, want empty", stored.ResultSummary)
 	}
@@ -518,6 +527,121 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 
 	assertEventNotPublished(t, publisher.events, outbound.EventRunCompleted)
 	assertEventPublished(t, publisher.events, outbound.EventRunFailed)
+}
+
+func TestWorkerProcessOneStoresPartialToolCallsWhenModelFailsAfterToolCall(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item := queueRun(ctx, t, repo, queue, now)
+
+	worker := newWorkerWithModel(
+		queue,
+		repo,
+		publisher,
+		now,
+		&modelFailingAfterToolClient{},
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored := findRun(ctx, t, repo, item.ID)
+	if stored.Status != run.StatusFailed {
+		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusFailed)
+	}
+	if stored.FailureCode != run.FailureCodeModelGenerateFailed {
+		t.Fatalf("stored failure code = %q, want %q", stored.FailureCode, run.FailureCodeModelGenerateFailed)
+	}
+	if len(stored.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(stored.ToolCalls))
+	}
+	if stored.ToolCalls[0].Name != "echo" {
+		t.Fatalf("tool call name = %q, want echo", stored.ToolCalls[0].Name)
+	}
+	if stored.ToolCalls[0].IsError {
+		t.Fatal("tool call IsError = true, want false")
+	}
+}
+
+func TestWorkerProcessOneStoresToolExecutionFailureDiagnosticsAndToolCall(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item := queueRun(ctx, t, repo, queue, now)
+
+	tools := &recordingWorkflowToolRunner{runErr: errToolExecutionFailed}
+	worker := newWorkerWithAgent(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(&toolCallingModelClient{}, tools),
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored := findRun(ctx, t, repo, item.ID)
+	if stored.Status != run.StatusFailed {
+		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusFailed)
+	}
+	if stored.FailureCode != run.FailureCodeToolExecutionFailed {
+		t.Fatalf("stored failure code = %q, want %q", stored.FailureCode, run.FailureCodeToolExecutionFailed)
+	}
+	if stored.FailureMessage != "tool execution failed" {
+		t.Fatalf("stored failure message = %q, want tool execution failed", stored.FailureMessage)
+	}
+	if len(stored.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(stored.ToolCalls))
+	}
+	if !stored.ToolCalls[0].IsError {
+		t.Fatal("tool call IsError = false, want true")
+	}
+	if stored.ToolCalls[0].Result != "tool execution failed" {
+		t.Fatalf("tool call result = %q, want tool execution failed", stored.ToolCalls[0].Result)
+	}
+}
+
+func TestWorkerProcessOneStoresMaxTurnsFailureCode(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item := queueRun(ctx, t, repo, queue, now)
+
+	worker := newWorkerWithAgent(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(&toolCallingModelClient{}, fakeToolRunner{}, applicationagent.WithMaxTurns(1)),
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored := findRun(ctx, t, repo, item.ID)
+	if stored.Status != run.StatusFailed {
+		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusFailed)
+	}
+	if stored.FailureCode != run.FailureCodeAgentMaxTurns {
+		t.Fatalf("stored failure code = %q, want %q", stored.FailureCode, run.FailureCodeAgentMaxTurns)
+	}
+	if stored.FailureMessage != "agent reached max turns" {
+		t.Fatalf("stored failure message = %q, want agent reached max turns", stored.FailureMessage)
+	}
+	if len(stored.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(stored.ToolCalls))
+	}
 }
 
 func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
@@ -551,6 +675,12 @@ func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
 	}
 	if stored.FailureReason != "run failed" {
 		t.Fatalf("stored failure reason = %q, want run failed", stored.FailureReason)
+	}
+	if stored.FailureCode != run.FailureCodePreparationFailed {
+		t.Fatalf("stored failure code = %q, want %q", stored.FailureCode, run.FailureCodePreparationFailed)
+	}
+	if stored.FailureMessage != "preparation failed" {
+		t.Fatalf("stored failure message = %q, want preparation failed", stored.FailureMessage)
 	}
 	assertSteps(t, stored.Steps, []wantStep{
 		{
@@ -949,6 +1079,24 @@ func (c *toolCallingModelClient) Generate(context.Context, outbound.ModelRequest
 	return outbound.ModelResponse{Content: `{"type":"final","summary":"done with tool"}`}, nil
 }
 
+type modelFailingAfterToolClient struct {
+	calls int
+}
+
+func (c *modelFailingAfterToolClient) Generate(
+	context.Context,
+	outbound.ModelRequest,
+) (outbound.ModelResponse, error) {
+	c.calls++
+	if c.calls == 1 {
+		return outbound.ModelResponse{
+			Content: `{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}`,
+		}, nil
+	}
+
+	return outbound.ModelResponse{}, errModelGenerationFailed
+}
+
 type fileAndShellToolCallingModelClient struct {
 	calls int
 }
@@ -1150,6 +1298,7 @@ func (r fakeToolRunner) RunTool(_ context.Context, call outbound.ToolCall) (outb
 type recordingWorkflowToolRunner struct {
 	listRequests []outbound.ToolListRequest
 	calls        []outbound.ToolCall
+	runErr       error
 }
 
 func (r *recordingWorkflowToolRunner) ListTools(
@@ -1163,6 +1312,9 @@ func (r *recordingWorkflowToolRunner) ListTools(
 
 func (r *recordingWorkflowToolRunner) RunTool(_ context.Context, call outbound.ToolCall) (outbound.ToolResult, error) {
 	r.calls = append(r.calls, call)
+	if r.runErr != nil {
+		return outbound.ToolResult{}, r.runErr
+	}
 
 	return outbound.ToolResult{Content: "tool result"}, nil
 }
@@ -1178,6 +1330,7 @@ func (p *recordingPublisher) Publish(_ context.Context, event outbound.Event) er
 }
 
 var errPublishFailed = errors.New("publish failed")
+var errToolExecutionFailed = errors.New("tool failed: secret value")
 
 type failingPublisher struct {
 	failOn string
