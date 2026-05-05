@@ -56,9 +56,9 @@ func NewRunner(cfg Config) *Runner {
 	}
 }
 
-// ListTools exposes file tools only when a workspace path is available.
+// ListTools exposes file tools only when uploaded files are available in the workspace.
 func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
-	if request.Context.WorkspacePath == "" {
+	if request.Context.WorkspacePath == "" || !request.Context.WorkspaceHasFiles {
 		return nil, nil
 	}
 

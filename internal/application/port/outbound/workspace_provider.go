@@ -14,7 +14,8 @@ type WorkspacePrepareRequest struct {
 
 // Workspace describes a prepared runtime workspace.
 type Workspace struct {
-	Path string
+	Path     string
+	HasFiles bool
 }
 
 // WorkspaceProvider prepares and cleans up ephemeral run workspaces.

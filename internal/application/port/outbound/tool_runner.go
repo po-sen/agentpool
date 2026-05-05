@@ -14,8 +14,9 @@ type ToolDefinition struct {
 
 // ToolContext carries application execution context visible to tools.
 type ToolContext struct {
-	WorkspacePath string
-	Sandbox       Sandbox
+	WorkspacePath     string
+	WorkspaceHasFiles bool
+	Sandbox           Sandbox
 }
 
 // ToolListRequest contains context needed to list available tools.

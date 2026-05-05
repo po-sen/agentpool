@@ -30,6 +30,9 @@ func TestPrepareWorkspaceWritesAttachments(t *testing.T) {
 	if workspace.Path == "" {
 		t.Fatal("workspace path is empty")
 	}
+	if !workspace.HasFiles {
+		t.Fatal("workspace HasFiles = false, want true")
+	}
 
 	content, err := os.ReadFile(filepath.Join(workspace.Path, "README.md"))
 	if err != nil {
@@ -86,7 +89,7 @@ func TestCleanupWorkspaceRemovesDirectory(t *testing.T) {
 	}
 }
 
-func TestPrepareWorkspaceReturnsEmptyForNoAttachments(t *testing.T) {
+func TestPrepareWorkspaceCreatesEmptyWorkspaceForNoAttachments(t *testing.T) {
 	baseDir := t.TempDir()
 	provider := NewProvider(Config{BaseDir: baseDir})
 
@@ -94,15 +97,27 @@ func TestPrepareWorkspaceReturnsEmptyForNoAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrepareWorkspace() error = %v", err)
 	}
-	if workspace.Path != "" {
-		t.Fatalf("workspace path = %q, want empty", workspace.Path)
+	if workspace.Path == "" {
+		t.Fatal("workspace path is empty")
+	}
+	if workspace.HasFiles {
+		t.Fatal("workspace HasFiles = true, want false")
+	}
+	if _, err := os.Stat(workspace.Path); err != nil {
+		t.Fatalf("stat empty workspace: %v", err)
 	}
 
 	entries, err := os.ReadDir(baseDir)
 	if err != nil {
 		t.Fatalf("read base dir: %v", err)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("base dir entries = %d, want 0", len(entries))
+	if len(entries) != 1 {
+		t.Fatalf("base dir entries = %d, want 1", len(entries))
+	}
+	if err := provider.CleanupWorkspace(context.Background(), workspace); err != nil {
+		t.Fatalf("CleanupWorkspace() error = %v", err)
+	}
+	if _, err := os.Stat(workspace.Path); !os.IsNotExist(err) {
+		t.Fatalf("workspace path still exists or stat error = %v", err)
 	}
 }

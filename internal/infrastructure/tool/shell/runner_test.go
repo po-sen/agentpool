@@ -71,6 +71,24 @@ func TestListToolsRequiresSandboxAndWorkspace(t *testing.T) {
 	}
 }
 
+func TestListToolsAllowsEmptyWorkspaceWithCommandSandbox(t *testing.T) {
+	runner := newTestRunner(t, &recordingCommandRunner{})
+
+	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{
+		Context: outbound.ToolContext{
+			WorkspacePath:     "/tmp/workspace",
+			WorkspaceHasFiles: false,
+			Sandbox:           commandCapableSandbox(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "run_shell" {
+		t.Fatalf("tools = %#v, want run_shell", tools)
+	}
+}
+
 func TestRunToolExecutesSandboxCommand(t *testing.T) {
 	commands := &recordingCommandRunner{
 		result: outbound.SandboxCommandResult{

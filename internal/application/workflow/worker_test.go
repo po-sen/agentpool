@@ -195,32 +195,43 @@ func TestWorkerStoresFileAndShellToolCallHistory(t *testing.T) {
 	})
 }
 
-func TestWorkerPassesEmptyRuntimeContextToAgentTools(t *testing.T) {
+func TestWorkerPassesPromptOnlyWorkspaceContextToAgentTools(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	queue := &fakeRunQueue{}
 	publisher := &recordingPublisher{}
+	workspace := &recordingWorkspaceProvider{path: "/tmp/workspace"}
 	now := time.Unix(100, 0).UTC()
 
 	queueRun(ctx, t, repo, queue, now)
 
 	tools := &recordingWorkflowToolRunner{}
-	worker := newWorkerWithAgent(
+	worker := newWorkerWithWorkspace(
 		queue,
 		repo,
 		publisher,
 		now,
 		applicationagent.NewRunner(&toolCallingModelClient{}, tools),
+		workspace,
 	)
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
 
+	if !workspace.prepareCalled {
+		t.Fatal("workspace prepare was not called")
+	}
+	if !workspace.cleanupCalled {
+		t.Fatal("workspace cleanup was not called")
+	}
 	if len(tools.listRequests) == 0 {
 		t.Fatal("tool list request was not recorded")
 	}
-	if tools.listRequests[0].Context.WorkspacePath != "" {
-		t.Fatalf("list workspace path = %q, want empty", tools.listRequests[0].Context.WorkspacePath)
+	if tools.listRequests[0].Context.WorkspacePath != workspace.path {
+		t.Fatalf("list workspace path = %q, want %q", tools.listRequests[0].Context.WorkspacePath, workspace.path)
+	}
+	if tools.listRequests[0].Context.WorkspaceHasFiles {
+		t.Fatal("list workspace HasFiles = true, want false")
 	}
 	if tools.listRequests[0].Context.Sandbox.ID != "" {
 		t.Fatalf("list sandbox id = %q, want empty", tools.listRequests[0].Context.Sandbox.ID)
@@ -228,15 +239,18 @@ func TestWorkerPassesEmptyRuntimeContextToAgentTools(t *testing.T) {
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
-	if tools.calls[0].Context.WorkspacePath != "" {
-		t.Fatalf("tool workspace path = %q, want empty", tools.calls[0].Context.WorkspacePath)
+	if tools.calls[0].Context.WorkspacePath != workspace.path {
+		t.Fatalf("tool workspace path = %q, want %q", tools.calls[0].Context.WorkspacePath, workspace.path)
+	}
+	if tools.calls[0].Context.WorkspaceHasFiles {
+		t.Fatal("tool workspace HasFiles = true, want false")
 	}
 	if tools.calls[0].Context.Sandbox.ID != "" {
 		t.Fatalf("tool sandbox id = %q, want empty", tools.calls[0].Context.Sandbox.ID)
 	}
 }
 
-func TestWorkerDoesNotPrepareWorkspaceWithoutAttachments(t *testing.T) {
+func TestWorkerPreparesWorkspaceWithoutAttachments(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	queue := &fakeRunQueue{}
@@ -257,19 +271,23 @@ func TestWorkerDoesNotPrepareWorkspaceWithoutAttachments(t *testing.T) {
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
-	if workspace.prepareCalled {
-		t.Fatal("workspace prepare was called")
+	if !workspace.prepareCalled {
+		t.Fatal("workspace prepare was not called")
 	}
-	if workspace.cleanupCalled {
-		t.Fatal("workspace cleanup was called")
+	if len(workspace.attachments) != 0 {
+		t.Fatalf("workspace attachments = %#v, want none", workspace.attachments)
+	}
+	if !workspace.cleanupCalled {
+		t.Fatal("workspace cleanup was not called")
 	}
 }
 
-func TestWorkerDoesNotPrepareSandboxForPromptOnlyRun(t *testing.T) {
+func TestWorkerPreparesCommandSandboxForPromptOnlyRun(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	queue := &fakeRunQueue{}
 	publisher := &recordingPublisher{}
+	workspace := &recordingWorkspaceProvider{path: "/tmp/workspace"}
 	sandbox := &recordingSandboxProvider{supportsCommands: true}
 	now := time.Unix(100, 0).UTC()
 
@@ -281,11 +299,48 @@ func TestWorkerDoesNotPrepareSandboxForPromptOnlyRun(t *testing.T) {
 		publisher,
 		now,
 		applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
-		&recordingWorkspaceProvider{path: "/tmp/workspace"},
+		workspace,
 		sandbox,
 	)
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
+	}
+	if !sandbox.prepareCalled {
+		t.Fatal("sandbox prepare was not called")
+	}
+	if sandbox.workspacePath != workspace.path {
+		t.Fatalf("sandbox workspace path = %q, want %q", sandbox.workspacePath, workspace.path)
+	}
+	if !sandbox.cleanupCalled {
+		t.Fatal("sandbox cleanup was not called")
+	}
+}
+
+func TestWorkerDoesNotPrepareNoopSandboxForPromptOnlyRun(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	workspace := &recordingWorkspaceProvider{path: "/tmp/workspace"}
+	sandbox := &recordingSandboxProvider{supportsCommands: false}
+	now := time.Unix(100, 0).UTC()
+
+	queueRun(ctx, t, repo, queue, now)
+
+	worker := newWorkerWithWorkspaceAndSandbox(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
+		workspace,
+		sandbox,
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+	if !workspace.prepareCalled {
+		t.Fatal("workspace prepare was not called")
 	}
 	if sandbox.prepareCalled {
 		t.Fatal("sandbox prepare was called")
@@ -349,11 +404,17 @@ func TestWorkerPreparesWorkspaceForAttachmentsAndPassesPathToAgentTools(t *testi
 	if tools.listRequests[0].Context.WorkspacePath != workspace.path {
 		t.Fatalf("list workspace path = %q, want %q", tools.listRequests[0].Context.WorkspacePath, workspace.path)
 	}
+	if !tools.listRequests[0].Context.WorkspaceHasFiles {
+		t.Fatal("list workspace HasFiles = false, want true")
+	}
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
 	if tools.calls[0].Context.WorkspacePath != workspace.path {
 		t.Fatalf("tool workspace path = %q, want %q", tools.calls[0].Context.WorkspacePath, workspace.path)
+	}
+	if !tools.calls[0].Context.WorkspaceHasFiles {
+		t.Fatal("tool workspace HasFiles = false, want true")
 	}
 	if tools.calls[0].Context.Sandbox.ID != "" {
 		t.Fatalf("tool sandbox id = %q, want empty", tools.calls[0].Context.Sandbox.ID)
@@ -1025,6 +1086,7 @@ func newWorkerWithAgent(
 			StateStore: repo,
 			Events:     publisher,
 			Agent:      agentRunner,
+			Workspace:  &recordingWorkspaceProvider{path: "/tmp/workspace"},
 			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
@@ -1328,7 +1390,7 @@ func (p *recordingWorkspaceProvider) PrepareWorkspace(
 	p.runID = request.RunID
 	p.attachments = append([]run.TaskAttachment(nil), request.Attachments...)
 
-	return outbound.Workspace{Path: p.path}, nil
+	return outbound.Workspace{Path: p.path, HasFiles: len(request.Attachments) > 0}, nil
 }
 
 func (p *recordingWorkspaceProvider) CleanupWorkspace(ctx context.Context, _ outbound.Workspace) error {

@@ -38,10 +38,6 @@ func (p *Provider) PrepareWorkspace(
 	_ context.Context,
 	request outbound.WorkspacePrepareRequest,
 ) (outbound.Workspace, error) {
-	if len(request.Attachments) == 0 {
-		return outbound.Workspace{}, nil
-	}
-
 	root, err := os.MkdirTemp(p.baseDir, "agentpool-run-"+safeRunID(request.RunID.String())+"-")
 	if err != nil {
 		return outbound.Workspace{}, err
@@ -60,7 +56,7 @@ func (p *Provider) PrepareWorkspace(
 		}
 	}
 
-	return outbound.Workspace{Path: root}, nil
+	return outbound.Workspace{Path: root, HasFiles: len(request.Attachments) > 0}, nil
 }
 
 // CleanupWorkspace removes a prepared temp workspace.

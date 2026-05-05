@@ -12,7 +12,7 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - The default sandbox provider is noop. A dev-only Docker sandbox can be enabled explicitly to verify sandbox-backed shell commands.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol and read-only uploaded-file tools. The default runtime has no command-capable sandbox and does not expose `run_shell`.
+- Agent loop v1 supports a minimal JSON action protocol, read-only uploaded-file tools, and opt-in dev Docker `run_shell`. The default runtime has no command-capable sandbox and does not expose `run_shell`.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -338,9 +338,9 @@ Use `openai_compatible` with a local or internal endpoint for air-gapped environ
 
 The current MVP supports prompt-only JSON runs and multipart runs with already-authorized uploaded text files. `repository_url` and `branch` are metadata only.
 
-Product applications own file authorization, file selection, and product ACLs before submitting a run. AgentPool receives the selected files, writes them to an ephemeral per-run temp workspace, and exposes only read-only file tools to the agent.
+Product applications own file authorization, file selection, and product ACLs before submitting a run. AgentPool creates an ephemeral per-run temp workspace for every run. Prompt-only runs get an empty workspace; uploaded-file runs get a workspace populated with the selected files.
 
-Prompt-only JSON runs still prepare no workspace:
+Prompt-only JSON runs prepare an empty workspace:
 
 ```json
 {
@@ -359,7 +359,7 @@ curl -sS -X POST http://localhost:8080/v1/runs \
 
 Uploaded files are currently limited to UTF-8 text files with safe relative names, at most 10 files, 1 MiB per file, and 5 MiB total. Supported extensions are `.txt`, `.md`, `.json`, `.yaml`, `.yml`, `.go`, `.py`, `.js`, and `.ts`.
 
-The runtime does not persist uploaded files beyond the run workspace cleanup. AgentPool does not currently accept archive uploads, mounted directories, or git checkout as workspace input. It does not provide file mutation, workspace diffing, archive materialization, or product file permissions.
+The runtime does not persist workspace contents beyond cleanup. AgentPool does not currently accept archive uploads, mounted directories, or git checkout as workspace input. It does not provide file mutation, workspace diffing, archive materialization, or product file permissions.
 
 ## Tools
 
@@ -367,9 +367,9 @@ AgentPool has an application-owned tool loop. Models can respond with a JSON `to
 
 The agent protocol accepts only `tool_call` and `final` JSON actions. Models should return exactly one JSON object with no markdown fences. For compatibility, AgentPool normalizes whole-response fenced JSON blocks and simple scalar values that can safely become strings, such as `{"type":"final","summary":true}` becoming summary `"true"` and numeric tool arguments becoming string arguments. AgentPool does not extract JSON from arbitrary prose. Unknown JSON action types, malformed JSON, unsupported fields, nested argument values, or multiple JSON objects are rejected as protocol errors with targeted correction feedback. Plain natural-language output is still accepted as a final summary for compatibility with local models.
 
-When uploaded files are present, the agent can discover them with `list_files` and read selected text files with `read_file`. File contents are not injected into the initial prompt by default.
+When uploaded files are present, the agent can discover them with `list_files` and read selected text files with `read_file`. File tools are not advertised for empty prompt-only workspaces. File contents are not injected into the initial prompt by default.
 
-The `run_shell` tool is sandbox-backed and is advertised only when a run has workspace context and a command-capable sandbox. In the default runtime the sandbox provider is `noop`, so `run_shell` is not available.
+The `run_shell` tool is sandbox-backed and is advertised when a run has a workspace path and a command-capable sandbox. Because every run has a workspace, enabling the dev Docker sandbox can expose `run_shell` for prompt-only runs as well as uploaded-file runs. In the default runtime the sandbox provider is `noop`, so `run_shell` is not available.
 
 Tool calls use this provider-neutral shape when a tool is available:
 
@@ -490,6 +490,16 @@ AGENTPOOL_SANDBOX_IMAGE=alpine:3.20 \
 go run ./cmd/agentpool dev
 ```
 
+Submit a prompt-only run that asks the agent to use shell:
+
+```sh
+curl -sS -X POST http://localhost:8080/v1/runs \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Use run_shell to calculate 234 * 887123 with sh."}'
+```
+
+When Docker sandboxing is enabled, `agent_system_prompt` should show `run_shell` under `Available tools`, and the command runs inside Docker with `/workspace` as an empty read-only workspace.
+
 Submit an uploaded-file run that asks the agent to use both file tools and shell when available:
 
 ```sh
@@ -498,13 +508,13 @@ curl -sS -X POST http://localhost:8080/v1/runs \
   -F 'files=@README.md'
 ```
 
-With the default `noop` sandbox, `list_files` and `read_file` are available when files are uploaded, but `run_shell` is unavailable. With `AGENTPOOL_SANDBOX_PROVIDER=docker`, the worker prepares a command-capable sandbox for uploaded-file runs, and `run_shell` runs through:
+With the default `noop` sandbox, `list_files` and `read_file` are available when files are uploaded, but `run_shell` is unavailable. With `AGENTPOOL_SANDBOX_PROVIDER=docker`, the worker prepares a command-capable sandbox for the run workspace, and `run_shell` runs through:
 
 ```text
 docker run --rm --network none -v <workspace>:/workspace:ro -w /workspace <image> /bin/sh -lc <command>
 ```
 
-Docker must be installed and running. The uploaded workspace is mounted read-only at `/workspace`, networking is disabled with `--network none`, and no secrets are passed into the container. This provider is dev-only and does not provide write-back, persistent storage, or production sandbox hardening.
+Docker must be installed and running. The run workspace is mounted read-only at `/workspace`, networking is disabled with `--network none`, and no secrets are passed into the container. This provider is dev-only and does not provide write-back, persistent storage, or production sandbox hardening.
 
 ## Run Lifecycle
 

@@ -285,8 +285,9 @@ func (w *Worker) startRun(
 		RunID: item.ID,
 		Task:  item.Task,
 		Context: outbound.ToolContext{
-			WorkspacePath: workspace.Path,
-			Sandbox:       sandbox,
+			WorkspacePath:     workspace.Path,
+			WorkspaceHasFiles: workspace.HasFiles,
+			Sandbox:           sandbox,
 		},
 	})
 
@@ -307,9 +308,6 @@ func (w *Worker) startRun(
 }
 
 func (w *Worker) prepareWorkspace(ctx context.Context, item *run.Run) (outbound.Workspace, error) {
-	if len(item.Task.Attachments) == 0 {
-		return outbound.Workspace{}, nil
-	}
 	if w.workspace == nil {
 		return outbound.Workspace{}, errors.New("workspace provider is required")
 	}

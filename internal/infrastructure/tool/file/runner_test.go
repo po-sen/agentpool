@@ -20,6 +20,36 @@ func TestRunnerDoesNotExposeToolsWithoutWorkspace(t *testing.T) {
 	}
 }
 
+func TestRunnerDoesNotExposeToolsForEmptyWorkspace(t *testing.T) {
+	tools, err := NewRunner(Config{}).ListTools(context.Background(), outbound.ToolListRequest{
+		Context: outbound.ToolContext{WorkspacePath: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("len(tools) = %d, want 0", len(tools))
+	}
+}
+
+func TestRunnerExposesToolsWhenWorkspaceHasFiles(t *testing.T) {
+	tools, err := NewRunner(Config{}).ListTools(context.Background(), outbound.ToolListRequest{
+		Context: outbound.ToolContext{
+			WorkspacePath:     t.TempDir(),
+			WorkspaceHasFiles: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if len(tools) != 2 {
+		t.Fatalf("len(tools) = %d, want 2", len(tools))
+	}
+	if tools[0].Name != toolNameListFiles || tools[1].Name != toolNameReadFile {
+		t.Fatalf("tools = %#v, want list_files and read_file", tools)
+	}
+}
+
 func TestRunnerListsFiles(t *testing.T) {
 	root := newWorkspace(t)
 
