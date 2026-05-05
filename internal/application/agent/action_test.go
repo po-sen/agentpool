@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseActionParsesFinalAction(t *testing.T) {
 	result := parseAction(`{"type":"final","summary":"done"}`)
@@ -72,11 +75,16 @@ func TestParseActionParsesToolCallScalarArgumentsAsStrings(t *testing.T) {
 	}
 }
 
-func TestParseActionRepairsMarkdownEscapedPunctuationInJSONString(t *testing.T) {
+func TestParseActionRejectsInvalidJSONStringEscapeWithClearReason(t *testing.T) {
 	result := parseAction(`{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"expr 123 \* 654321 \* 2"}}`)
-	assertValidAction(t, result, actionTypeToolCall)
-	if result.action.Arguments["command"] != `expr 123 \* 654321 \* 2` {
-		t.Fatalf("command = %q, want shell-escaped expression", result.action.Arguments["command"])
+	assertProtocolErrorCode(t, result, actionParseCodeInvalidJSON)
+	for _, want := range []string{
+		`JSON strings cannot use backslash before arbitrary punctuation such as \*`,
+		`encode it as \\* in JSON`,
+	} {
+		if !strings.Contains(result.parseErr.Message+" "+result.parseErr.Hint, want) {
+			t.Fatalf("parse error does not contain %q: %#v", want, result.parseErr)
+		}
 	}
 }
 

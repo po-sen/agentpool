@@ -138,15 +138,10 @@ func normalizeProtocolResponse(content string) string {
 func decodeActionObject(content string) (map[string]any, *actionParseError) {
 	decoded, extraErr, decodeErr := decodeSingleJSONValue(content)
 	if decodeErr != nil {
-		if repaired, ok := repairMarkdownEscapesInJSONStrings(content); ok {
-			decoded, extraErr, decodeErr = decodeSingleJSONValue(repaired)
-		}
-	}
-	if decodeErr != nil {
 		return nil, newActionParseError(
 			actionParseCodeInvalidJSON,
-			"model response was not valid JSON",
-			`Return exactly one JSON object like {"type":"final","summary":"..."}`,
+			invalidJSONActionMessage(decodeErr),
+			invalidJSONActionHint(decodeErr),
 			decodeErr,
 		)
 	}
@@ -184,73 +179,24 @@ func decodeSingleJSONValue(content string) (any, error, error) {
 	return decoded, decoder.Decode(&struct{}{}), nil
 }
 
-func repairMarkdownEscapesInJSONStrings(content string) (string, bool) {
-	var builder strings.Builder
-	builder.Grow(len(content))
-
-	changed := false
-	inString := false
-	for index := 0; index < len(content); index++ {
-		current := content[index]
-		if !inString {
-			builder.WriteByte(current)
-			if current == '"' {
-				inString = true
-			}
-			continue
-		}
-
-		switch current {
-		case '"':
-			builder.WriteByte(current)
-			inString = false
-		case '\\':
-			replacement, advance, repaired := repairedJSONStringEscape(content, index)
-			builder.WriteString(replacement)
-			index += advance
-			changed = changed || repaired
-		default:
-			builder.WriteByte(current)
-		}
-	}
-	if !changed {
-		return content, false
+func invalidJSONActionMessage(err error) string {
+	if isInvalidJSONStringEscapeError(err) {
+		return `model response was not valid JSON: JSON strings cannot use backslash before arbitrary punctuation such as \*`
 	}
 
-	return builder.String(), true
+	return "model response was not valid JSON"
 }
 
-func repairedJSONStringEscape(content string, index int) (string, int, bool) {
-	if index+1 >= len(content) {
-		return `\`, 0, false
-	}
-	next := content[index+1]
-	if isValidJSONEscape(next) {
-		return content[index : index+2], 1, false
-	}
-	if isMarkdownEscapedPunctuation(next) {
-		return `\\` + string(next), 1, true
+func invalidJSONActionHint(err error) string {
+	if isInvalidJSONStringEscapeError(err) {
+		return `JSON strings only allow escapes like \", \\, \n, \t, or \uXXXX. If a shell command needs \*, encode it as \\* in JSON, for example {"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"expr 123 \\* 654321 \\* 2"}}.`
 	}
 
-	return `\`, 0, false
+	return `Return exactly one JSON object like {"type":"final","summary":"..."}`
 }
 
-func isValidJSONEscape(value byte) bool {
-	switch value {
-	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u':
-		return true
-	default:
-		return false
-	}
-}
-
-func isMarkdownEscapedPunctuation(value byte) bool {
-	switch value {
-	case '!', '#', '*', '+', '-', '.', '>', '[', ']', '_', '`', '~':
-		return true
-	default:
-		return false
-	}
+func isInvalidJSONStringEscapeError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "in string escape code")
 }
 
 func parseActionObject(raw map[string]any) (action, *actionParseError) {
