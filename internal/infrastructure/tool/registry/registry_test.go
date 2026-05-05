@@ -1,4 +1,4 @@
-package composite
+package registry
 
 import (
 	"context"
@@ -8,22 +8,22 @@ import (
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 )
 
-func TestRunnerImplementsToolRunner(t *testing.T) {
-	runner, err := NewRunner(fakeToolRunner{name: "echo"})
+func TestRegistryImplementsToolRunner(t *testing.T) {
+	runner, err := New(fakeToolRunner{name: "echo"})
 	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
 	var _ outbound.ToolRunner = runner
 }
 
-func TestRunnerCombinesTools(t *testing.T) {
-	runner, err := NewRunner(
+func TestRegistryCombinesTools(t *testing.T) {
+	runner, err := New(
 		fakeToolRunner{name: "echo"},
 		fakeToolRunner{name: "read_file"},
 	)
 	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
 	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{})
@@ -38,10 +38,10 @@ func TestRunnerCombinesTools(t *testing.T) {
 	}
 }
 
-func TestRunnerSupportsNoTools(t *testing.T) {
-	runner, err := NewRunner()
+func TestRegistrySupportsNoTools(t *testing.T) {
+	runner, err := New()
 	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
 	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{})
@@ -64,12 +64,12 @@ func TestRunnerSupportsNoTools(t *testing.T) {
 	}
 }
 
-func TestRunnerDispatchesToCorrectRunner(t *testing.T) {
+func TestRegistryDispatchesToCorrectRunner(t *testing.T) {
 	echoRunner := &recordingToolRunner{name: "echo", content: "echoed"}
 	readRunner := &recordingToolRunner{name: "read_file", content: "read"}
-	runner, err := NewRunner(echoRunner, readRunner)
+	runner, err := New(echoRunner, readRunner)
 	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
 	result, err := runner.RunTool(context.Background(), outbound.ToolCall{Name: "read_file"})
@@ -87,13 +87,13 @@ func TestRunnerDispatchesToCorrectRunner(t *testing.T) {
 	}
 }
 
-func TestRunnerListToolsRejectsDuplicateToolNames(t *testing.T) {
-	runner, err := NewRunner(
+func TestRegistryListToolsRejectsDuplicateToolNames(t *testing.T) {
+	runner, err := New(
 		fakeToolRunner{name: "echo"},
 		fakeToolRunner{name: "echo"},
 	)
 	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
 	_, err = runner.ListTools(context.Background(), outbound.ToolListRequest{})
@@ -102,13 +102,13 @@ func TestRunnerListToolsRejectsDuplicateToolNames(t *testing.T) {
 	}
 }
 
-func TestRunnerRunToolRejectsDuplicateToolNames(t *testing.T) {
-	runner, err := NewRunner(
+func TestRegistryRunToolRejectsDuplicateToolNames(t *testing.T) {
+	runner, err := New(
 		fakeToolRunner{name: "echo"},
 		fakeToolRunner{name: "echo"},
 	)
 	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
 	_, err = runner.RunTool(context.Background(), outbound.ToolCall{Name: "echo"})
@@ -117,10 +117,10 @@ func TestRunnerRunToolRejectsDuplicateToolNames(t *testing.T) {
 	}
 }
 
-func TestRunnerReturnsToolErrorForUnknownTool(t *testing.T) {
-	runner, err := NewRunner(fakeToolRunner{name: "echo"})
+func TestRegistryReturnsToolErrorForUnknownTool(t *testing.T) {
+	runner, err := New(fakeToolRunner{name: "echo"})
 	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
 	result, err := runner.RunTool(context.Background(), outbound.ToolCall{Name: "missing"})
@@ -135,12 +135,12 @@ func TestRunnerReturnsToolErrorForUnknownTool(t *testing.T) {
 	}
 }
 
-func TestRunnerPropagatesListToolsErrorsDuringConstruction(t *testing.T) {
+func TestRegistryPropagatesListToolsErrors(t *testing.T) {
 	errListTools := errors.New("list tools failed")
 
-	runner, err := NewRunner(errorToolRunner{err: errListTools})
+	runner, err := New(errorToolRunner{err: errListTools})
 	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 	_, err = runner.ListTools(context.Background(), outbound.ToolListRequest{})
 	if !errors.Is(err, errListTools) {
@@ -148,13 +148,13 @@ func TestRunnerPropagatesListToolsErrorsDuringConstruction(t *testing.T) {
 	}
 }
 
-func TestRunnerUsesRequestContextForDynamicTools(t *testing.T) {
-	runner, err := NewRunner(
+func TestRegistryUsesRequestContextForDynamicTools(t *testing.T) {
+	runner, err := New(
 		fakeToolRunner{name: "echo"},
 		dynamicToolRunner{name: "read_file"},
 	)
 	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
+		t.Fatalf("New() error = %v", err)
 	}
 
 	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{})
@@ -176,6 +176,35 @@ func TestRunnerUsesRequestContextForDynamicTools(t *testing.T) {
 	}
 	if len(tools) != 2 || tools[0].Name != "echo" || tools[1].Name != "read_file" {
 		t.Fatalf("tools with workspace = %#v, want echo and read_file", tools)
+	}
+}
+
+func TestRegistryUsesCallContextForDynamicToolDispatch(t *testing.T) {
+	runner, err := New(dynamicToolRunner{name: "read_file"})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runner.RunTool(context.Background(), outbound.ToolCall{Name: "read_file"})
+	if err != nil {
+		t.Fatalf("RunTool() without workspace error = %v", err)
+	}
+	if !result.IsError || result.Content != "unknown tool: read_file" {
+		t.Fatalf("RunTool() without workspace result = %#v, want unknown tool error", result)
+	}
+
+	result, err = runner.RunTool(context.Background(), outbound.ToolCall{
+		Name: "read_file",
+		Context: outbound.ToolContext{
+			WorkspacePath:     "/tmp/repo",
+			WorkspaceHasFiles: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunTool() with workspace error = %v", err)
+	}
+	if result.IsError || result.Content != "read_file" {
+		t.Fatalf("RunTool() with workspace result = %#v, want read_file content", result)
 	}
 }
 

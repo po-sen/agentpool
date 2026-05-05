@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -116,43 +115,4 @@ func (r *Runner) RunTool(ctx context.Context, call outbound.ToolCall) (outbound.
 		Content: formatCommandResult(result),
 		IsError: result.TimedOut || result.ExitCode != 0,
 	}, nil
-}
-
-func (r *Runner) parseTimeout(arguments map[string]string) (time.Duration, error) {
-	raw := strings.TrimSpace(arguments[argumentTimeoutSeconds])
-	if raw == "" {
-		return r.defaultTimeout, nil
-	}
-
-	seconds, err := strconv.Atoi(raw)
-	if err != nil || seconds <= 0 {
-		return 0, errors.New("timeout_seconds must be a positive integer")
-	}
-	timeout := time.Duration(seconds) * time.Second
-	if timeout > r.maxTimeout {
-		return 0, fmt.Errorf("timeout_seconds exceeds maximum %d", int(r.maxTimeout/time.Second))
-	}
-
-	return timeout, nil
-}
-
-func formatCommandResult(result outbound.SandboxCommandResult) string {
-	var output strings.Builder
-	_, _ = fmt.Fprintf(&output, "exit_code: %d\n", result.ExitCode)
-	if result.TimedOut {
-		output.WriteString("timed_out: true\n")
-	}
-	output.WriteString("stdout:\n")
-	writeBlock(&output, result.Stdout)
-	output.WriteString("stderr:\n")
-	writeBlock(&output, result.Stderr)
-
-	return output.String()
-}
-
-func writeBlock(output *strings.Builder, content string) {
-	output.WriteString(content)
-	if !strings.HasSuffix(content, "\n") {
-		output.WriteString("\n")
-	}
 }

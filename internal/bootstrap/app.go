@@ -24,8 +24,8 @@ import (
 	sandboxdocker "github.com/po-sen/agentpool/internal/infrastructure/sandbox/docker"
 	sandboxnoop "github.com/po-sen/agentpool/internal/infrastructure/sandbox/noop"
 	secretnoop "github.com/po-sen/agentpool/internal/infrastructure/secret/noop"
-	"github.com/po-sen/agentpool/internal/infrastructure/tool/composite"
 	filetools "github.com/po-sen/agentpool/internal/infrastructure/tool/file"
+	"github.com/po-sen/agentpool/internal/infrastructure/tool/registry"
 	"github.com/po-sen/agentpool/internal/infrastructure/tool/shell"
 	workspacetemp "github.com/po-sen/agentpool/internal/infrastructure/workspace/temp"
 	"github.com/po-sen/agentpool/internal/runtime/httpserver"
@@ -140,7 +140,7 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		return nil, err
 	}
 	fileTools := filetools.NewRunner(filetools.Config{})
-	toolRunner, err := composite.NewRunner(fileTools, shellTools)
+	toolRunner, err := registry.New(fileTools, shellTools)
 	if err != nil {
 		return nil, err
 	}
