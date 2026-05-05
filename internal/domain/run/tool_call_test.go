@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestRunRecordToolCallsCopiesRecords(t *testing.T) {
@@ -95,6 +96,26 @@ func TestRunRecordToolCallsTruncatesResult(t *testing.T) {
 	result := item.ToolCalls[0].Result
 	if len(result) != MaxToolCallResultLength {
 		t.Fatalf("len(result) = %d, want %d", len(result), MaxToolCallResultLength)
+	}
+	if !strings.HasSuffix(result, toolCallResultTruncatedMarker) {
+		t.Fatalf("result does not contain truncation marker: %q", result)
+	}
+}
+
+func TestRunRecordToolCallsTruncatesResultWithoutBreakingUTF8(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	item := newRun(t, now)
+
+	item.RecordToolCalls(now.Add(time.Second), []ToolCall{
+		{Name: "read_file", Result: strings.Repeat("界", MaxToolCallResultLength)},
+	})
+
+	result := item.ToolCalls[0].Result
+	if len(result) > MaxToolCallResultLength {
+		t.Fatalf("len(result) = %d, want <= %d", len(result), MaxToolCallResultLength)
+	}
+	if !utf8.ValidString(result) {
+		t.Fatalf("result is not valid UTF-8: %q", result)
 	}
 	if !strings.HasSuffix(result, toolCallResultTruncatedMarker) {
 		t.Fatalf("result does not contain truncation marker: %q", result)

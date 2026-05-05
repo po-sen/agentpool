@@ -3,6 +3,7 @@ package run
 import (
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -56,6 +57,7 @@ func copyArguments(arguments map[string]string) map[string]string {
 }
 
 func truncateToolCallResult(result string) string {
+	result = strings.ToValidUTF8(result, "\uFFFD")
 	if len(result) <= MaxToolCallResultLength {
 		return result
 	}
@@ -63,6 +65,10 @@ func truncateToolCallResult(result string) string {
 	maxContentLength := MaxToolCallResultLength - len(toolCallResultTruncatedMarker)
 	if maxContentLength < 0 {
 		maxContentLength = 0
+	}
+
+	for maxContentLength > 0 && !utf8.ValidString(result[:maxContentLength]) {
+		maxContentLength--
 	}
 
 	return result[:maxContentLength] + toolCallResultTruncatedMarker
