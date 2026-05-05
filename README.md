@@ -94,9 +94,9 @@ Completed runs include the one-shot model response summary:
   },
   "steps": [
     {
-      "name": "prepare",
+      "name": "workspace",
       "status": "completed",
-      "message": "Prepared policy, secrets, and source context",
+      "message": "Prepared empty workspace",
       "started_at": "2026-04-30T08:00:00Z",
       "ended_at": "2026-04-30T08:00:00Z"
     },
@@ -128,9 +128,9 @@ Failed runs keep the public `failure_reason` sanitized and may include safe diag
   "failure_message": "agent reached max turns",
   "steps": [
     {
-      "name": "prepare",
+      "name": "workspace",
       "status": "completed",
-      "message": "Prepared policy, secrets, and source context",
+      "message": "Prepared empty workspace",
       "started_at": "2026-04-30T08:00:00Z",
       "ended_at": "2026-04-30T08:00:00Z"
     },
@@ -554,7 +554,7 @@ Workspace path is separate from sandbox state, and sandbox execution is reserved
 
 Run diagnostics are intentionally split:
 
-- `steps`: coarse lifecycle timeline, such as `prepare` and `agent`.
+- `steps`: coarse lifecycle timeline, currently `workspace` and `agent`.
 - `agent_turns`: per-model-turn diagnostics from the agent loop.
 - `tool_calls`: concrete tool execution history and tool results.
 
@@ -662,7 +662,7 @@ curl -sS -X POST http://localhost:8080/v1/runs \
   -F 'files=@README.md'
 ```
 
-With the default `noop` sandbox, `workspace` is available but `sandbox_exec` is unavailable. With `AGENTPOOL_SANDBOX_PROVIDER=docker`, the worker prepares a command-capable sandbox for the run workspace, and `sandbox_exec` runs through:
+With the default `noop` sandbox, `workspace` is available but `sandbox_exec` is unavailable. With `AGENTPOOL_SANDBOX_PROVIDER=docker`, the worker enables `sandbox_exec` for the run workspace, and each command runs through:
 
 ```text
 docker run --rm --network none -v <input>:/workspace/input:ro -v <work>:/workspace/work:rw -w /workspace/work <image> /bin/sh -lc <command>
@@ -699,7 +699,7 @@ Completed runs persist the agent result summary.
 
 ## Run Steps
 
-Run steps are coarse execution timeline entries. The current worker records `prepare` for policy, secrets, and source context preparation, and `agent` for model and tool-loop execution. Steps explain the broad phase outcome, but they are not full logs. Tool logs and streaming output are future features.
+Run steps are coarse execution timeline entries. The current worker records `workspace` for preparing the runtime workspace and `agent` for model and tool-loop execution. Steps explain the broad phase outcome, but they are not full logs. Tool logs and streaming output are future features.
 
 ## Architecture
 

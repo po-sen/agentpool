@@ -17,10 +17,9 @@ const sandboxCleanupTimeout = 30 * time.Second
 const publicFailureReason = "run failed"
 
 const (
-	prepareStepName             = "prepare"
-	prepareStepRunningMessage   = "Preparing policy, secrets, and source context"
-	prepareStepCompletedMessage = "Prepared policy, secrets, and source context"
-	prepareStepFailedMessage    = "Preparation failed"
+	workspaceStepName           = "workspace"
+	workspaceStepRunningMessage = "Preparing workspace"
+	workspaceStepFailedMessage  = "Workspace preparation failed"
 	agentStepName               = "agent"
 	agentStepRunningMessage     = "Agent execution started"
 	agentStepCompletedMessage   = "Agent generated result summary"
@@ -203,9 +202,6 @@ func ignoreRunStateChanged(err error) error {
 func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (outbound.Workspace, error) {
 	now := w.clock()
 	expectedStatus := item.Status
-	if err := item.StartStep(prepareStepName, prepareStepRunningMessage, now); err != nil {
-		return outbound.Workspace{}, err
-	}
 	if err := item.StartPreparing(now); err != nil {
 		return outbound.Workspace{}, err
 	}
@@ -237,6 +233,15 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (outbound.Worksp
 		return outbound.Workspace{}, err
 	}
 
+	now = w.clock()
+	expectedStatus = item.Status
+	if err := item.StartStep(workspaceStepName, workspaceStepRunningMessage, now); err != nil {
+		return outbound.Workspace{}, err
+	}
+	if err := w.saveIfCurrentStatus(ctx, item, expectedStatus); err != nil {
+		return outbound.Workspace{}, err
+	}
+
 	workspace, err := w.prepareWorkspace(ctx, item)
 	if err != nil {
 		return outbound.Workspace{}, err
@@ -244,7 +249,7 @@ func (w *Worker) prepareRun(ctx context.Context, item *run.Run) (outbound.Worksp
 
 	now = w.clock()
 	expectedStatus = item.Status
-	if err := item.CompleteStep(prepareStepName, prepareStepCompletedMessage, now); err != nil {
+	if err := item.CompleteStep(workspaceStepName, workspaceCompletedMessage(len(item.Task.Attachments)), now); err != nil {
 		w.cleanupWorkspace(ctx, workspace)
 
 		return outbound.Workspace{}, err
@@ -451,7 +456,10 @@ func failureDiagnosticsFor(item *run.Run, cause error) (string, string) {
 	if errors.As(cause, &agentErr) {
 		return domainFailureCode(agentErr.Code), agentErr.Message
 	}
-	if item.Status == run.StatusPreparing || stepWasRunning(item, prepareStepName) {
+	if stepWasRunning(item, workspaceStepName) {
+		return run.FailureCodePreparationFailed, "workspace preparation failed"
+	}
+	if item.Status == run.StatusPreparing {
 		return run.FailureCodePreparationFailed, "preparation failed"
 	}
 
@@ -519,8 +527,8 @@ func latestRunningStepName(item *run.Run) (string, bool) {
 
 func failedStepMessage(name string) string {
 	switch name {
-	case prepareStepName:
-		return prepareStepFailedMessage
+	case workspaceStepName:
+		return workspaceStepFailedMessage
 	case agentStepName:
 		return agentStepFailedMessage
 	default:
@@ -534,6 +542,14 @@ func agentCompletedMessage(toolCallCount int) string {
 	}
 
 	return fmt.Sprintf("Agent generated result summary after %d tool call(s)", toolCallCount)
+}
+
+func workspaceCompletedMessage(attachmentCount int) string {
+	if attachmentCount <= 0 {
+		return "Prepared empty workspace"
+	}
+
+	return fmt.Sprintf("Prepared workspace with %d uploaded file(s)", attachmentCount)
 }
 
 func toDomainToolCalls(records []agent.ToolCallRecord) []run.ToolCall {

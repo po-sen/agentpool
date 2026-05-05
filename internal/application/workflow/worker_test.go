@@ -45,9 +45,9 @@ func TestWorkerProcessOneCompletesQueuedRun(t *testing.T) {
 	assertAgentTurnStatuses(t, stored.AgentTurns, []string{run.AgentTurnStatusNaturalLanguageFinal})
 	assertSteps(t, stored.Steps, []wantStep{
 		{
-			name:    "prepare",
+			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared policy, secrets, and source context",
+			message: "Prepared empty workspace",
 			ended:   true,
 		},
 		{
@@ -118,9 +118,9 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 	}
 	assertSteps(t, stored.Steps, []wantStep{
 		{
-			name:    "prepare",
+			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared policy, secrets, and source context",
+			message: "Prepared empty workspace",
 			ended:   true,
 		},
 		{
@@ -199,7 +199,7 @@ func TestWorkerPassesPromptOnlyWorkspaceContextToAgentTools(t *testing.T) {
 	workspace := &recordingWorkspaceProvider{path: "/tmp/workspace"}
 	now := time.Unix(100, 0).UTC()
 
-	queueRun(ctx, t, repo, queue, now)
+	item := queueRun(ctx, t, repo, queue, now)
 
 	tools := &recordingWorkflowToolRunner{}
 	worker := newWorkerWithWorkspace(
@@ -214,6 +214,21 @@ func TestWorkerPassesPromptOnlyWorkspaceContextToAgentTools(t *testing.T) {
 		t.Fatalf("process one: %v", err)
 	}
 
+	stored := findRun(ctx, t, repo, item.ID)
+	assertSteps(t, stored.Steps, []wantStep{
+		{
+			name:    "workspace",
+			status:  run.StatusCompleted,
+			message: "Prepared empty workspace",
+			ended:   true,
+		},
+		{
+			name:    "agent",
+			status:  run.StatusCompleted,
+			message: "Agent generated result summary after 1 tool call(s)",
+			ended:   true,
+		},
+	})
 	if !workspace.prepareCalled {
 		t.Fatal("workspace prepare was not called")
 	}
@@ -468,6 +483,21 @@ func TestWorkerPreparesWorkspaceForAttachmentsAndPassesPathToAgentTools(t *testi
 		t.Fatalf("process one: %v", err)
 	}
 
+	stored := findRun(ctx, t, repo, item.ID)
+	assertSteps(t, stored.Steps, []wantStep{
+		{
+			name:    "workspace",
+			status:  run.StatusCompleted,
+			message: "Prepared workspace with 1 uploaded file(s)",
+			ended:   true,
+		},
+		{
+			name:    "agent",
+			status:  run.StatusCompleted,
+			message: "Agent generated result summary after 1 tool call(s)",
+			ended:   true,
+		},
+	})
 	if !workspace.prepareCalled {
 		t.Fatal("workspace prepare was not called")
 	}
@@ -628,9 +658,9 @@ func TestWorkerProcessOneKeepsCompletedRunWhenCompletedEventFails(t *testing.T) 
 	}
 	assertSteps(t, stored.Steps, []wantStep{
 		{
-			name:    "prepare",
+			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared policy, secrets, and source context",
+			message: "Prepared empty workspace",
 			ended:   true,
 		},
 		{
@@ -692,9 +722,9 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 	}
 	assertSteps(t, stored.Steps, []wantStep{
 		{
-			name:    "prepare",
+			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared policy, secrets, and source context",
+			message: "Prepared empty workspace",
 			ended:   true,
 		},
 		{
@@ -868,16 +898,20 @@ func TestWorkerProcessOneStoresProtocolCorrectionAgentTurns(t *testing.T) {
 		t.Fatalf("protocol preview = %q, want invalid response", stored.AgentTurns[0].ResponsePreview)
 	}
 	if len(stored.Steps) != 2 {
-		t.Fatalf("len(Steps) = %d, want coarse prepare and agent steps", len(stored.Steps))
+		t.Fatalf("len(Steps) = %d, want coarse workspace and agent steps", len(stored.Steps))
 	}
 }
 
-func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
+func TestWorkerProcessOneRecordsFailedWorkspaceStep(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	queue := &fakeRunQueue{}
 	publisher := &recordingPublisher{}
 	now := time.Unix(100, 0).UTC()
+	workspace := &recordingWorkspaceProvider{
+		path:       "/tmp/workspace",
+		prepareErr: errors.New("workspace failed: host path details"),
+	}
 
 	item := queueRun(ctx, t, repo, queue, now)
 
@@ -888,7 +922,8 @@ func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
 			StateStore: repo,
 			Events:     publisher,
 			Agent:      applicationagent.NewRunner(fakeModelClient{}, fakeToolRunner{}),
-			Policy:     failingPolicyDecision{},
+			Workspace:  workspace,
+			Policy:     fakePolicyDecision{},
 			Secrets:    fakeSecretBroker{},
 		},
 		WithClock(func() time.Time { return now }),
@@ -907,14 +942,14 @@ func TestWorkerProcessOneRecordsFailedPrepareStep(t *testing.T) {
 	if stored.FailureCode != run.FailureCodePreparationFailed {
 		t.Fatalf("stored failure code = %q, want %q", stored.FailureCode, run.FailureCodePreparationFailed)
 	}
-	if stored.FailureMessage != "preparation failed" {
-		t.Fatalf("stored failure message = %q, want preparation failed", stored.FailureMessage)
+	if stored.FailureMessage != "workspace preparation failed" {
+		t.Fatalf("stored failure message = %q, want workspace preparation failed", stored.FailureMessage)
 	}
 	assertSteps(t, stored.Steps, []wantStep{
 		{
-			name:    "prepare",
+			name:    "workspace",
 			status:  run.StatusFailed,
-			message: "Preparation failed",
+			message: "Workspace preparation failed",
 			ended:   true,
 		},
 	})
@@ -954,9 +989,9 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationDuringExecution(t *testing.
 	}
 	assertSteps(t, stored.Steps, []wantStep{
 		{
-			name:    "prepare",
+			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared policy, secrets, and source context",
+			message: "Prepared empty workspace",
 			ended:   true,
 		},
 		{
@@ -971,7 +1006,7 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationDuringExecution(t *testing.
 	assertEventNotPublished(t, publisher.events, outbound.EventRunFailed)
 }
 
-func TestWorkerProcessOneDoesNotLeavePrepareStepRunningWhenCancelledDuringPreparation(t *testing.T) {
+func TestWorkerProcessOneDoesNotRecordWorkspaceStepWhenCancelledBeforeWorkspace(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
 	queue := &fakeRunQueue{}
@@ -1004,14 +1039,7 @@ func TestWorkerProcessOneDoesNotLeavePrepareStepRunningWhenCancelledDuringPrepar
 	if stored.Status != run.StatusCancelled {
 		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCancelled)
 	}
-	assertSteps(t, stored.Steps, []wantStep{
-		{
-			name:    "prepare",
-			status:  run.StatusCancelled,
-			message: "Run cancelled",
-			ended:   true,
-		},
-	})
+	assertSteps(t, stored.Steps, nil)
 
 	assertEventNotPublished(t, publisher.events, outbound.EventRunStarted)
 	assertEventNotPublished(t, publisher.events, outbound.EventRunCompleted)
@@ -1048,9 +1076,9 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationWhenExecutionFails(t *testi
 	}
 	assertSteps(t, stored.Steps, []wantStep{
 		{
-			name:    "prepare",
+			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared policy, secrets, and source context",
+			message: "Prepared empty workspace",
 			ended:   true,
 		},
 		{
@@ -1463,6 +1491,7 @@ type recordingWorkspaceProvider struct {
 	cleanupCalled          bool
 	cleanupContextErr      error
 	path                   string
+	prepareErr             error
 	runID                  run.RunID
 	attachments            []run.TaskAttachment
 	artifacts              []run.Artifact
@@ -1475,6 +1504,9 @@ func (p *recordingWorkspaceProvider) PrepareWorkspace(
 	p.prepareCalled = true
 	p.runID = request.RunID
 	p.attachments = append([]run.TaskAttachment(nil), request.Attachments...)
+	if p.prepareErr != nil {
+		return outbound.Workspace{}, p.prepareErr
+	}
 
 	return p.workspace(len(request.Attachments) > 0), nil
 }

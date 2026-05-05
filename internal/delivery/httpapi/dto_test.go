@@ -178,9 +178,9 @@ func TestRunResponseJSONIncludesCompletedSteps(t *testing.T) {
 		Status: "completed",
 		Steps: []inbound.StepView{
 			{
-				Name:      "prepare",
+				Name:      "workspace",
 				Status:    "completed",
-				Message:   "Prepared policy, secrets, and source context",
+				Message:   "Prepared empty workspace",
 				StartedAt: time.Unix(101, 0).UTC(),
 				EndedAt:   &endedAt,
 			},
@@ -200,8 +200,8 @@ func TestRunResponseJSONIncludesCompletedSteps(t *testing.T) {
 	}
 
 	got := string(payload)
-	if !strings.Contains(got, `"name":"prepare"`) {
-		t.Fatalf("response does not contain prepare step: %s", got)
+	if !strings.Contains(got, `"name":"workspace"`) {
+		t.Fatalf("response does not contain workspace step: %s", got)
 	}
 	if !strings.Contains(got, `"message":"Agent generated result summary"`) {
 		t.Fatalf("response does not contain agent step message: %s", got)

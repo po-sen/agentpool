@@ -15,7 +15,7 @@ func TestFormatRunCompletedIncludesSummary(t *testing.T) {
 			{Path: "report.md", MediaType: "text/markdown", SizeBytes: 9},
 		},
 		Steps: []StepResponse{
-			{Name: "prepare", Status: statusCompleted, Message: "Prepared policy"},
+			{Name: "workspace", Status: statusCompleted, Message: "Prepared empty workspace"},
 			{Name: "agent", Status: statusCompleted, Message: "Agent generated result summary"},
 		},
 		ToolCalls: []ToolCallResponse{{Name: "sandbox_exec"}},
