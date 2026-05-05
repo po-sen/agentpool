@@ -365,7 +365,7 @@ The runtime does not persist uploaded files beyond the run workspace cleanup. Ag
 
 AgentPool has an application-owned tool loop. Models can respond with a JSON `tool_call` action, the agent runner executes the tool through the `ToolRunner` port, and the tool result is fed back to the model for a final JSON answer.
 
-The agent protocol accepts only `tool_call` and `final` JSON actions. Unknown JSON action types, malformed JSON, or multiple JSON objects are rejected as protocol errors and the model is asked to correct itself. Plain natural-language output is still accepted as a final summary for compatibility with local models.
+The agent protocol accepts only `tool_call` and `final` JSON actions. Models should return exactly one JSON object with no markdown fences. For compatibility, AgentPool normalizes whole-response fenced JSON blocks and simple scalar values that can safely become strings, such as `{"type":"final","summary":true}` becoming summary `"true"` and numeric tool arguments becoming string arguments. AgentPool does not extract JSON from arbitrary prose. Unknown JSON action types, malformed JSON, unsupported fields, nested argument values, or multiple JSON objects are rejected as protocol errors with targeted correction feedback. Plain natural-language output is still accepted as a final summary for compatibility with local models.
 
 When uploaded files are present, the agent can discover them with `list_files` and read selected text files with `read_file`. File contents are not injected into the initial prompt by default.
 

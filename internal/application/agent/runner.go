@@ -214,17 +214,21 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 
 		return session.finalResult(response.Content), true, nil
 	case actionParseProtocolError:
+		message := "model response did not match AgentPool action protocol"
+		if parsed.parseErr.Message != "" {
+			message = parsed.parseErr.Message
+		}
 		session.recordTurn(TurnRecord{
 			Index:           turnIndex,
 			Status:          run.AgentTurnStatusProtocolError,
-			Message:         "model response did not match AgentPool action protocol",
+			Message:         message,
 			ResponsePreview: previewModelResponse(response.Content),
 			StartedAt:       startedAt,
 			EndedAt:         endedAt,
 		})
 		session.messages = append(session.messages,
 			outbound.ModelMessage{Role: "assistant", Content: response.Content},
-			outbound.ModelMessage{Role: "user", Content: protocolCorrectionMessage()},
+			outbound.ModelMessage{Role: "user", Content: protocolCorrectionMessage(parsed.parseErr)},
 		)
 
 		return RunResult{}, false, nil
@@ -339,13 +343,23 @@ func validateFinalSummary(summary string) error {
 	return nil
 }
 
-func protocolCorrectionMessage() string {
+func protocolCorrectionMessage(parseErr actionParseError) string {
+	message := parseErr.Message
+	if message == "" {
+		message = "model response did not match AgentPool action protocol"
+	}
+	hint := parseErr.Hint
+	if hint == "" {
+		hint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"read_file","arguments":{"path":"README.md"}}.`
+	}
+
 	return `Protocol error:
-Your previous response was JSON but did not match the AgentPool action protocol.
-Return exactly one JSON object with either:
-{"type":"final","summary":"..."}
-or
-{"type":"tool_call","tool":"<tool_name>","arguments":{"key":"value"}}
+Your previous response was invalid because ` + message + `.
+` + hint + `
+Return exactly one JSON object with only the allowed fields.
+Examples:
+{"type":"final","summary":"Finished the task."}
+{"type":"tool_call","tool":"read_file","arguments":{"path":"README.md"}}
 Do not return tool_result. Do not return multiple JSON objects. Do not use markdown fences.`
 }
 

@@ -219,6 +219,7 @@ func TestRunnerRejectsUnknownJSONActionTypeAndContinues(t *testing.T) {
 	lastMessages := model.requests[1].Messages
 	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", "tool_result")
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Protocol error:")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "action type must be final or tool_call")
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not return tool_result.")
 	if len(tools.calls) != 0 {
 		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
@@ -226,7 +227,7 @@ func TestRunnerRejectsUnknownJSONActionTypeAndContinues(t *testing.T) {
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
 		index:           1,
 		status:          run.AgentTurnStatusProtocolError,
-		message:         "model response did not match AgentPool action protocol",
+		message:         "action type must be final or tool_call",
 		responsePreview: `{"type":"tool_result","result":"hello from tool"}`,
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
@@ -266,11 +267,11 @@ func TestRunnerRejectsMultipleJSONObjectsAndContinues(t *testing.T) {
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not return multiple JSON objects.")
 }
 
-func TestRunnerRejectsFencedJSONActionAndContinues(t *testing.T) {
+func TestRunnerParsesFencedJSONToolCallAndContinues(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
 			{Content: "```json\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```"},
-			{Content: `{"type":"final","summary":"corrected final"}`},
+			{Content: `{"type":"final","summary":"fenced tool handled"}`},
 		},
 	}
 	tools := newFakeToolRunner()
@@ -283,18 +284,99 @@ func TestRunnerRejectsFencedJSONActionAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	if result.Summary != "corrected final" {
-		t.Fatalf("summary = %q, want corrected final", result.Summary)
+	if result.Summary != "fenced tool handled" {
+		t.Fatalf("summary = %q, want fenced tool handled", result.Summary)
 	}
-	if len(tools.calls) != 0 {
-		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
 	}
 	lastMessages := model.requests[1].Messages
 	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", "```json")
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not use markdown fences.")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool result for echo:\nhello")
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "echo",
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+	})
+}
+
+func TestRunnerParsesBooleanFinalSummary(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{{Content: `{"type":"final","summary":true}`}},
+	}
+	runner := NewRunner(model, newFakeToolRunner())
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "is 0.11 < 0.2?"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "true" {
+		t.Fatalf("summary = %q, want true", result.Summary)
+	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+	})
+}
+
+func TestRunnerParsesNumericToolArgument(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"echo","arguments":{"text":30}}`},
+			{Content: `{"type":"final","summary":"done"}`},
+		},
+	}
+	tools := newFakeToolRunner()
+	runner := NewRunner(model, tools)
+
+	_, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if tools.calls[0].Arguments["text"] != "30" {
+		t.Fatalf("tool text argument = %q, want 30", tools.calls[0].Arguments["text"])
+	}
+}
+
+func TestRunnerProvidesTargetedCorrectionForInvalidSummary(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"final","summary":{"value":"done"}}`},
+			{Content: `{"type":"final","summary":"fixed"}`},
+		},
+	}
+	runner := NewRunner(model, newFakeToolRunner())
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	lastMessages := model.requests[1].Messages
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "final.summary must be a string, boolean, or number")
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:   1,
+		status:  run.AgentTurnStatusProtocolError,
+		message: "final.summary must be a string, boolean, or number",
+	})
 }
 
 func TestRunnerRejectsEmptyFinalSummaryAndContinues(t *testing.T) {
