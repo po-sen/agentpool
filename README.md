@@ -432,9 +432,9 @@ Each run gets a workspace with two areas:
 /workspace/work   read-write agent working directory
 ```
 
-Run attachments are materialized under `/workspace/input` by default. File contents are inspected through `sandbox_exec`, for example with `sed`, `cat`, `grep`, or scripts written under `/workspace/work`. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
+Run attachments are materialized under `/workspace/input` by default. `workspace` lists and stats paths only; file contents are inspected through `sandbox_exec`. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
 
-When `sandbox_exec` is available, deterministic or exact-answer tasks should be verified through sandbox execution instead of guessed. Examples include exact arithmetic, counting or searching files, transforming data, and running small scripts, tests, builds, or linters.
+When `sandbox_exec` is available, exact or verifiable tasks should be checked through sandbox execution instead of guessed. That includes exact arithmetic, counting or searching files, transforming data, and running small scripts, tests, builds, or linters. Subjective discussion, design advice, brainstorming, and simple conversation can answer directly when no command is needed.
 
 Tool calls use this provider-neutral shape when a tool is available:
 
@@ -452,14 +452,14 @@ Advertised tools include minimal argument hints in the system prompt while execu
 
 ```text
 Available tools:
-- workspace: Lists workspace files and stats workspace paths without reading file contents.
+- workspace: Lists or stats workspace paths without reading file contents.
   Arguments:
   - operation (required): Operation to run. Supported values: "list" or "stat". Example: list
   - area (optional): Workspace area to inspect. Supported values: "input", "work", or "all". Example: input
   - path (optional): Safe relative path inside the selected area. Example: README.md
-- sandbox_exec: Runs a shell command inside the prepared sandbox with /workspace/work as the working directory.
+- sandbox_exec: Runs a command inside the sandbox from /workspace/work.
   Arguments:
-  - command (required): Shell command to run inside the sandbox. Example: sed -n '1,160p' /workspace/input/README.md
+  - command (required): Command to run inside the sandbox. Example: wc -l /workspace/input/README.md
   - timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10
   - max_output_bytes (optional): Optional maximum combined stdout and stderr bytes returned by the tool. Example: 65536
 ```

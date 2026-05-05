@@ -45,8 +45,8 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 		t.Fatalf("model RunID = %s, want run_test", model.requests[0].RunID)
 	}
 	assertMessage(t, model.requests[0].Messages[0], "system", "Available tools")
-	assertMessage(t, model.requests[0].Messages[0], "system", "workspace: Lists workspace metadata")
-	assertMessage(t, model.requests[0].Messages[0], "system", "sandbox_exec: Runs a shell command")
+	assertMessage(t, model.requests[0].Messages[0], "system", "workspace: Lists or stats workspace paths without reading file contents.")
+	assertMessage(t, model.requests[0].Messages[0], "system", "sandbox_exec: Runs a command inside the sandbox from /workspace/work.")
 	assertMessage(t, model.requests[0].Messages[1], "user", "do work")
 	if !strings.Contains(result.SystemPrompt, "Available tools") {
 		t.Fatalf("SystemPrompt = %q, want available tools", result.SystemPrompt)
@@ -58,8 +58,8 @@ func TestRunnerExposesSandboxVerificationPolicyToModel(t *testing.T) {
 		responses: []outbound.ModelResponse{{Content: `{"type":"final","summary":"done"}`}},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "workspace", Description: "Lists workspace metadata"},
-		{Name: "sandbox_exec", Description: "Runs a shell command"},
+		{Name: "workspace", Description: "Lists or stats workspace paths without reading file contents."},
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
 	})
 	runner := NewRunner(model, tools)
 
@@ -78,10 +78,10 @@ func TestRunnerExposesSandboxVerificationPolicyToModel(t *testing.T) {
 		t.Fatalf("run agent: %v", err)
 	}
 	systemMessage := model.requests[0].Messages[0]
-	assertMessage(t, systemMessage, "system", "When sandbox_exec is available, prefer using it before the final answer for deterministic or verifiable tasks")
-	assertMessage(t, systemMessage, "system", "Do not guess exact answers when sandbox_exec can cheaply verify them.")
-	assertMessage(t, systemMessage, "system", "exact arithmetic, counts, hashes, encoding/decoding checks, file content inspection, grep/search")
-	if !strings.Contains(result.SystemPrompt, "deterministic or verifiable tasks") {
+	assertMessage(t, systemMessage, "system", "call sandbox_exec before final")
+	assertMessage(t, systemMessage, "system", "Do not guess exact answers when sandbox_exec can verify them.")
+	assertMessage(t, systemMessage, "system", "arithmetic, counts, hashes, encoding/decoding, file content inspection, grep/search")
+	if !strings.Contains(result.SystemPrompt, "otherwise verified by a command") {
 		t.Fatalf("SystemPrompt = %q, want sandbox verification policy", result.SystemPrompt)
 	}
 }
@@ -271,7 +271,7 @@ func TestRunnerRecordsExistingToolResultError(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "workspace", Description: "Lists workspace metadata"},
+		{Name: "workspace", Description: "Lists or stats workspace paths without reading file contents."},
 	})
 	tools.results = map[string]outbound.ToolResult{
 		"workspace": {Content: "path is not available", IsError: true},
@@ -316,8 +316,8 @@ func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "workspace", Description: "Lists workspace metadata"},
-		{Name: "sandbox_exec", Description: "Runs a shell command"},
+		{Name: "workspace", Description: "Lists or stats workspace paths without reading file contents."},
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
 	})
 	tools.results = map[string]outbound.ToolResult{
 		"sandbox_exec": {Content: "exit_code: 0\nstdout:\n123 /workspace/input/README.md\n"},
@@ -383,7 +383,7 @@ func TestRunnerAllowsAdvertisedSandboxExecTool(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "sandbox_exec", Description: "Runs a shell command"},
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
 	})
 	tools.results = map[string]outbound.ToolResult{
 		"sandbox_exec": {Content: "exit_code: 0\nstdout:\n/workspace/work\n"},
@@ -1029,8 +1029,8 @@ func (r *fakeToolRunner) ListTools(_ context.Context, request outbound.ToolListR
 
 	return []outbound.ToolDefinition{
 		{Name: "echo", Description: "Returns text"},
-		{Name: "workspace", Description: "Lists workspace metadata"},
-		{Name: "sandbox_exec", Description: "Runs a shell command"},
+		{Name: "workspace", Description: "Lists or stats workspace paths without reading file contents."},
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
 	}, nil
 }
 

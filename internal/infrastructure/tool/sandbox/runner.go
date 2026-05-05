@@ -93,13 +93,13 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 	return []outbound.ToolDefinition{
 		{
 			Name:        toolNameSandboxExec,
-			Description: "Runs a shell command inside the prepared sandbox with /workspace/work as the working directory.",
+			Description: "Runs a command inside the sandbox from /workspace/work.",
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        argumentCommand,
-					Description: "Shell command to run inside the sandbox. Read inputs from /workspace/input and write generated files under /workspace/work.",
+					Description: "Command to run inside the sandbox.",
 					Required:    true,
-					Example:     "sed -n '1,160p' /workspace/input/README.md",
+					Example:     "wc -l /workspace/input/README.md",
 				},
 				{
 					Name:        argumentTimeoutSeconds,

@@ -66,7 +66,7 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 	return []outbound.ToolDefinition{
 		{
 			Name:        toolNameWorkspace,
-			Description: "Lists workspace files and stats workspace paths without reading file contents.",
+			Description: "Lists or stats workspace paths without reading file contents.",
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        argumentOperation,

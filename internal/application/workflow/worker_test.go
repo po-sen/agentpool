@@ -178,10 +178,10 @@ func TestWorkerStoresWorkspaceAndSandboxExecToolCallHistory(t *testing.T) {
 	if stored.ToolCalls[1].Result != "exit_code: 0\nstdout:\n/workspace/work\n" {
 		t.Fatalf("sandbox_exec result = %q, want command output", stored.ToolCalls[1].Result)
 	}
-	if !strings.Contains(stored.AgentSystemPrompt, "workspace: Lists workspace metadata") {
+	if !strings.Contains(stored.AgentSystemPrompt, "workspace: Lists or stats workspace paths without reading file contents.") {
 		t.Fatalf("AgentSystemPrompt = %q, want workspace", stored.AgentSystemPrompt)
 	}
-	if !strings.Contains(stored.AgentSystemPrompt, "sandbox_exec: Runs shell commands") {
+	if !strings.Contains(stored.AgentSystemPrompt, "sandbox_exec: Runs a command inside the sandbox from /workspace/work.") {
 		t.Fatalf("AgentSystemPrompt = %q, want sandbox_exec", stored.AgentSystemPrompt)
 	}
 	assertAgentTurnStatuses(t, stored.AgentTurns, []string{
@@ -1444,8 +1444,8 @@ type fakeToolRunner struct{}
 func (r fakeToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
 	return []outbound.ToolDefinition{
 		{Name: "echo", Description: "Returns text"},
-		{Name: "workspace", Description: "Lists workspace metadata"},
-		{Name: "sandbox_exec", Description: "Runs shell commands"},
+		{Name: "workspace", Description: "Lists or stats workspace paths without reading file contents."},
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
 	}, nil
 }
 
