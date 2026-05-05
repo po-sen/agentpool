@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -243,7 +242,7 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 		})
 		session.messages = append(session.messages,
 			outbound.ModelMessage{Role: modelRoleAssistant, Content: response.Content},
-			outbound.ModelMessage{Role: modelRoleUser, Content: protocolCorrectionMessage(parsed.parseErr)},
+			outbound.ModelMessage{Role: modelRoleUser, Content: buildProtocolCorrectionMessage(parsed.parseErr)},
 		)
 
 		return RunResult{}, false, nil
@@ -364,26 +363,6 @@ func validateFinalSummary(summary string) error {
 	return nil
 }
 
-func protocolCorrectionMessage(parseErr actionParseError) string {
-	message := parseErr.Message
-	if message == "" {
-		message = "model response did not match AgentPool action protocol"
-	}
-	hint := parseErr.Hint
-	if hint == "" {
-		hint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"read_file","arguments":{"path":"README.md"}}.`
-	}
-
-	return `Protocol error:
-Your previous response was invalid because ` + message + `.
-` + hint + `
-Return exactly one JSON object with only the allowed fields.
-Examples:
-{"type":"final","summary":"Finished the task."}
-{"type":"tool_call","tool":"read_file","arguments":{"path":"README.md"}}
-Do not return tool_result. Do not return multiple JSON objects. Do not use markdown fences.`
-}
-
 func handleUnavailableToolCall(
 	session *runSession,
 	content string,
@@ -405,7 +384,13 @@ func handleUnavailableToolCall(
 	})
 	session.messages = append(session.messages,
 		outbound.ModelMessage{Role: modelRoleAssistant, Content: content},
-		outbound.ModelMessage{Role: modelRoleUser, Content: unavailableToolCorrectionMessage(parsed.Tool, session.availableToolNames)},
+		outbound.ModelMessage{
+			Role: modelRoleUser,
+			Content: buildUnavailableToolCorrectionMessage(unavailableToolCorrectionRequest{
+				RequestedTool:  parsed.Tool,
+				AvailableTools: session.availableToolNames,
+			}),
+		},
 	)
 
 	return RunResult{}, false, nil
@@ -440,7 +425,7 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 
 	session.messages = append(session.messages, outbound.ModelMessage{
 		Role:    modelRoleUser,
-		Content: toolObservation(parsed.Tool, result),
+		Content: buildToolObservation(parsed.Tool, result),
 	})
 
 	return RunResult{}, false, nil
@@ -526,30 +511,6 @@ func copyArguments(arguments map[string]string) map[string]string {
 	}
 
 	return copied
-}
-
-func toolObservation(tool string, result outbound.ToolResult) string {
-	if result.IsError {
-		return fmt.Sprintf("Tool error for %s:\n%s", tool, result.Content)
-	}
-
-	return fmt.Sprintf("Tool result for %s:\n%s", tool, result.Content)
-}
-
-func unavailableToolCorrectionMessage(name string, available []string) string {
-	availableText := "none"
-	if len(available) > 0 {
-		availableText = strings.Join(available, ", ")
-	}
-
-	return fmt.Sprintf(`Tool call error:
-The tool %q is not available.
-Available tools: %s
-
-You may only call tools listed in Available tools.
-Do not invent tool names.
-Tool names are exact and case-sensitive.
-If no tools are available, return a final answer directly.`, name, availableText)
 }
 
 func availableToolMap(tools []outbound.ToolDefinition) map[string]outbound.ToolDefinition {
