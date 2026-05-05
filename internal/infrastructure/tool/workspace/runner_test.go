@@ -261,6 +261,13 @@ func TestRunnerBoundsListOutput(t *testing.T) {
 	}
 }
 
+func TestRunnerDefaultListLimitMatchesPOCUploadLimit(t *testing.T) {
+	runner := NewRunner(Config{})
+	if runner.maxFiles != 500 {
+		t.Fatalf("default max files = %d, want 500", runner.maxFiles)
+	}
+}
+
 func TestRunnerListMissingInputPathReturnsSafeError(t *testing.T) {
 	workspace := testWorkspace(t)
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +25,16 @@ func TestCollectUploadInputsPreservesFileBehavior(t *testing.T) {
 	}
 }
 
+func TestCollectUploadInputsRejectsExplicitUnsupportedFile(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "image.png")
+	writeUploadTestFile(t, filePath, "not really png\n")
+
+	_, err := collectUploadInputs(CreateRunRequest{Files: []string{filePath}})
+	if err == nil || !strings.Contains(err.Error(), "unsupported upload file type") {
+		t.Fatalf("collect uploads error = %v, want unsupported file type error", err)
+	}
+}
+
 func TestCollectUploadInputsExpandsDirectoryRelativePaths(t *testing.T) {
 	root := t.TempDir()
 	writeUploadTestFile(t, filepath.Join(root, "README.md"), "# Demo\n")
@@ -34,6 +45,20 @@ func TestCollectUploadInputsExpandsDirectoryRelativePaths(t *testing.T) {
 		t.Fatalf("collect uploads: %v", err)
 	}
 	assertUploadNames(t, uploads, []string{"README.md", "cmd/agentpool/main.go"})
+}
+
+func TestCollectUploadInputsSkipsUnsupportedDirectoryFiles(t *testing.T) {
+	root := t.TempDir()
+	writeUploadTestFile(t, filepath.Join(root, "README.md"), "# Demo\n")
+	writeUploadTestFile(t, filepath.Join(root, "LICENSE"), "MIT\n")
+	writeUploadTestFile(t, filepath.Join(root, ".DS_Store"), "noise\n")
+	writeUploadTestFile(t, filepath.Join(root, "assets", "image.png"), "not really png\n")
+
+	uploads, err := collectUploadInputs(CreateRunRequest{Dirs: []string{root}})
+	if err != nil {
+		t.Fatalf("collect uploads: %v", err)
+	}
+	assertUploadNames(t, uploads, []string{"README.md"})
 }
 
 func TestCollectUploadInputsSkipsExcludedDirectories(t *testing.T) {
@@ -65,6 +90,35 @@ func TestCollectUploadInputsExpandsTarGzArchive(t *testing.T) {
 	assertUploadNames(t, uploads, []string{"README.md", "internal/app.go"})
 }
 
+func TestCollectUploadInputsSkipsUnsupportedArchiveEntries(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "project.tar.gz")
+	writeTarGzArchive(t, archivePath, map[string]string{
+		"README.md":        "# Demo\n",
+		"CODEOWNERS":       "* @team\n",
+		"assets/image.png": "not really png\n",
+	})
+
+	uploads, err := collectUploadInputs(CreateRunRequest{Archives: []string{archivePath}})
+	if err != nil {
+		t.Fatalf("collect uploads: %v", err)
+	}
+	assertUploadNames(t, uploads, []string{"README.md"})
+}
+
+func TestCollectUploadInputsNormalizesDotSlashArchiveEntries(t *testing.T) {
+	archivePath := filepath.Join(t.TempDir(), "project.tar.gz")
+	writeTarGzArchive(t, archivePath, map[string]string{
+		"./README.md":       "# Demo\n",
+		"./internal/app.go": "package internal\n",
+	})
+
+	uploads, err := collectUploadInputs(CreateRunRequest{Archives: []string{archivePath}})
+	if err != nil {
+		t.Fatalf("collect uploads: %v", err)
+	}
+	assertUploadNames(t, uploads, []string{"README.md", "internal/app.go"})
+}
+
 func TestCollectUploadInputsRejectsUnsafePaths(t *testing.T) {
 	if _, err := collectUploadInputs(CreateRunRequest{Files: []string{"../README.md"}}); err == nil {
 		t.Fatal("collect uploads error = nil, want unsafe file path error")
@@ -74,6 +128,12 @@ func TestCollectUploadInputsRejectsUnsafePaths(t *testing.T) {
 	writeTarGzArchive(t, archivePath, map[string]string{"../secret.txt": "secret\n"})
 	if _, err := collectUploadInputs(CreateRunRequest{Archives: []string{archivePath}}); err == nil {
 		t.Fatal("collect archive uploads error = nil, want unsafe archive path error")
+	}
+
+	traversalArchivePath := filepath.Join(t.TempDir(), "unsafe-clean.tar.gz")
+	writeTarGzArchive(t, traversalArchivePath, map[string]string{"foo/../../bar.txt": "secret\n"})
+	if _, err := collectUploadInputs(CreateRunRequest{Archives: []string{traversalArchivePath}}); err == nil {
+		t.Fatal("collect archive uploads error = nil, want parent traversal error")
 	}
 }
 

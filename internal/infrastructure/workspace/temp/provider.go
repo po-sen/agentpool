@@ -204,7 +204,11 @@ type artifactCollector struct {
 
 func (c *artifactCollector) addEntry(ctx context.Context, current string, entry os.DirEntry, walkErr error) error {
 	if walkErr != nil {
-		return walkErr
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		return nil
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -215,9 +219,9 @@ func (c *artifactCollector) addEntry(ctx context.Context, current string, entry 
 	if entry.Type()&os.ModeSymlink != 0 {
 		return nil
 	}
-	info, err := entry.Info()
-	if err != nil {
-		return err
+	info, ok := artifactEntryInfo(entry)
+	if !ok {
+		return nil
 	}
 	if !info.Mode().IsRegular() {
 		return nil
@@ -243,9 +247,9 @@ func (c *artifactCollector) add(pathValue string, size int64) error {
 		return nil
 	}
 
-	content, err := readArtifactFile(pathValue, size)
-	if err != nil {
-		return err
+	content, ok := artifactFileContent(pathValue, size)
+	if !ok {
+		return nil
 	}
 	c.artifacts = append(c.artifacts, run.Artifact{
 		Path:      artifactPath,
@@ -258,8 +262,26 @@ func (c *artifactCollector) add(pathValue string, size int64) error {
 	return nil
 }
 
+func artifactEntryInfo(entry os.DirEntry) (os.FileInfo, bool) {
+	info, err := entry.Info()
+	if err != nil {
+		return nil, false
+	}
+
+	return info, true
+}
+
 func safeArtifactPath(path string) bool {
 	return run.ValidateArtifactPath(path) == nil
+}
+
+func artifactFileContent(pathValue string, size int64) ([]byte, bool) {
+	content, err := readArtifactFile(pathValue, size)
+	if err != nil {
+		return nil, false
+	}
+
+	return content, true
 }
 
 func readArtifactFile(pathValue string, size int64) ([]byte, error) {

@@ -159,6 +159,28 @@ func TestCollectArtifactsSkipsOversizedFiles(t *testing.T) {
 	}
 }
 
+func TestArtifactCollectorSkipsUnreadableFileWithoutDroppingPriorArtifacts(t *testing.T) {
+	root := t.TempDir()
+	goodPath := filepath.Join(root, "report.md")
+	changedPath := filepath.Join(root, "changed.txt")
+	writeTempWorkspaceFile(t, goodPath, "# Report\n")
+	writeTempWorkspaceFile(t, changedPath, "changed\n")
+
+	collector := artifactCollector{root: root}
+	if err := collector.add(goodPath, 9); err != nil {
+		t.Fatalf("add good artifact: %v", err)
+	}
+	if err := collector.add(changedPath, 100); err != nil {
+		t.Fatalf("add changed artifact: %v", err)
+	}
+	if len(collector.artifacts) != 1 {
+		t.Fatalf("len(artifacts) = %d, want 1: %#v", len(collector.artifacts), collector.artifacts)
+	}
+	if collector.artifacts[0].Path != "report.md" {
+		t.Fatalf("artifact path = %q, want report.md", collector.artifacts[0].Path)
+	}
+}
+
 func TestPrepareWorkspaceCreatesEmptyWorkspaceForNoAttachments(t *testing.T) {
 	baseDir := t.TempDir()
 	provider := NewProvider(Config{BaseDir: baseDir})

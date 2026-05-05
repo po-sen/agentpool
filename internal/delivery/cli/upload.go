@@ -183,6 +183,9 @@ func (c *uploadCollector) addDirectoryEntry(root string, current string, entry o
 	if err != nil || uploadPathContainsExcludedDir(filename) {
 		return err
 	}
+	if !supportedUploadName(filename) {
+		return nil
+	}
 	content, err := readUploadFile(current, info.Size())
 	if err != nil {
 		return err
@@ -267,6 +270,9 @@ func (c *uploadCollector) addTarEntry(reader io.Reader, header *tar.Header) erro
 	if uploadPathContainsExcludedDir(filename) {
 		return nil
 	}
+	if !supportedUploadName(filename) {
+		return nil
+	}
 	if header.Size > maxUploadFileSizeBytes {
 		return fmt.Errorf(formatUploadFileTooLarge, maxUploadFileSizeBytes, filename)
 	}
@@ -306,6 +312,9 @@ func (c *uploadCollector) addZipFile(file *zip.File) error {
 		return err
 	}
 	if uploadPathContainsExcludedDir(filename) {
+		return nil
+	}
+	if !supportedUploadName(filename) {
 		return nil
 	}
 	if info.Size() > maxUploadFileSizeBytes {
@@ -393,14 +402,34 @@ func readLimitedUploadContent(reader io.Reader, size int64, name string) ([]byte
 
 func archiveUploadFilename(name string) (string, error) {
 	filename := filepath.ToSlash(name)
-	if filename == "" {
+	if filename == "" || strings.TrimSpace(filename) == "" {
 		return "", errors.New("archive entry filename is required")
 	}
-	if !safeRelativeFilename(filename) {
+	if filename != strings.TrimSpace(filename) ||
+		path.IsAbs(filename) ||
+		strings.Contains(filename, "\\") ||
+		strings.Contains(filename, ":") ||
+		filepath.VolumeName(filename) != "" ||
+		archivePathContainsParentTraversal(filename) {
+		return "", fmt.Errorf("unsafe archive entry path: %s", name)
+	}
+
+	filename = path.Clean(filename)
+	if filename == "." || !safeRelativeFilename(filename) {
 		return "", fmt.Errorf("unsafe archive entry path: %s", name)
 	}
 
 	return filename, nil
+}
+
+func archivePathContainsParentTraversal(filename string) bool {
+	for _, component := range strings.Split(filename, "/") {
+		if component == ".." {
+			return true
+		}
+	}
+
+	return false
 }
 
 func uploadFilename(filePath string) (string, error) {

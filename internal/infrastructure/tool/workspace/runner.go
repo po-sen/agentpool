@@ -28,7 +28,7 @@ const (
 	areaWork  = "work"
 	areaAll   = "all"
 
-	defaultMaxFiles = 200
+	defaultMaxFiles = 500
 
 	virtualWorkspaceRoot = "/workspace"
 	messagePathUnsafe    = "path is unsafe"
