@@ -17,7 +17,7 @@ agentpool is a Go project with module path `github.com/po-sen/agentpool`.
 - `internal/application/port/inbound/`: use case contracts and application command/query/view DTOs exposed to delivery code. These DTOs must not have JSON, HTTP, DB, or external API tags.
 - `internal/application/port/outbound/`: external capability contracts required by the application. Do not put a vague `RunRepository` here.
 - `internal/delivery/`: inbound delivery mechanisms such as HTTP API and CLI. Delivery code translates external formats into application commands/queries and translates application views back into external responses.
-- `internal/infrastructure/`: concrete external technology implementations such as persistence, LLM providers, sandbox providers, event publishers, Git/source providers, policy engines, secret brokers, and ID generators.
+- `internal/infrastructure/`: concrete external technology implementations such as persistence, LLM providers, sandbox providers, event publishers, policy engines, secret brokers, and ID generators.
 - `internal/infrastructure/llm/`: model provider implementations such as noop, OpenAI-compatible endpoints, OpenAI, Anthropic, Gemini, or local models.
 - `internal/infrastructure/tool/`: tool execution implementations. Tool implementations must implement `internal/application/port/outbound.ToolRunner`.
 - `internal/runtime/`: process/runtime helpers such as HTTP server lifecycle and logging. Runtime helpers must stay product-agnostic and must not implement business rules.
@@ -86,6 +86,8 @@ Sandbox command tools must execute through `internal/application/port/outbound.S
 The default sandbox provider is noop. The Docker sandbox provider is dev-only and may invoke the Docker CLI with `os/exec`, but it must never execute requested commands directly on the host. `run_shell` must only be advertised when a workspace path exists and the sandbox reports `SupportsCommands`.
 
 Do not add persistent workspace storage, archive materialization, workspace diffing, file mutation, unrestricted shell execution, or worker-local path workspace providers without explicit design review. Future workspace source implementations should be explicit product-authorized input sources, not product ACL logic inside AgentPool. Local path access is not core behavior.
+
+Git checkout is not implemented in the current MVP. `repository_url` and `branch` are metadata only; any future Git workspace source must be intentionally designed later.
 
 Unit tests are mandatory for domain packages, application port packages, application command/query/workflow packages, delivery packages, infrastructure packages, bootstrap, config, and runtime helpers. Every production `.go` file under `internal/` must have a same-directory companion test file with the same basename, such as `run_queue.go` and `run_queue_test.go`; `internal/test` is the repository policy-test exception. `cmd/agentpool` stays thin and is exempt unless business logic is added there. Application unit tests must use test-local fakes for ports instead of importing concrete infrastructure. Test imports are checked by `internal/test/import_policy_test.go`.
 Tests under `internal/` must use the same package as the production code, such as `package bootstrap`, not external test packages such as `package bootstrap_test`. External `_test` packages are reserved for future stable public APIs outside `internal/`.
