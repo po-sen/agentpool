@@ -149,7 +149,7 @@ Failed runs keep the public `failure_reason` sanitized and may include safe diag
 
 `failure_code` is a safe machine-readable code, and `failure_message` is a short safe explanation. Raw provider errors, stack traces, API keys, and hidden provider details are intentionally not exposed through the API.
 
-Failed runs can include partial `tool_calls` when the agent invoked tools before failing:
+Failed runs can include partial `agent_turns` and `tool_calls` when the agent invoked the model or tools before failing:
 
 ```json
 {
@@ -157,6 +157,24 @@ Failed runs can include partial `tool_calls` when the agent invoked tools before
   "failure_reason": "run failed",
   "failure_code": "agent_max_turns",
   "failure_message": "agent reached max turns",
+  "agent_turns": [
+    {
+      "index": 1,
+      "status": "protocol_error",
+      "message": "model response did not match AgentPool action protocol"
+    },
+    {
+      "index": 2,
+      "status": "tool_call",
+      "action_type": "tool_call",
+      "tool_name": "list_files"
+    },
+    {
+      "index": 5,
+      "status": "max_turns",
+      "message": "agent reached max turns"
+    }
+  ],
   "tool_calls": [
     {
       "name": "list_files",
@@ -375,6 +393,49 @@ Final answers use:
 ```
 
 Tools are dynamically advertised. Runs without the required context do not expose unavailable tools to the model. Workspace path is separate from sandbox state, and sandbox execution is reserved for future side-effectful tools.
+
+## Agent Turn Diagnostics
+
+Run diagnostics are intentionally split:
+
+- `steps`: coarse lifecycle timeline, such as `prepare` and `agent`.
+- `agent_turns`: per-model-turn diagnostics from the agent loop.
+- `tool_calls`: concrete tool execution history and tool results.
+
+`agent_turns` records safe, bounded metadata for each model turn: index, status, parsed action type, tool name for tool calls, safe message, optional response preview, and timestamps. This helps debug `agent_max_turns` without turning steps into a full model transcript.
+
+Example snippet:
+
+```json
+{
+  "status": "failed",
+  "failure_code": "agent_max_turns",
+  "failure_message": "agent reached max turns",
+  "steps": ["..."],
+  "agent_turns": [
+    {
+      "index": 1,
+      "status": "protocol_error",
+      "message": "model response did not match AgentPool action protocol",
+      "response_preview": "{\"type\":\"tool_result\"}"
+    },
+    {
+      "index": 2,
+      "status": "tool_call",
+      "action_type": "tool_call",
+      "tool_name": "list_files"
+    },
+    {
+      "index": 5,
+      "status": "max_turns",
+      "message": "agent reached max turns"
+    }
+  ],
+  "tool_calls": ["..."]
+}
+```
+
+`agent_turns` are in-memory only for now. `response_preview` is UTF-8 safe and truncated, and it is not a full model transcript. Raw provider errors, secrets, stack traces, and product ACL decisions are intentionally not exposed.
 
 ## Tool Call History
 

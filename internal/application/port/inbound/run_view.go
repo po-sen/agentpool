@@ -15,6 +15,7 @@ type RunView struct {
 	FailureMessage string
 	Steps          []StepView
 	ToolCalls      []ToolCallView
+	AgentTurns     []AgentTurnView
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -48,6 +49,18 @@ type ToolCallView struct {
 	IsError   bool
 	StartedAt time.Time
 	EndedAt   time.Time
+}
+
+// AgentTurnView is the application-level representation of one model-loop diagnostic turn.
+type AgentTurnView struct {
+	Index           int
+	Status          string
+	ActionType      string
+	ToolName        string
+	Message         string
+	ResponsePreview string
+	StartedAt       time.Time
+	EndedAt         time.Time
 }
 
 // StepView is the application-level representation of a run step.

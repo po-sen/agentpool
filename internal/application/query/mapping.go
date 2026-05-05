@@ -43,6 +43,19 @@ func toRunView(item *run.Run) inbound.RunView {
 			EndedAt:   call.EndedAt,
 		})
 	}
+	agentTurns := make([]inbound.AgentTurnView, 0, len(item.AgentTurns))
+	for _, turn := range item.AgentTurns {
+		agentTurns = append(agentTurns, inbound.AgentTurnView{
+			Index:           turn.Index,
+			Status:          turn.Status,
+			ActionType:      turn.ActionType,
+			ToolName:        turn.ToolName,
+			Message:         turn.Message,
+			ResponsePreview: turn.ResponsePreview,
+			StartedAt:       turn.StartedAt,
+			EndedAt:         turn.EndedAt,
+		})
+	}
 
 	return inbound.RunView{
 		ID:     item.ID.String(),
@@ -62,6 +75,7 @@ func toRunView(item *run.Run) inbound.RunView {
 		FailureMessage: item.FailureMessage,
 		Steps:          steps,
 		ToolCalls:      toolCalls,
+		AgentTurns:     agentTurns,
 		CreatedAt:      item.CreatedAt,
 		UpdatedAt:      item.UpdatedAt,
 	}

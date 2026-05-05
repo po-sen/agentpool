@@ -295,6 +295,50 @@ func TestGetRunIncludesToolCalls(t *testing.T) {
 	}
 }
 
+func TestGetRunIncludesAgentTurns(t *testing.T) {
+	get := &getRunStub{
+		view: inbound.RunView{
+			ID:     "run_test",
+			Status: "completed",
+			AgentTurns: []inbound.AgentTurnView{
+				{
+					Index:           1,
+					Status:          "tool_call",
+					ActionType:      "tool_call",
+					ToolName:        "list_files",
+					Message:         "model requested tool call",
+					ResponsePreview: `{"type":"tool_call"}`,
+					StartedAt:       time.Unix(101, 0).UTC(),
+					EndedAt:         time.Unix(102, 0).UTC(),
+				},
+			},
+			Steps:     []inbound.StepView{},
+			CreatedAt: time.Unix(100, 0).UTC(),
+			UpdatedAt: time.Unix(103, 0).UTC(),
+		},
+	}
+	router := NewRouter(Dependencies{
+		CreateRun: &createRunStub{},
+		ListRuns:  &listRunsStub{},
+		GetRun:    get,
+		CancelRun: &cancelRunStub{},
+	})
+	request := httptest.NewRequest(http.MethodGet, "/v1/runs/run_test", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"agent_turns":[{"index":1,"status":"tool_call"`) {
+		t.Fatalf("response missing agent_turns: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"tool_name":"list_files"`) {
+		t.Fatalf("response missing turn tool name: %s", response.Body.String())
+	}
+}
+
 func TestGetRunIncludesFailureDiagnosticsAndPartialToolCalls(t *testing.T) {
 	get := &getRunStub{
 		view: inbound.RunView{
@@ -303,6 +347,16 @@ func TestGetRunIncludesFailureDiagnosticsAndPartialToolCalls(t *testing.T) {
 			FailureReason:  "run failed",
 			FailureCode:    "tool_execution_failed",
 			FailureMessage: "tool execution failed",
+			AgentTurns: []inbound.AgentTurnView{
+				{
+					Index:     1,
+					Status:    "tool_call",
+					ToolName:  "run_shell",
+					Message:   "model requested tool call",
+					StartedAt: time.Unix(100, 0).UTC(),
+					EndedAt:   time.Unix(101, 0).UTC(),
+				},
+			},
 			ToolCalls: []inbound.ToolCallView{
 				{
 					Name:      "run_shell",
@@ -341,6 +395,9 @@ func TestGetRunIncludesFailureDiagnosticsAndPartialToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(body, `"tool_calls":[{"name":"run_shell"`) {
 		t.Fatalf("response missing partial tool_calls: %s", body)
+	}
+	if !strings.Contains(body, `"agent_turns":[{"index":1,"status":"tool_call"`) {
+		t.Fatalf("response missing partial agent_turns: %s", body)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
@@ -34,6 +35,12 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 	if len(result.ToolCalls) != 0 {
 		t.Fatalf("len(ToolCalls) = %d, want 0", len(result.ToolCalls))
 	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:           1,
+		status:          run.AgentTurnStatusNaturalLanguageFinal,
+		message:         "model returned natural-language final answer",
+		responsePreview: "done",
+	})
 	if model.requests[0].RunID != "run_test" {
 		t.Fatalf("model RunID = %s, want run_test", model.requests[0].RunID)
 	}
@@ -59,6 +66,13 @@ func TestRunnerReturnsJSONFinalActionSummary(t *testing.T) {
 	if result.Summary != "done" {
 		t.Fatalf("summary = %q, want done", result.Summary)
 	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:           1,
+		status:          run.AgentTurnStatusFinal,
+		actionType:      run.AgentTurnActionTypeFinal,
+		message:         "model returned final answer",
+		responsePreview: "done",
+	})
 }
 
 func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
@@ -72,6 +86,10 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	runner := NewRunner(model, tools, WithClock(sequenceClock(
 		timeUnix(101),
 		timeUnix(102),
+		timeUnix(103),
+		timeUnix(104),
+		timeUnix(105),
+		timeUnix(106),
 	)))
 
 	result, err := runner.Run(context.Background(), RunRequest{
@@ -92,6 +110,23 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
 	}
 	assertEchoToolRecord(t, result.ToolCalls)
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "echo",
+		message:    "model requested tool call",
+		startedAt:  timeUnix(101),
+		endedAt:    timeUnix(102),
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+		message:    "model returned final answer",
+		startedAt:  timeUnix(105),
+		endedAt:    timeUnix(106),
+	})
 	assertEchoToolInvocation(t, tools)
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
@@ -140,6 +175,17 @@ func TestRunnerFeedsUnknownToolResultBackToModel(t *testing.T) {
 	if !result.ToolCalls[0].IsError {
 		t.Fatal("tool record IsError = false, want true")
 	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "missing",
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+	})
 	lastMessages := model.requests[1].Messages
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool error for missing:\nunknown tool: missing")
 }
@@ -177,6 +223,17 @@ func TestRunnerRejectsUnknownJSONActionTypeAndContinues(t *testing.T) {
 	if len(tools.calls) != 0 {
 		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
 	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:           1,
+		status:          run.AgentTurnStatusProtocolError,
+		message:         "model response did not match AgentPool action protocol",
+		responsePreview: `{"type":"tool_result","result":"hello from tool"}`,
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+	})
 }
 
 func TestRunnerRejectsMultipleJSONObjectsAndContinues(t *testing.T) {
@@ -294,6 +351,10 @@ func TestRunnerReturnsErrorWhenMaxTurnsExceeded(t *testing.T) {
 	runner := NewRunner(model, tools, WithMaxTurns(1), WithClock(sequenceClock(
 		timeUnix(101),
 		timeUnix(102),
+		timeUnix(103),
+		timeUnix(104),
+		timeUnix(105),
+		timeUnix(106),
 	)))
 
 	result, err := runner.Run(context.Background(), RunRequest{
@@ -305,6 +366,21 @@ func TestRunnerReturnsErrorWhenMaxTurnsExceeded(t *testing.T) {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
 	assertEchoToolRecord(t, result.ToolCalls)
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "echo",
+		startedAt:  timeUnix(101),
+		endedAt:    timeUnix(102),
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:     2,
+		status:    run.AgentTurnStatusMaxTurns,
+		message:   "agent reached max turns",
+		startedAt: timeUnix(105),
+		endedAt:   timeUnix(106),
+	})
 }
 
 func TestRunnerReturnsErrorWhenProtocolErrorsExceedMaxTurns(t *testing.T) {
@@ -314,7 +390,7 @@ func TestRunnerReturnsErrorWhenProtocolErrorsExceedMaxTurns(t *testing.T) {
 	tools := newFakeToolRunner()
 	runner := NewRunner(model, tools, WithMaxTurns(1))
 
-	_, err := runner.Run(context.Background(), RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -322,13 +398,22 @@ func TestRunnerReturnsErrorWhenProtocolErrorsExceedMaxTurns(t *testing.T) {
 	if len(tools.calls) != 0 {
 		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
 	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:           1,
+		status:          run.AgentTurnStatusProtocolError,
+		responsePreview: `{"type":"tool_result","result":"hello from tool"}`,
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:  2,
+		status: run.AgentTurnStatusMaxTurns,
+	})
 }
 
 func TestRunnerPropagatesModelErrors(t *testing.T) {
 	model := &recordingModelClient{err: errModelFailed}
 	runner := NewRunner(model, newFakeToolRunner())
 
-	_, err := runner.Run(context.Background(), RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
@@ -336,6 +421,11 @@ func TestRunnerPropagatesModelErrors(t *testing.T) {
 		t.Fatalf("Run() error = %v, want %v", err, errModelFailed)
 	}
 	assertAgentErrorCode(t, err, ErrorCodeModelGenerateFailed)
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:   1,
+		status:  run.AgentTurnStatusModelError,
+		message: "model generation failed",
+	})
 }
 
 func TestRunnerReturnsPartialToolCallsWhenModelFailsAfterToolCall(t *testing.T) {
@@ -344,6 +434,10 @@ func TestRunnerReturnsPartialToolCallsWhenModelFailsAfterToolCall(t *testing.T) 
 	runner := NewRunner(model, tools, WithClock(sequenceClock(
 		timeUnix(101),
 		timeUnix(102),
+		timeUnix(103),
+		timeUnix(104),
+		timeUnix(105),
+		timeUnix(106),
 	)))
 
 	result, err := runner.Run(context.Background(), RunRequest{
@@ -358,6 +452,17 @@ func TestRunnerReturnsPartialToolCallsWhenModelFailsAfterToolCall(t *testing.T) 
 		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
 	}
 	assertEchoToolRecord(t, result.ToolCalls)
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "echo",
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:   2,
+		status:  run.AgentTurnStatusModelError,
+		message: "model generation failed",
+	})
 }
 
 func TestRunnerPropagatesListToolsErrors(t *testing.T) {
@@ -388,6 +493,8 @@ func TestRunnerRecordsToolExecutionErrorAndReturnsPartialResult(t *testing.T) {
 	runner := NewRunner(model, tools, WithClock(sequenceClock(
 		timeUnix(101),
 		timeUnix(102),
+		timeUnix(103),
+		timeUnix(104),
 	)))
 
 	result, err := runner.Run(context.Background(), RunRequest{
@@ -411,9 +518,17 @@ func TestRunnerRecordsToolExecutionErrorAndReturnsPartialResult(t *testing.T) {
 	if !record.IsError {
 		t.Fatal("record IsError = false, want true")
 	}
-	if !record.StartedAt.Equal(timeUnix(101)) || !record.EndedAt.Equal(timeUnix(102)) {
+	if !record.StartedAt.Equal(timeUnix(103)) || !record.EndedAt.Equal(timeUnix(104)) {
 		t.Fatalf("record timestamps = %v/%v, want deterministic clock", record.StartedAt, record.EndedAt)
 	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "echo",
+		startedAt:  timeUnix(101),
+		endedAt:    timeUnix(102),
+	})
 }
 
 func TestRunnerReturnsFinalSummaryInvalidForEmptyNaturalLanguageOutput(t *testing.T) {
@@ -422,12 +537,46 @@ func TestRunnerReturnsFinalSummaryInvalidForEmptyNaturalLanguageOutput(t *testin
 	}
 	runner := NewRunner(model, newFakeToolRunner())
 
-	_, err := runner.Run(context.Background(), RunRequest{
+	result, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
 
 	assertAgentErrorCode(t, err, ErrorCodeFinalSummaryInvalid)
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+		message:    "agent final summary is invalid",
+	})
+}
+
+func TestRunnerBoundsTurnResponsePreviewWithoutBreakingUTF8(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"final","summary":"` + strings.Repeat("界", run.MaxAgentTurnPreviewLength) + `"}`},
+		},
+	}
+	runner := NewRunner(model, newFakeToolRunner())
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+
+	preview := result.AgentTurns[0].ResponsePreview
+	if len(preview) > run.MaxAgentTurnPreviewLength {
+		t.Fatalf("len(ResponsePreview) = %d, want <= %d", len(preview), run.MaxAgentTurnPreviewLength)
+	}
+	if !utf8.ValidString(preview) {
+		t.Fatalf("ResponsePreview is not valid UTF-8: %q", preview)
+	}
+	if !strings.HasSuffix(preview, agentTurnPreviewTruncatedMarker) {
+		t.Fatalf("ResponsePreview does not contain truncation marker: %q", preview)
+	}
 }
 
 var errModelFailed = errors.New("model failed")
@@ -567,11 +716,55 @@ func assertEchoToolRecord(t *testing.T, records []ToolCallRecord) {
 	if record.IsError {
 		t.Fatal("record IsError = true, want false")
 	}
-	if !record.StartedAt.Equal(timeUnix(101)) {
-		t.Fatalf("StartedAt = %v, want %v", record.StartedAt, timeUnix(101))
+	if !record.StartedAt.Equal(timeUnix(103)) {
+		t.Fatalf("StartedAt = %v, want %v", record.StartedAt, timeUnix(103))
 	}
-	if !record.EndedAt.Equal(timeUnix(102)) {
-		t.Fatalf("EndedAt = %v, want %v", record.EndedAt, timeUnix(102))
+	if !record.EndedAt.Equal(timeUnix(104)) {
+		t.Fatalf("EndedAt = %v, want %v", record.EndedAt, timeUnix(104))
+	}
+}
+
+type wantTurn struct {
+	index           int
+	status          string
+	actionType      string
+	toolName        string
+	message         string
+	responsePreview string
+	startedAt       time.Time
+	endedAt         time.Time
+}
+
+func assertTurn(t *testing.T, turns []TurnRecord, index int, want wantTurn) {
+	t.Helper()
+
+	if len(turns) <= index {
+		t.Fatalf("len(AgentTurns) = %d, want at least %d", len(turns), index+1)
+	}
+	turn := turns[index]
+	if turn.Index != want.index {
+		t.Fatalf("AgentTurns[%d].Index = %d, want %d", index, turn.Index, want.index)
+	}
+	if turn.Status != want.status {
+		t.Fatalf("AgentTurns[%d].Status = %q, want %q", index, turn.Status, want.status)
+	}
+	if want.actionType != "" && turn.ActionType != want.actionType {
+		t.Fatalf("AgentTurns[%d].ActionType = %q, want %q", index, turn.ActionType, want.actionType)
+	}
+	if want.toolName != "" && turn.ToolName != want.toolName {
+		t.Fatalf("AgentTurns[%d].ToolName = %q, want %q", index, turn.ToolName, want.toolName)
+	}
+	if want.message != "" && turn.Message != want.message {
+		t.Fatalf("AgentTurns[%d].Message = %q, want %q", index, turn.Message, want.message)
+	}
+	if want.responsePreview != "" && turn.ResponsePreview != want.responsePreview {
+		t.Fatalf("AgentTurns[%d].ResponsePreview = %q, want %q", index, turn.ResponsePreview, want.responsePreview)
+	}
+	if !want.startedAt.IsZero() && !turn.StartedAt.Equal(want.startedAt) {
+		t.Fatalf("AgentTurns[%d].StartedAt = %v, want %v", index, turn.StartedAt, want.startedAt)
+	}
+	if !want.endedAt.IsZero() && !turn.EndedAt.Equal(want.endedAt) {
+		t.Fatalf("AgentTurns[%d].EndedAt = %v, want %v", index, turn.EndedAt, want.endedAt)
 	}
 }
 

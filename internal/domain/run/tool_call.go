@@ -57,19 +57,23 @@ func copyArguments(arguments map[string]string) map[string]string {
 }
 
 func truncateToolCallResult(result string) string {
-	result = strings.ToValidUTF8(result, "\uFFFD")
-	if len(result) <= MaxToolCallResultLength {
-		return result
+	return truncateUTF8Text(result, MaxToolCallResultLength)
+}
+
+func truncateUTF8Text(value string, maxLength int) string {
+	value = strings.ToValidUTF8(value, "\uFFFD")
+	if len(value) <= maxLength {
+		return value
 	}
 
-	maxContentLength := MaxToolCallResultLength - len(toolCallResultTruncatedMarker)
+	maxContentLength := maxLength - len(toolCallResultTruncatedMarker)
 	if maxContentLength < 0 {
 		maxContentLength = 0
 	}
 
-	for maxContentLength > 0 && !utf8.ValidString(result[:maxContentLength]) {
+	for maxContentLength > 0 && !utf8.ValidString(value[:maxContentLength]) {
 		maxContentLength--
 	}
 
-	return result[:maxContentLength] + toolCallResultTruncatedMarker
+	return value[:maxContentLength] + toolCallResultTruncatedMarker
 }

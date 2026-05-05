@@ -23,6 +23,7 @@ type Run struct {
 	FailureMessage string
 	Steps          []Step
 	ToolCalls      []ToolCall
+	AgentTurns     []AgentTurn
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -57,6 +58,7 @@ func (r *Run) Clone() *Run {
 		clone.Steps = append([]Step(nil), r.Steps...)
 	}
 	clone.ToolCalls = copyToolCalls(r.ToolCalls)
+	clone.AgentTurns = copyAgentTurns(r.AgentTurns)
 
 	return &clone
 }
@@ -133,6 +135,12 @@ func (r *Run) CompleteWithResult(now time.Time, summary string) error {
 // RecordToolCalls replaces the stored tool call history with detached bounded records.
 func (r *Run) RecordToolCalls(now time.Time, calls []ToolCall) {
 	r.ToolCalls = copyToolCalls(calls)
+	r.UpdatedAt = now
+}
+
+// RecordAgentTurns replaces the stored model-loop diagnostics with detached bounded records.
+func (r *Run) RecordAgentTurns(now time.Time, turns []AgentTurn) {
+	r.AgentTurns = copyAgentTurns(turns)
 	r.UpdatedAt = now
 }
 

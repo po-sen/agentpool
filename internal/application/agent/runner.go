@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
@@ -14,6 +15,8 @@ import (
 const defaultMaxTurns = 4
 
 var errToolRunnerRequired = errors.New("tool runner is required")
+
+const agentTurnPreviewTruncatedMarker = "\n... [truncated]"
 
 // Runner owns AgentPool's application-level agent behavior.
 type Runner struct {
@@ -38,6 +41,7 @@ type RunResult struct {
 	Summary       string
 	ToolCallCount int
 	ToolCalls     []ToolCallRecord
+	AgentTurns    []TurnRecord
 }
 
 // ToolCallRecord captures one tool execution observed by the agent loop.
@@ -50,11 +54,25 @@ type ToolCallRecord struct {
 	EndedAt   time.Time
 }
 
+// TurnRecord captures one model-loop diagnostic observed by the agent runner.
+type TurnRecord struct {
+	Index           int
+	Status          string
+	ActionType      string
+	ToolName        string
+	Message         string
+	ResponsePreview string
+	StartedAt       time.Time
+	EndedAt         time.Time
+}
+
 type runSession struct {
 	request       RunRequest
 	messages      []outbound.ModelMessage
+	turnIndex     int
 	toolCallCount int
 	toolCalls     []ToolCallRecord
+	turns         []TurnRecord
 }
 
 // NewRunner creates an application agent runner.
@@ -118,6 +136,16 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (RunResult, error)
 		}
 	}
 
+	startedAt := r.clock()
+	endedAt := r.clock()
+	session.recordTurn(TurnRecord{
+		Index:     session.nextTurnIndex(),
+		Status:    run.AgentTurnStatusMaxTurns,
+		Message:   messageAgentMaxTurns,
+		StartedAt: startedAt,
+		EndedAt:   endedAt,
+	})
+
 	return session.partialResult(), newAgentError(ErrorCodeAgentMaxTurns, "", nil)
 }
 
@@ -140,11 +168,22 @@ func (r *Runner) newRunSession(ctx context.Context, request RunRequest) (*runSes
 }
 
 func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, bool, error) {
+	turnIndex := session.nextTurnIndex()
+	startedAt := r.clock()
 	response, err := r.model.Generate(ctx, outbound.ModelRequest{
 		RunID:    session.request.RunID,
 		Messages: session.messages,
 	})
+	endedAt := r.clock()
 	if err != nil {
+		session.recordTurn(TurnRecord{
+			Index:     turnIndex,
+			Status:    run.AgentTurnStatusModelError,
+			Message:   messageModelGenerateFailed,
+			StartedAt: startedAt,
+			EndedAt:   endedAt,
+		})
+
 		return session.partialResult(), false, newAgentError(ErrorCodeModelGenerateFailed, "", err)
 	}
 
@@ -152,11 +191,37 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 	switch parsed.status {
 	case actionParseNaturalLanguage:
 		if err := validateFinalSummary(response.Content); err != nil {
+			session.recordTurn(TurnRecord{
+				Index:           turnIndex,
+				Status:          run.AgentTurnStatusFinal,
+				ActionType:      run.AgentTurnActionTypeFinal,
+				Message:         messageFinalSummaryInvalid,
+				ResponsePreview: previewModelResponse(response.Content),
+				StartedAt:       startedAt,
+				EndedAt:         endedAt,
+			})
+
 			return session.partialResult(), false, newAgentError(ErrorCodeFinalSummaryInvalid, "", err)
 		}
+		session.recordTurn(TurnRecord{
+			Index:           turnIndex,
+			Status:          run.AgentTurnStatusNaturalLanguageFinal,
+			Message:         "model returned natural-language final answer",
+			ResponsePreview: previewModelResponse(response.Content),
+			StartedAt:       startedAt,
+			EndedAt:         endedAt,
+		})
 
 		return session.finalResult(response.Content), true, nil
 	case actionParseProtocolError:
+		session.recordTurn(TurnRecord{
+			Index:           turnIndex,
+			Status:          run.AgentTurnStatusProtocolError,
+			Message:         "model response did not match AgentPool action protocol",
+			ResponsePreview: previewModelResponse(response.Content),
+			StartedAt:       startedAt,
+			EndedAt:         endedAt,
+		})
 		session.messages = append(session.messages,
 			outbound.ModelMessage{Role: "assistant", Content: response.Content},
 			outbound.ModelMessage{Role: "user", Content: protocolCorrectionMessage()},
@@ -164,8 +229,17 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 
 		return RunResult{}, false, nil
 	case actionParseValid:
-		return r.handleAction(ctx, session, response.Content, parsed.action)
+		return r.handleAction(ctx, session, response.Content, parsed.action, turnIndex, startedAt, endedAt)
 	default:
+		session.recordTurn(TurnRecord{
+			Index:           turnIndex,
+			Status:          run.AgentTurnStatusProtocolError,
+			Message:         messageAgentProtocolError,
+			ResponsePreview: previewModelResponse(response.Content),
+			StartedAt:       startedAt,
+			EndedAt:         endedAt,
+		})
+
 		return session.partialResult(), false, newAgentError(
 			ErrorCodeAgentProtocolError,
 			"",
@@ -174,17 +248,64 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 	}
 }
 
-func (r *Runner) handleAction(ctx context.Context, session *runSession, content string, parsed action) (RunResult, bool, error) {
+func (r *Runner) handleAction(
+	ctx context.Context,
+	session *runSession,
+	content string,
+	parsed action,
+	turnIndex int,
+	startedAt time.Time,
+	endedAt time.Time,
+) (RunResult, bool, error) {
 	switch parsed.Type {
 	case actionTypeFinal:
 		if err := validateFinalSummary(parsed.Summary); err != nil {
+			session.recordTurn(TurnRecord{
+				Index:           turnIndex,
+				Status:          run.AgentTurnStatusFinal,
+				ActionType:      run.AgentTurnActionTypeFinal,
+				Message:         messageFinalSummaryInvalid,
+				ResponsePreview: previewModelResponse(content),
+				StartedAt:       startedAt,
+				EndedAt:         endedAt,
+			})
+
 			return session.partialResult(), false, newAgentError(ErrorCodeFinalSummaryInvalid, "", err)
 		}
+		session.recordTurn(TurnRecord{
+			Index:           turnIndex,
+			Status:          run.AgentTurnStatusFinal,
+			ActionType:      run.AgentTurnActionTypeFinal,
+			Message:         "model returned final answer",
+			ResponsePreview: previewModelResponse(parsed.Summary),
+			StartedAt:       startedAt,
+			EndedAt:         endedAt,
+		})
 
 		return session.finalResult(parsed.Summary), true, nil
 	case actionTypeToolCall:
+		session.recordTurn(TurnRecord{
+			Index:           turnIndex,
+			Status:          run.AgentTurnStatusToolCall,
+			ActionType:      run.AgentTurnActionTypeToolCall,
+			ToolName:        parsed.Tool,
+			Message:         "model requested tool call",
+			ResponsePreview: previewModelResponse(content),
+			StartedAt:       startedAt,
+			EndedAt:         endedAt,
+		})
+
 		return r.handleToolCall(ctx, session, content, parsed)
 	default:
+		session.recordTurn(TurnRecord{
+			Index:           turnIndex,
+			Status:          run.AgentTurnStatusProtocolError,
+			Message:         messageAgentProtocolError,
+			ResponsePreview: previewModelResponse(content),
+			StartedAt:       startedAt,
+			EndedAt:         endedAt,
+		})
+
 		return session.partialResult(), false, newAgentError(
 			ErrorCodeAgentProtocolError,
 			"",
@@ -198,6 +319,7 @@ func (s *runSession) finalResult(summary string) RunResult {
 		Summary:       summary,
 		ToolCallCount: s.toolCallCount,
 		ToolCalls:     copyToolCallRecords(s.toolCalls),
+		AgentTurns:    copyTurnRecords(s.turns),
 	}
 }
 
@@ -205,6 +327,7 @@ func (s *runSession) partialResult() RunResult {
 	return RunResult{
 		ToolCallCount: s.toolCallCount,
 		ToolCalls:     copyToolCallRecords(s.toolCalls),
+		AgentTurns:    copyTurnRecords(s.turns),
 	}
 }
 
@@ -279,6 +402,17 @@ func (s *runSession) recordToolCall(
 	})
 }
 
+func (s *runSession) nextTurnIndex() int {
+	s.turnIndex++
+
+	return s.turnIndex
+}
+
+func (s *runSession) recordTurn(record TurnRecord) {
+	record.ResponsePreview = previewModelResponse(record.ResponsePreview)
+	s.turns = append(s.turns, record)
+}
+
 func copyToolCallRecords(records []ToolCallRecord) []ToolCallRecord {
 	if len(records) == 0 {
 		return nil
@@ -288,6 +422,21 @@ func copyToolCallRecords(records []ToolCallRecord) []ToolCallRecord {
 	for _, record := range records {
 		item := record
 		item.Arguments = copyArguments(record.Arguments)
+		copied = append(copied, item)
+	}
+
+	return copied
+}
+
+func copyTurnRecords(records []TurnRecord) []TurnRecord {
+	if len(records) == 0 {
+		return nil
+	}
+
+	copied := make([]TurnRecord, 0, len(records))
+	for _, record := range records {
+		item := record
+		item.ResponsePreview = previewModelResponse(record.ResponsePreview)
 		copied = append(copied, item)
 	}
 
@@ -313,4 +462,22 @@ func toolObservation(tool string, result outbound.ToolResult) string {
 	}
 
 	return fmt.Sprintf("Tool result for %s:\n%s", tool, result.Content)
+}
+
+func previewModelResponse(content string) string {
+	content = strings.ToValidUTF8(content, "\uFFFD")
+	if len(content) <= run.MaxAgentTurnPreviewLength {
+		return content
+	}
+
+	maxContentLength := run.MaxAgentTurnPreviewLength - len(agentTurnPreviewTruncatedMarker)
+	if maxContentLength < 0 {
+		maxContentLength = 0
+	}
+
+	for maxContentLength > 0 && !utf8.ValidString(content[:maxContentLength]) {
+		maxContentLength--
+	}
+
+	return content[:maxContentLength] + agentTurnPreviewTruncatedMarker
 }

@@ -375,6 +375,7 @@ func (w *Worker) completeRun(
 	now := w.clock()
 	expectedStatus := item.Status
 	item.RecordToolCalls(now, toDomainToolCalls(result.ToolCalls))
+	item.RecordAgentTurns(now, toDomainAgentTurns(result.AgentTurns))
 	if err := item.CompleteWithResult(now, result.Summary); err != nil {
 		return err
 	}
@@ -389,6 +390,7 @@ func (w *Worker) failRun(ctx context.Context, item *run.Run, result agent.RunRes
 	now := w.clock()
 	expectedStatus := item.Status
 	item.RecordToolCalls(now, toDomainToolCalls(result.ToolCalls))
+	item.RecordAgentTurns(now, toDomainAgentTurns(result.AgentTurns))
 	code, message := failureDiagnosticsFor(item, cause)
 	if name, ok := latestRunningStepName(item); ok {
 		if err := item.FailStep(name, failedStepMessage(name), now); err != nil {
@@ -520,6 +522,28 @@ func toDomainToolCalls(records []agent.ToolCallRecord) []run.ToolCall {
 	}
 
 	return calls
+}
+
+func toDomainAgentTurns(records []agent.TurnRecord) []run.AgentTurn {
+	if len(records) == 0 {
+		return nil
+	}
+
+	turns := make([]run.AgentTurn, 0, len(records))
+	for _, record := range records {
+		turns = append(turns, run.AgentTurn{
+			Index:           record.Index,
+			Status:          record.Status,
+			ActionType:      record.ActionType,
+			ToolName:        record.ToolName,
+			Message:         record.Message,
+			ResponsePreview: record.ResponsePreview,
+			StartedAt:       record.StartedAt,
+			EndedAt:         record.EndedAt,
+		})
+	}
+
+	return turns
 }
 
 func copyToolArguments(arguments map[string]string) map[string]string {

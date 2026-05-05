@@ -44,6 +44,18 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 				EndedAt:   time.Unix(105, 0).UTC(),
 			},
 		},
+		AgentTurns: []AgentTurnView{
+			{
+				Index:           1,
+				Status:          "tool_call",
+				ActionType:      "tool_call",
+				ToolName:        "read_file",
+				Message:         "model requested tool call",
+				ResponsePreview: `{"type":"tool_call"}`,
+				StartedAt:       time.Unix(106, 0).UTC(),
+				EndedAt:         time.Unix(107, 0).UTC(),
+			},
+		},
 		CreatedAt: time.Unix(100, 0).UTC(),
 		UpdatedAt: time.Unix(103, 0).UTC(),
 	}
@@ -74,5 +86,8 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	}
 	if view.ToolCalls[0].Arguments["path"] != "README.md" {
 		t.Fatalf("ToolCalls[0] path = %q, want README.md", view.ToolCalls[0].Arguments["path"])
+	}
+	if view.AgentTurns[0].ToolName != "read_file" {
+		t.Fatalf("AgentTurns[0].ToolName = %q, want read_file", view.AgentTurns[0].ToolName)
 	}
 }

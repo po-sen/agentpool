@@ -14,17 +14,18 @@ type createRunRequest struct {
 }
 
 type runResponse struct {
-	ID             string             `json:"id"`
-	Status         string             `json:"status"`
-	Task           taskResponse       `json:"task"`
-	Result         *runResultResponse `json:"result,omitempty"`
-	FailureReason  string             `json:"failure_reason,omitempty"`
-	FailureCode    string             `json:"failure_code,omitempty"`
-	FailureMessage string             `json:"failure_message,omitempty"`
-	Steps          []stepResponse     `json:"steps"`
-	ToolCalls      []toolCallResponse `json:"tool_calls,omitempty"`
-	CreatedAt      time.Time          `json:"created_at"`
-	UpdatedAt      time.Time          `json:"updated_at"`
+	ID             string              `json:"id"`
+	Status         string              `json:"status"`
+	Task           taskResponse        `json:"task"`
+	Result         *runResultResponse  `json:"result,omitempty"`
+	FailureReason  string              `json:"failure_reason,omitempty"`
+	FailureCode    string              `json:"failure_code,omitempty"`
+	FailureMessage string              `json:"failure_message,omitempty"`
+	Steps          []stepResponse      `json:"steps"`
+	ToolCalls      []toolCallResponse  `json:"tool_calls,omitempty"`
+	AgentTurns     []agentTurnResponse `json:"agent_turns,omitempty"`
+	CreatedAt      time.Time           `json:"created_at"`
+	UpdatedAt      time.Time           `json:"updated_at"`
 }
 
 type runResultResponse struct {
@@ -62,6 +63,17 @@ type toolCallResponse struct {
 	EndedAt   time.Time         `json:"ended_at"`
 }
 
+type agentTurnResponse struct {
+	Index           int       `json:"index"`
+	Status          string    `json:"status"`
+	ActionType      string    `json:"action_type,omitempty"`
+	ToolName        string    `json:"tool_name,omitempty"`
+	Message         string    `json:"message,omitempty"`
+	ResponsePreview string    `json:"response_preview,omitempty"`
+	StartedAt       time.Time `json:"started_at"`
+	EndedAt         time.Time `json:"ended_at"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -96,6 +108,19 @@ func toRunResponse(item inbound.RunView) runResponse {
 			EndedAt:   call.EndedAt,
 		})
 	}
+	agentTurns := make([]agentTurnResponse, 0, len(item.AgentTurns))
+	for _, turn := range item.AgentTurns {
+		agentTurns = append(agentTurns, agentTurnResponse{
+			Index:           turn.Index,
+			Status:          turn.Status,
+			ActionType:      turn.ActionType,
+			ToolName:        turn.ToolName,
+			Message:         turn.Message,
+			ResponsePreview: turn.ResponsePreview,
+			StartedAt:       turn.StartedAt,
+			EndedAt:         turn.EndedAt,
+		})
+	}
 	response := runResponse{
 		ID:     item.ID,
 		Status: item.Status,
@@ -111,6 +136,7 @@ func toRunResponse(item inbound.RunView) runResponse {
 		FailureMessage: item.FailureMessage,
 		Steps:          steps,
 		ToolCalls:      toolCalls,
+		AgentTurns:     agentTurns,
 		CreatedAt:      item.CreatedAt,
 		UpdatedAt:      item.UpdatedAt,
 	}

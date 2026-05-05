@@ -35,6 +35,7 @@ func TestWorkerProcessOneCompletesQueuedRun(t *testing.T) {
 	if stored.FailureReason != "" {
 		t.Fatalf("stored failure reason = %q, want empty", stored.FailureReason)
 	}
+	assertAgentTurnStatuses(t, stored.AgentTurns, []string{run.AgentTurnStatusNaturalLanguageFinal})
 	assertSteps(t, stored.Steps, []wantStep{
 		{
 			name:    "prepare",
@@ -101,6 +102,13 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 	if stored.ToolCalls[0].Result != "tool result" {
 		t.Fatalf("tool call result = %q, want tool result", stored.ToolCalls[0].Result)
 	}
+	assertAgentTurnStatuses(t, stored.AgentTurns, []string{
+		run.AgentTurnStatusToolCall,
+		run.AgentTurnStatusFinal,
+	})
+	if stored.AgentTurns[0].ToolName != "echo" {
+		t.Fatalf("AgentTurns[0].ToolName = %q, want echo", stored.AgentTurns[0].ToolName)
+	}
 	assertSteps(t, stored.Steps, []wantStep{
 		{
 			name:    "prepare",
@@ -163,6 +171,12 @@ func TestWorkerStoresFileAndShellToolCallHistory(t *testing.T) {
 	if stored.ToolCalls[2].Result != "exit_code: 0\nstdout:\n/workspace\n" {
 		t.Fatalf("run_shell result = %q, want shell output", stored.ToolCalls[2].Result)
 	}
+	assertAgentTurnStatuses(t, stored.AgentTurns, []string{
+		run.AgentTurnStatusToolCall,
+		run.AgentTurnStatusToolCall,
+		run.AgentTurnStatusToolCall,
+		run.AgentTurnStatusFinal,
+	})
 }
 
 func TestWorkerPassesEmptyRuntimeContextToAgentTools(t *testing.T) {
@@ -501,6 +515,7 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 	if stored.FailureCode != run.FailureCodeModelGenerateFailed {
 		t.Fatalf("stored failure code = %q, want %q", stored.FailureCode, run.FailureCodeModelGenerateFailed)
 	}
+	assertAgentTurnStatuses(t, stored.AgentTurns, []string{run.AgentTurnStatusModelError})
 	if stored.FailureMessage != "model generation failed" {
 		t.Fatalf("stored failure message = %q, want model generation failed", stored.FailureMessage)
 	}
@@ -565,6 +580,10 @@ func TestWorkerProcessOneStoresPartialToolCallsWhenModelFailsAfterToolCall(t *te
 	if stored.ToolCalls[0].IsError {
 		t.Fatal("tool call IsError = true, want false")
 	}
+	assertAgentTurnStatuses(t, stored.AgentTurns, []string{
+		run.AgentTurnStatusToolCall,
+		run.AgentTurnStatusModelError,
+	})
 }
 
 func TestWorkerProcessOneStoresToolExecutionFailureDiagnosticsAndToolCall(t *testing.T) {
@@ -607,6 +626,7 @@ func TestWorkerProcessOneStoresToolExecutionFailureDiagnosticsAndToolCall(t *tes
 	if stored.ToolCalls[0].Result != "tool execution failed" {
 		t.Fatalf("tool call result = %q, want tool execution failed", stored.ToolCalls[0].Result)
 	}
+	assertAgentTurnStatuses(t, stored.AgentTurns, []string{run.AgentTurnStatusToolCall})
 }
 
 func TestWorkerProcessOneStoresMaxTurnsFailureCode(t *testing.T) {
@@ -641,6 +661,46 @@ func TestWorkerProcessOneStoresMaxTurnsFailureCode(t *testing.T) {
 	}
 	if len(stored.ToolCalls) != 1 {
 		t.Fatalf("len(ToolCalls) = %d, want 1", len(stored.ToolCalls))
+	}
+	assertAgentTurnStatuses(t, stored.AgentTurns, []string{
+		run.AgentTurnStatusToolCall,
+		run.AgentTurnStatusMaxTurns,
+	})
+}
+
+func TestWorkerProcessOneStoresProtocolCorrectionAgentTurns(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item := queueRun(ctx, t, repo, queue, now)
+
+	worker := newWorkerWithModel(
+		queue,
+		repo,
+		publisher,
+		now,
+		&protocolCorrectionModelClient{},
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+
+	stored := findRun(ctx, t, repo, item.ID)
+	if stored.Status != run.StatusCompleted {
+		t.Fatalf("stored status = %s, want %s", stored.Status, run.StatusCompleted)
+	}
+	assertAgentTurnStatuses(t, stored.AgentTurns, []string{
+		run.AgentTurnStatusProtocolError,
+		run.AgentTurnStatusFinal,
+	})
+	if stored.AgentTurns[0].ResponsePreview != `{"type":"tool_result","result":"hello"}` {
+		t.Fatalf("protocol preview = %q, want invalid response", stored.AgentTurns[0].ResponsePreview)
+	}
+	if len(stored.Steps) != 2 {
+		t.Fatalf("len(Steps) = %d, want coarse prepare and agent steps", len(stored.Steps))
 	}
 }
 
@@ -1079,6 +1139,22 @@ func (c *toolCallingModelClient) Generate(context.Context, outbound.ModelRequest
 	return outbound.ModelResponse{Content: `{"type":"final","summary":"done with tool"}`}, nil
 }
 
+type protocolCorrectionModelClient struct {
+	calls int
+}
+
+func (c *protocolCorrectionModelClient) Generate(
+	context.Context,
+	outbound.ModelRequest,
+) (outbound.ModelResponse, error) {
+	c.calls++
+	if c.calls == 1 {
+		return outbound.ModelResponse{Content: `{"type":"tool_result","result":"hello"}`}, nil
+	}
+
+	return outbound.ModelResponse{Content: `{"type":"final","summary":"corrected"}`}, nil
+}
+
 type modelFailingAfterToolClient struct {
 	calls int
 }
@@ -1384,6 +1460,22 @@ func assertSteps(t *testing.T, got []run.Step, want []wantStep) {
 	}
 	for i := range want {
 		assertStep(t, i, got[i], want[i])
+	}
+}
+
+func assertAgentTurnStatuses(t *testing.T, got []run.AgentTurn, want []string) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("len(AgentTurns) = %d, want %d; got %#v", len(got), len(want), got)
+	}
+	for i, status := range want {
+		if got[i].Index != i+1 {
+			t.Fatalf("AgentTurns[%d].Index = %d, want %d", i, got[i].Index, i+1)
+		}
+		if got[i].Status != status {
+			t.Fatalf("AgentTurns[%d].Status = %q, want %q", i, got[i].Status, status)
+		}
 	}
 }
 

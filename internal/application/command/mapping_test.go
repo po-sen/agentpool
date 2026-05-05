@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/po-sen/agentpool/internal/application/port/inbound"
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
@@ -38,6 +39,18 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 			Result:    "exit_code: 0",
 			StartedAt: time.Unix(104, 0).UTC(),
 			EndedAt:   time.Unix(105, 0).UTC(),
+		},
+	}
+	item.AgentTurns = []run.AgentTurn{
+		{
+			Index:           1,
+			Status:          run.AgentTurnStatusToolCall,
+			ActionType:      run.AgentTurnActionTypeToolCall,
+			ToolName:        "run_shell",
+			Message:         "model requested tool call",
+			ResponsePreview: `{"type":"tool_call"}`,
+			StartedAt:       time.Unix(106, 0).UTC(),
+			EndedAt:         time.Unix(107, 0).UTC(),
 		},
 	}
 	item.Steps = []run.Step{
@@ -89,8 +102,20 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	if item.ToolCalls[0].Arguments["command"] != "pwd" {
 		t.Fatalf("domain tool call command = %q, want pwd", item.ToolCalls[0].Arguments["command"])
 	}
+	assertMappedAgentTurn(t, view.AgentTurns)
 	if view.Steps[0].EndedAt == nil || !view.Steps[0].EndedAt.Equal(endedAt) {
 		t.Fatalf("EndedAt = %v, want %v", view.Steps[0].EndedAt, endedAt)
+	}
+}
+
+func assertMappedAgentTurn(t *testing.T, turns []inbound.AgentTurnView) {
+	t.Helper()
+
+	if len(turns) != 1 {
+		t.Fatalf("len(AgentTurns) = %d, want 1", len(turns))
+	}
+	if turns[0].ToolName != "run_shell" {
+		t.Fatalf("AgentTurns[0].ToolName = %q, want run_shell", turns[0].ToolName)
 	}
 }
 

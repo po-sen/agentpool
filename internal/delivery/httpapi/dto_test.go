@@ -47,6 +47,18 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 				EndedAt:   time.Unix(105, 0).UTC(),
 			},
 		},
+		AgentTurns: []inbound.AgentTurnView{
+			{
+				Index:           1,
+				Status:          "tool_call",
+				ActionType:      "tool_call",
+				ToolName:        "run_shell",
+				Message:         "model requested tool call",
+				ResponsePreview: `{"type":"tool_call"}`,
+				StartedAt:       time.Unix(106, 0).UTC(),
+				EndedAt:         time.Unix(107, 0).UTC(),
+			},
+		},
 		CreatedAt: time.Unix(100, 0).UTC(),
 		UpdatedAt: time.Unix(103, 0).UTC(),
 	}
@@ -88,6 +100,18 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	}
 	if response.ToolCalls[0].Arguments["command"] != "pwd" {
 		t.Fatalf("ToolCalls[0] command = %q, want pwd", response.ToolCalls[0].Arguments["command"])
+	}
+	assertAgentTurnResponse(t, response.AgentTurns)
+}
+
+func assertAgentTurnResponse(t *testing.T, turns []agentTurnResponse) {
+	t.Helper()
+
+	if len(turns) != 1 {
+		t.Fatalf("len(AgentTurns) = %d, want 1", len(turns))
+	}
+	if turns[0].ToolName != "run_shell" {
+		t.Fatalf("AgentTurns[0].ToolName = %q, want run_shell", turns[0].ToolName)
 	}
 }
 
@@ -316,6 +340,68 @@ func TestRunResponseJSONIncludesToolCalls(t *testing.T) {
 	}
 	if !strings.Contains(got, `"result":"exit_code: 0\nstdout:\n/workspace\n"`) {
 		t.Fatalf("response does not contain tool result: %s", got)
+	}
+}
+
+func TestRunResponseJSONIncludesAgentTurns(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:     "run_test",
+		Status: "completed",
+		AgentTurns: []inbound.AgentTurnView{
+			{
+				Index:           1,
+				Status:          "protocol_error",
+				Message:         "model response did not match AgentPool action protocol",
+				ResponsePreview: "{bad}",
+				StartedAt:       time.Unix(101, 0).UTC(),
+				EndedAt:         time.Unix(102, 0).UTC(),
+			},
+			{
+				Index:           2,
+				Status:          "tool_call",
+				ActionType:      "tool_call",
+				ToolName:        "list_files",
+				Message:         "model requested tool call",
+				ResponsePreview: `{"type":"tool_call"}`,
+				StartedAt:       time.Unix(103, 0).UTC(),
+				EndedAt:         time.Unix(104, 0).UTC(),
+			},
+		},
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(105, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if !strings.Contains(got, `"agent_turns":[{"index":1,"status":"protocol_error"`) {
+		t.Fatalf("response does not contain agent_turns: %s", got)
+	}
+	if !strings.Contains(got, `"tool_name":"list_files"`) {
+		t.Fatalf("response does not contain turn tool name: %s", got)
+	}
+	if !strings.Contains(got, `"response_preview":"{bad}"`) {
+		t.Fatalf("response does not contain response preview: %s", got)
+	}
+}
+
+func TestRunResponseJSONOmitsAgentTurnsWhenEmpty(t *testing.T) {
+	payload, err := json.Marshal(toRunResponse(inbound.RunView{
+		ID:        "run_test",
+		Status:    "queued",
+		Steps:     []inbound.StepView{},
+		CreatedAt: time.Unix(100, 0).UTC(),
+		UpdatedAt: time.Unix(101, 0).UTC(),
+	}))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	got := string(payload)
+	if strings.Contains(got, `"agent_turns"`) {
+		t.Fatalf("response contains empty agent_turns: %s", got)
 	}
 }
 
