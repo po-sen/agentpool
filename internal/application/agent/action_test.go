@@ -133,7 +133,7 @@ func TestParseActionRejectsInvalidJSONStringEscapeWithClearReason(t *testing.T) 
 	assertProtocolErrorCode(t, result, actionParseCodeInvalidJSON)
 	for _, want := range []string{
 		`JSON strings cannot use backslash before arbitrary punctuation such as \*`,
-		`encode it as \\* in JSON`,
+		`encode the backslash as \\ in JSON`,
 	} {
 		if !strings.Contains(result.parseErr.Message+" "+result.parseErr.Hint, want) {
 			t.Fatalf("parse error does not contain %q: %#v", want, result.parseErr)

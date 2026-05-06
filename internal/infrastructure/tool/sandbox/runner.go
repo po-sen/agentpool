@@ -97,7 +97,7 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        argumentCommand,
-					Description: "Command to run from /workspace. Stage inputs first; for multi-file checks, continue across files.",
+					Description: "Command to run from /workspace. If using authorized file sources, stage them first; for multi-file checks, continue across files.",
 					Required:    true,
 					Example:     "pwd",
 				},

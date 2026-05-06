@@ -301,13 +301,9 @@ func toChatToolParameters(arguments []outbound.ToolArgumentDefinition) chatToolP
 		if name == "" {
 			continue
 		}
-		description := strings.TrimSpace(argument.Description)
-		if argument.Example != "" {
-			description = strings.TrimSpace(description + " Example: " + argument.Example)
-		}
 		properties[name] = chatToolParameterSchema{
 			Type:        "string",
-			Description: description,
+			Description: strings.TrimSpace(argument.Description),
 		}
 		if argument.Required {
 			required = append(required, name)

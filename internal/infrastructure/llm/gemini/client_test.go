@@ -201,6 +201,9 @@ func TestToGeminiToolsBuildsFunctionDeclarations(t *testing.T) {
 	if declaration.Parameters.Properties["operation"].Type != "string" {
 		t.Fatalf("operation parameter = %#v, want string", declaration.Parameters.Properties["operation"])
 	}
+	if declaration.Parameters.Properties["operation"].Description != "Operation to run." {
+		t.Fatalf("operation description = %q, want no example suffix", declaration.Parameters.Properties["operation"].Description)
+	}
 }
 
 func TestNewClientRequiresAPIKey(t *testing.T) {

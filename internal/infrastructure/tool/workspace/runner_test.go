@@ -55,6 +55,20 @@ func TestRunnerDoesNotAdvertiseWithoutWorkspace(t *testing.T) {
 	}
 }
 
+func TestRunnerDoesNotAdvertiseWithoutSources(t *testing.T) {
+	runner := newTestRunner(t, nil)
+
+	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{
+		Context: outbound.ToolContext{Workspace: testWorkspaceWithSources(t, nil)},
+	})
+	if err != nil {
+		t.Fatalf("ListTools() error = %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("tools = %#v, want none", tools)
+	}
+}
+
 func TestRunnerListsSources(t *testing.T) {
 	materializer := &fakeMaterializer{
 		staged: []outbound.WorkspaceStagedFile{{SourceID: "input_001", Path: "README.md", SizeBytes: 4}},

@@ -27,7 +27,7 @@ func buildProtocolCorrectionMessage(parseErr actionParseError) string {
 	}
 	hint := parseErr.Hint
 	if hint == "" {
-		hint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"workspace","arguments":{"operation":"list_sources"}}.`
+		hint = `Return {"type":"final","summary":"..."} unless a listed tool is needed; tool_call requires "tool" and "arguments".`
 	}
 
 	return `Protocol error:
@@ -71,13 +71,25 @@ func buildPlaceholderToolArgumentCorrectionMessage(request placeholderToolArgume
 	if len(request.UploadedFileIDs) > 0 {
 		builder.WriteString("Uploaded files: ")
 		builder.WriteString(strings.Join(request.UploadedFileIDs, ", "))
-		builder.WriteString(". Stage authorized sources into /workspace before using file contents.\n")
+		builder.WriteString(". Use available file-source tools before reading file contents.\n")
+	} else if toolAvailable(request.AvailableTools, "workspace") {
+		builder.WriteString("If a file path is needed, discover it with the available file-source tool first.\n")
 	} else {
-		builder.WriteString("If a file path is needed, discover it with an available workspace tool first.\n")
+		builder.WriteString("Use concrete argument values from the task or available context.\n")
 	}
 	builder.WriteString("Available tools: ")
 	builder.WriteString(availableText)
 	builder.WriteString("\nReturn exactly one JSON object.")
 
 	return builder.String()
+}
+
+func toolAvailable(tools []string, name string) bool {
+	for _, tool := range tools {
+		if strings.TrimSpace(tool) == name {
+			return true
+		}
+	}
+
+	return false
 }

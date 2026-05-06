@@ -34,8 +34,8 @@ const (
 
 const (
 	finalActionHint    = `Return {"type":"final","summary":"..."}`
-	protocolActionHint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"workspace","arguments":{"operation":"list_sources"}}`
-	toolCallActionHint = `Return {"type":"tool_call","tool":"workspace","arguments":{"operation":"list_sources"}}`
+	protocolActionHint = `Return {"type":"final","summary":"..."} unless a listed tool is needed; tool_call requires "tool" and "arguments".`
+	toolCallActionHint = `Use a listed tool name and flat string arguments, or return {"type":"final","summary":"..."} if no tool is needed.`
 )
 
 const (
@@ -195,7 +195,7 @@ func invalidJSONActionMessage(err error) string {
 
 func invalidJSONActionHint(err error) string {
 	if isInvalidJSONStringEscapeError(err) {
-		return `JSON strings only allow escapes like \", \\, \n, \t, or \uXXXX. If a shell command needs \*, encode it as \\* in JSON, for example {"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"expr 123 \\* 654321 \\* 2"}}.`
+		return `JSON strings only allow escapes like \", \\, \n, \t, or \uXXXX. If text needs a literal backslash before punctuation, encode the backslash as \\ in JSON.`
 	}
 
 	return `Return exactly one JSON object like {"type":"final","summary":"..."}`

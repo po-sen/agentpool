@@ -72,6 +72,9 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 	if !workspaceAvailable(request.Context.Workspace) {
 		return nil, nil
 	}
+	if len(request.Context.Workspace.Sources) == 0 {
+		return nil, nil
+	}
 
 	return []outbound.ToolDefinition{
 		{
@@ -86,13 +89,13 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 				},
 				{
 					Name:        argumentSourceID,
-					Description: `Authorized source id to stage or restore. Required for "stage"; optional for "restore" when path identifies a staged file.`,
+					Description: `Authorized source id returned by workspace context or list_sources. Required for "stage"; optional for "restore" when path identifies a staged file.`,
 					Required:    false,
 					Example:     "input_001",
 				},
 				{
 					Name:        argumentSourceIDs,
-					Description: `Comma-separated authorized source ids to stage with "stage_many".`,
+					Description: `Comma-separated authorized source ids returned by workspace context or list_sources to stage with "stage_many".`,
 					Required:    false,
 					Example:     "input_001,input_002",
 				},

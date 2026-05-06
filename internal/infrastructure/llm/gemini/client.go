@@ -439,13 +439,9 @@ func toGeminiParameters(arguments []outbound.ToolArgumentDefinition) geminiParam
 		if name == "" {
 			continue
 		}
-		description := strings.TrimSpace(argument.Description)
-		if argument.Example != "" {
-			description = strings.TrimSpace(description + " Example: " + argument.Example)
-		}
 		properties[name] = geminiParameterSchema{
 			Type:        "string",
-			Description: description,
+			Description: strings.TrimSpace(argument.Description),
 		}
 		if argument.Required {
 			required = append(required, name)

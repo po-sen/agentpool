@@ -37,7 +37,7 @@ func TestBuildProtocolCorrectionMessageUsesFallbacks(t *testing.T) {
 	if !strings.Contains(message, "model response did not match AgentPool action protocol") {
 		t.Fatalf("message does not contain fallback parse error:\n%s", message)
 	}
-	if !strings.Contains(message, `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"workspace","arguments":{"operation":"list_sources"}}.`) {
+	if !strings.Contains(message, `Return {"type":"final","summary":"..."} unless a listed tool is needed; tool_call requires "tool" and "arguments".`) {
 		t.Fatalf("message does not contain fallback hint:\n%s", message)
 	}
 }
@@ -85,7 +85,7 @@ func TestBuildPlaceholderToolArgumentCorrectionMessageUsesUploadedFiles(t *testi
 		"placeholder argument values: command=<file_path>",
 		"Replace placeholders with concrete values before calling a tool.",
 		"Uploaded files: README.md.",
-		"Stage authorized sources into /workspace before using file contents.",
+		"Use available file-source tools before reading file contents.",
 		"Available tools: workspace, sandbox_exec",
 		"Return exactly one JSON object.",
 	} {
@@ -100,11 +100,21 @@ func TestBuildPlaceholderToolArgumentCorrectionMessageHandlesNoUploadedFiles(t *
 
 	for _, want := range []string{
 		"placeholder argument values: one or more arguments",
-		"discover it with an available workspace tool first",
+		"Use concrete argument values from the task or available context.",
 		"Available tools: none",
 	} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("message does not contain %q:\n%s", want, message)
 		}
+	}
+}
+
+func TestBuildPlaceholderToolArgumentCorrectionMessageUsesWorkspaceOnlyWhenAvailable(t *testing.T) {
+	message := buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
+		AvailableTools: []string{"workspace"},
+	})
+
+	if !strings.Contains(message, "discover it with the available file-source tool first") {
+		t.Fatalf("message does not point to available file-source tool:\n%s", message)
 	}
 }

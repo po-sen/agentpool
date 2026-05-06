@@ -36,15 +36,18 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		"echo: Returns text",
 		"Arguments: none",
 		"workspace: Manages authorized input sources and staged files for the mutable /workspace.",
-		`operation (required): Operation to run. Supported values: "list_sources", "stage", "stage_many", "restore", or "list". Example: list_sources`,
+		`operation (required): Operation to run. Supported values: "list_sources", "stage", "stage_many", "restore", or "list".`,
 		"sandbox_exec: Runs commands in a general-purpose sandbox from /workspace.",
-		`command (required): Command to run from /workspace. Stage inputs first; for multi-file checks, continue across files. Example: pwd`,
-		"timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10",
+		`command (required): Command to run from /workspace. If using authorized file sources, stage them first; for multi-file checks, continue across files.`,
+		"timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum.",
 	} {
 		assertPromptContains(t, prompt, want)
 	}
 
 	assertNoOldToolNames(t, prompt)
+	if strings.Contains(prompt, "Example:") {
+		t.Fatalf("prompt includes argument examples:\n%s", prompt)
+	}
 }
 
 func TestBuildSystemPromptListsPriorityToolPolicy(t *testing.T) {
@@ -52,14 +55,14 @@ func TestBuildSystemPromptListsPriorityToolPolicy(t *testing.T) {
 
 	for _, want := range []string{
 		"Tool policy:",
-		"workspace is a control-plane tool for authorized input sources and the mutable /workspace working copy.",
-		"Use workspace list_sources to discover inputs; stage only needed files; use stage_many when several known sources are needed; restore damaged staged files.",
+		"workspace is only for authorized file sources, never pure computation, code verification, or general reasoning.",
+		"Use only source_ids from workspace context or list_sources; never infer source_ids from task numbers. Stage only needed files.",
 		"If the task needs source file contents, call workspace stage before sandbox_exec or final.",
 		"workspace does not read file contents or execute commands.",
 		"For exact or externally checkable work, prefer sandbox_exec before final;",
 		"base final.summary on observed tool output.",
 		"sandbox_exec is a general-purpose command environment running from /workspace.",
-		"Use installed sandbox tools and scripts to inspect staged files, search text, compute, transform data, run project checks, and create artifacts under /workspace.",
+		"Use installed sandbox tools and scripts to inspect available files, search text, compute, transform data, run project checks, and create artifacts under /workspace.",
 		"Empty output, no matches, or nonzero exit is an observation; try broader queries, different commands, or direct inspection before final.",
 		"For subjective discussion, architecture advice, brainstorming, or simple conversation, return final directly when no command is needed.",
 		"If required content or capability is unavailable, answer only with what can be supported and state the user-facing limitation.",
@@ -73,11 +76,10 @@ func TestBuildSystemPromptListsWorkspaceRules(t *testing.T) {
 
 	for _, want := range []string{
 		"Workspace:",
-		"/workspace is a disposable mutable working copy.",
-		"Authorized input sources are not automatically readable until staged into /workspace.",
-		"Do not assume source paths exist in /workspace until workspace stage or list confirms them.",
-		"You may modify, move, or delete staged files; use workspace restore to recover source-backed files.",
-		"workspace paths are safe relative paths or full /workspace virtual paths.",
+		"/workspace is disposable; authorized sources are unreadable until staged.",
+		"Do not assume source paths exist until workspace stage or list confirms them.",
+		"You may modify staged files and restore source-backed files.",
+		"Use safe relative paths or full /workspace virtual paths.",
 		"Do not use placeholder paths like <file_path>.",
 	} {
 		assertPromptContains(t, prompt, want)
@@ -89,11 +91,25 @@ func TestBuildSystemPromptHandlesNoTools(t *testing.T) {
 
 	assertPromptContains(t, prompt, "Available tools:\n- none")
 	assertPromptContains(t, prompt, "If required content or capability is unavailable, answer only with what can be supported and state the user-facing limitation.")
+	if strings.Contains(prompt, "Workspace:") {
+		t.Fatalf("no-tools prompt contains workspace policy:\n%s", prompt)
+	}
 	if strings.Contains(prompt, "Arguments:") {
 		t.Fatalf("no-tools prompt contains arguments metadata:\n%s", prompt)
 	}
 	if strings.Contains(prompt, "prefer sandbox_exec before final") {
 		t.Fatalf("no-tools prompt includes sandbox_exec verification rule:\n%s", prompt)
+	}
+}
+
+func TestBuildSystemPromptUsesMinimalWorkspaceRulesForSandboxOnly(t *testing.T) {
+	prompt := buildSystemPrompt([]outbound.ToolDefinition{
+		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace."},
+	})
+
+	assertPromptContains(t, prompt, "sandbox_exec runs from disposable /workspace; create artifacts there when needed.")
+	if strings.Contains(prompt, "authorized sources are unreadable until staged") {
+		t.Fatalf("sandbox-only prompt includes source staging rules:\n%s", prompt)
 	}
 }
 
@@ -136,7 +152,7 @@ func testPromptTools() []outbound.ToolDefinition {
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        "command",
-					Description: "Command to run from /workspace. Stage inputs first; for multi-file checks, continue across files.",
+					Description: "Command to run from /workspace. If using authorized file sources, stage them first; for multi-file checks, continue across files.",
 					Required:    true,
 					Example:     "pwd",
 				},

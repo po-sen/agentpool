@@ -190,6 +190,9 @@ func TestToChatToolsBuildsFunctionSchemas(t *testing.T) {
 	if tools[0].Function.Parameters.Properties["command"].Type != "string" {
 		t.Fatalf("command parameter = %#v, want string", tools[0].Function.Parameters.Properties["command"])
 	}
+	if tools[0].Function.Parameters.Properties["command"].Description != "Command to run." {
+		t.Fatalf("command description = %q, want no example suffix", tools[0].Function.Parameters.Properties["command"].Description)
+	}
 	if len(tools[0].Function.Parameters.Required) != 1 || tools[0].Function.Parameters.Required[0] != "command" {
 		t.Fatalf("required = %#v, want command", tools[0].Function.Parameters.Required)
 	}

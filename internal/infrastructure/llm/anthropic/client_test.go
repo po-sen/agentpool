@@ -182,6 +182,9 @@ func TestToAnthropicToolsBuildsInputSchema(t *testing.T) {
 	if tools[0].InputSchema.Properties["operation"].Type != "string" {
 		t.Fatalf("operation parameter = %#v, want string", tools[0].InputSchema.Properties["operation"])
 	}
+	if tools[0].InputSchema.Properties["operation"].Description != "Operation to run." {
+		t.Fatalf("operation description = %q, want no example suffix", tools[0].InputSchema.Properties["operation"].Description)
+	}
 }
 
 func TestNewClientRequiresAPIKey(t *testing.T) {

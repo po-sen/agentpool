@@ -394,13 +394,9 @@ func toAnthropicInputSchema(arguments []outbound.ToolArgumentDefinition) anthrop
 		if name == "" {
 			continue
 		}
-		description := strings.TrimSpace(argument.Description)
-		if argument.Example != "" {
-			description = strings.TrimSpace(description + " Example: " + argument.Example)
-		}
 		properties[name] = anthropicParameterSchema{
 			Type:        "string",
-			Description: description,
+			Description: strings.TrimSpace(argument.Description),
 		}
 		if argument.Required {
 			required = append(required, name)

@@ -197,6 +197,9 @@ func TestToChatToolsBuildsCompatibleFunctionSchemas(t *testing.T) {
 	if tools[0].Function.Parameters.Properties["operation"].Type != "string" {
 		t.Fatalf("operation parameter = %#v, want string", tools[0].Function.Parameters.Properties["operation"])
 	}
+	if tools[0].Function.Parameters.Properties["operation"].Description != "Operation to run." {
+		t.Fatalf("operation description = %q, want no example suffix", tools[0].Function.Parameters.Properties["operation"].Description)
+	}
 }
 
 func TestClientGenerateOmitsAuthorizationWhenAPIKeyEmpty(t *testing.T) {

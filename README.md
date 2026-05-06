@@ -547,7 +547,7 @@ The agent protocol accepts only `tool_call` and `final` JSON actions. Models mus
 
 AgentPool exposes exactly two model-facing tools:
 
-- `workspace`: control-plane. It lists authorized input sources, stages selected sources into `/workspace`, restores staged files from their source, and lists currently staged/generated workspace files. It can stage one source or a known batch of source ids. It does not read file contents.
+- `workspace`: control-plane. It is advertised only when authorized input sources exist. It lists authorized input sources, stages selected sources into `/workspace`, restores staged files from their source, and lists currently staged/generated workspace files. It can stage one source or a known batch of source ids. It does not read file contents.
 - `sandbox_exec`: execution/data-plane. It runs commands through a command-capable sandbox from `/workspace`.
 
 Each run gets one mutable workspace:
@@ -556,7 +556,7 @@ Each run gets one mutable workspace:
 /workspace  disposable agent working copy
 ```
 
-Run attachments become authorized input sources first. They are not automatically readable by sandbox commands until the agent stages them with `workspace`. Once staged, files are normal mutable copies under `/workspace`; the agent may modify, move, delete, or restore source-backed files. `workspace` accepts safe relative paths or full virtual paths such as `/workspace/README.md`. When several needed sources are already known, the agent can use `stage_many` with comma-separated `source_ids` to avoid one tool turn per file. It never returns host temp paths. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
+Run attachments become authorized input sources first. They are not automatically readable by sandbox commands until the agent stages them with `workspace`. Once staged, files are normal mutable copies under `/workspace`; the agent may modify, move, delete, or restore source-backed files. `workspace` accepts safe relative paths or full virtual paths such as `/workspace/README.md`. When several needed sources are already known, the agent can use `stage_many` with comma-separated `source_ids` to avoid one tool turn per file. It never returns host temp paths. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so prompt-only runs expose no tools and uploaded-file runs expose `workspace`.
 
 When `sandbox_exec` is available, exact or verifiable tasks should be checked through sandbox execution instead of guessed. That includes exact arithmetic, counting or searching files, transforming data, and running small scripts, tests, builds, or linters. Subjective discussion, design advice, brainstorming, and simple conversation can return a final JSON action directly when no command is needed.
 
@@ -574,21 +574,21 @@ The JSON tool-call action remains as a compatibility fallback when native tool c
 }
 ```
 
-Advertised tools include minimal argument hints in the system prompt while execution still receives string arguments:
+Advertised tools include minimal argument hints in the system prompt while execution still receives string arguments. Example values are intentionally omitted from model-facing prompt text and provider tool schemas so the model must use concrete values from the task, workspace context, or prior tool observations.
 
 ```text
 Available tools:
 - workspace: Manages authorized input sources and staged files for the mutable /workspace.
   Arguments:
-  - operation (required): Operation to run. Supported values: "list_sources", "stage", "stage_many", "restore", or "list". Example: list_sources
-  - source_id (optional): Authorized source id to stage or restore. Example: input_001
-  - source_ids (optional): Comma-separated authorized source ids to stage with "stage_many". Example: input_001,input_002
-  - path (optional): Safe relative /workspace path, or a full /workspace virtual path. Not used by "stage_many". Example: README.md
+  - operation (required): Operation to run. Supported values: "list_sources", "stage", "stage_many", "restore", or "list".
+  - source_id (optional): Authorized source id returned by workspace context or list_sources.
+  - source_ids (optional): Comma-separated authorized source ids returned by workspace context or list_sources to stage with "stage_many".
+  - path (optional): Safe relative /workspace path, or a full /workspace virtual path. Not used by "stage_many".
 - sandbox_exec: Runs commands in a general-purpose sandbox from /workspace.
   Arguments:
-  - command (required): Command to run from /workspace. Stage inputs first; for multi-file checks, continue across files. Example: wc -l /workspace/README.md
-  - timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10
-  - max_output_bytes (optional): Optional maximum combined stdout and stderr bytes returned by the tool. Example: 65536
+  - command (required): Command to run from /workspace. If using authorized file sources, stage them first; for multi-file checks, continue across files.
+  - timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum.
+  - max_output_bytes (optional): Optional maximum combined stdout and stderr bytes returned by the tool.
 ```
 
 Final answers use:

@@ -37,8 +37,8 @@ func TestRunnerAdvertisesOnlySandboxExec(t *testing.T) {
 	if !strings.Contains(tools[0].Arguments[0].Description, "/workspace") {
 		t.Fatalf("command description = %q, want workspace guidance", tools[0].Arguments[0].Description)
 	}
-	if !strings.Contains(tools[0].Arguments[0].Description, "Stage inputs") {
-		t.Fatalf("command description = %q, want staging guidance", tools[0].Arguments[0].Description)
+	if !strings.Contains(tools[0].Arguments[0].Description, "If using authorized file sources") {
+		t.Fatalf("command description = %q, want conditional file-source guidance", tools[0].Arguments[0].Description)
 	}
 	if !strings.Contains(tools[0].Arguments[0].Description, "continue across files") {
 		t.Fatalf("command description = %q, want multi-file guidance", tools[0].Arguments[0].Description)
