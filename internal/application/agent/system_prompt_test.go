@@ -32,7 +32,7 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		"workspace: Lists or stats workspace paths without reading file contents.",
 		`operation (required): Operation to run. Supported values: "list" or "stat". Example: list`,
 		"sandbox_exec: Runs a command inside the sandbox from /workspace/work.",
-		`command (required): Command to run inside the sandbox. For integer arithmetic, shell arithmetic is fine; for roots, decimals, or math functions, use a command that supports them such as awk. Example: awk 'BEGIN { print 123 * 321 }'`,
+		`command (required): Command to run inside the sandbox. For integer arithmetic, shell arithmetic is fine; for roots, decimals, or math functions, use python3 or awk to compute the value. For roots, print a root candidate and residual. Example: python3 -c 'print(123 * 321)'`,
 		"timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10",
 	} {
 		assertPromptContains(t, prompt, want)
@@ -50,7 +50,9 @@ func TestBuildSystemPromptListsPriorityToolPolicy(t *testing.T) {
 		"Do not guess exact answers when sandbox_exec can verify them.",
 		"Use sandbox_exec for arithmetic, counts, searches, file content inspection, data transforms, tests, builds, linters, and code behavior checks.",
 		"The sandbox_exec command must compute or inspect the answer; do not use it to echo an unverified guess.",
-		"Use shell arithmetic only for integer-only expressions; use a command with math functions, such as awk, for roots or decimals.",
+		"Use shell arithmetic only for integer-only expressions; use python3 or awk for decimals, math functions, or numerical methods.",
+		"For equations or roots, prefer a bracketed method such as bisection or brentq and base the final answer on computed output that includes a root candidate and residual.",
+		"Preserve significant digits from numeric tool output; do not round away verified evidence.",
 		"After a sandbox_exec error, call sandbox_exec again with a corrected command before final.",
 		"For subjective discussion, architecture advice, brainstorming, or simple conversation, return a final JSON action directly when no command is needed.",
 		"If a needed tool is unavailable, answer with what can be known and say what could not be verified.",
@@ -134,9 +136,9 @@ func testPromptTools() []outbound.ToolDefinition {
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        "command",
-					Description: "Command to run inside the sandbox. For integer arithmetic, shell arithmetic is fine; for roots, decimals, or math functions, use a command that supports them such as awk.",
+					Description: "Command to run inside the sandbox. For integer arithmetic, shell arithmetic is fine; for roots, decimals, or math functions, use python3 or awk to compute the value. For roots, print a root candidate and residual.",
 					Required:    true,
-					Example:     `awk 'BEGIN { print 123 * 321 }'`,
+					Example:     `python3 -c 'print(123 * 321)'`,
 				},
 				{
 					Name:        "timeout_seconds",

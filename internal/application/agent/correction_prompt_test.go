@@ -87,7 +87,46 @@ func TestBuildSandboxExecErrorFinalCorrectionMessageRequiresRetry(t *testing.T) 
 		"previous sandbox_exec command failed",
 		"not verified yet",
 		"Call sandbox_exec again with a corrected command before returning final.",
-		"such as awk",
+		"use python3 or awk",
+		"Return exactly one JSON object.",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
+func TestBuildSandboxExecStaticOutputCorrectionMessageRequiresComputation(t *testing.T) {
+	message := buildSandboxExecStaticOutputCorrectionMessage()
+
+	for _, want := range []string{
+		"only printed static text",
+		"next response must be a sandbox_exec tool_call, not final",
+		"computing or inspecting the answer",
+		"Call sandbox_exec again",
+		"awk and Python are fine when they actually compute",
+		"run a numerical method",
+		"root candidate and residual",
+		"Example shape for a root task",
+		"Return exactly one JSON object.",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
+func TestBuildSandboxExecUnverifiedNumericalSolveCorrectionMessageRequiresResidual(t *testing.T) {
+	message := buildSandboxExecUnverifiedNumericalSolveCorrectionMessage()
+
+	for _, want := range []string{
+		"unverified numerical solve",
+		"next response must be a sandbox_exec tool_call, not final",
+		"bracketed method",
+		"f(lo) and f(hi) have opposite signs",
+		"root candidate",
+		"residual f(root)",
+		"Do not use an arbitrary initial guess",
 		"Return exactly one JSON object.",
 	} {
 		if !strings.Contains(message, want) {

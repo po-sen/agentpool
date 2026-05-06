@@ -21,6 +21,8 @@ var errToolRunnerRequired = errors.New("tool runner is required")
 
 const toolNameSandboxExec = "sandbox_exec"
 
+const toolArgumentCommand = "command"
+
 const agentTurnPreviewTruncatedMarker = "\n... [truncated]"
 
 const (
@@ -97,17 +99,20 @@ type TurnMessageRecord struct {
 }
 
 type runSession struct {
-	request            RunRequest
-	systemPrompt       string
-	availableTools     map[string]outbound.ToolDefinition
-	toolDefinitions    []outbound.ToolDefinition
-	availableToolNames []string
-	turns              []outbound.ModelTurn
-	turnIndex          int
-	toolCallCount      int
-	toolCalls          []ToolCallRecord
-	turnRecords        []TurnRecord
-	sandboxExecErrored bool
+	request                    RunRequest
+	systemPrompt               string
+	availableTools             map[string]outbound.ToolDefinition
+	toolDefinitions            []outbound.ToolDefinition
+	availableToolNames         []string
+	turns                      []outbound.ModelTurn
+	turnIndex                  int
+	toolCallCount              int
+	toolCalls                  []ToolCallRecord
+	turnRecords                []TurnRecord
+	sandboxExecErrored         bool
+	sandboxExecRetryRequired   bool
+	sandboxExecRetryMessage    string
+	sandboxExecRetryCorrection string
 }
 
 type modelTurnContext struct {
@@ -336,13 +341,24 @@ func (r *Runner) handleAction(
 
 			return session.partialResult(), false, newAgentError(ErrorCodeFinalSummaryInvalid, "", err)
 		}
-		if session.sandboxExecErrored {
+		if session.sandboxExecErrored || session.sandboxExecRetryRequired {
+			message := "final answer attempted after failed sandbox_exec"
 			correctionMessage := buildSandboxExecErrorFinalCorrectionMessage()
+			if session.sandboxExecRetryRequired {
+				message = session.sandboxExecRetryMessage
+				if message == "" {
+					message = "final answer attempted after invalid sandbox_exec"
+				}
+				correctionMessage = session.sandboxExecRetryCorrection
+				if correctionMessage == "" {
+					correctionMessage = buildSandboxExecStaticOutputCorrectionMessage()
+				}
+			}
 			session.recordTurn(TurnRecord{
 				Index:             turn.index,
 				Status:            run.AgentTurnStatusProtocolError,
 				ActionType:        run.AgentTurnActionTypeFinal,
-				Message:           "final answer attempted after failed sandbox_exec",
+				Message:           message,
 				RequestMessages:   turn.requestMessages,
 				RawResponse:       turn.content,
 				ResponseFormat:    turn.responseFormat,
@@ -378,6 +394,12 @@ func (r *Runner) handleAction(
 		}
 		if placeholders := placeholderArgumentValues(parsed.Arguments); len(placeholders) > 0 {
 			return handlePlaceholderToolCall(session, turn, parsed, placeholders)
+		}
+		if sandboxExecCommandOnlyPrintsStaticText(parsed.Tool, parsed.Arguments) {
+			return handleStaticOutputSandboxExecToolCall(session, turn, parsed.Tool, turn.content)
+		}
+		if sandboxExecCommandUsesUnverifiedNumericalSolve(parsed.Tool, parsed.Arguments) {
+			return handleUnverifiedNumericalSandboxExecToolCall(session, turn, parsed.Tool, turn.content)
 		}
 
 		session.recordTurn(TurnRecord{
@@ -537,6 +559,11 @@ func (s *runSession) recordSandboxExecResult(tool string, result outbound.ToolRe
 	}
 
 	s.sandboxExecErrored = result.IsError
+	if !result.IsError {
+		s.sandboxExecRetryRequired = false
+		s.sandboxExecRetryMessage = ""
+		s.sandboxExecRetryCorrection = ""
+	}
 }
 
 func (s *runSession) partialResult() RunResult {
@@ -623,6 +650,69 @@ func handlePlaceholderToolCall(
 	return RunResult{}, false, nil
 }
 
+func handleStaticOutputSandboxExecToolCall(
+	session *runSession,
+	turn modelTurnContext,
+	toolName string,
+	content string,
+) (RunResult, bool, error) {
+	message := "sandbox_exec command only printed static text"
+	session.recordTurn(TurnRecord{
+		Index:           turn.index,
+		Status:          run.AgentTurnStatusInvalidToolCall,
+		ActionType:      run.AgentTurnActionTypeToolCall,
+		ToolName:        toolName,
+		Message:         message,
+		RequestMessages: turn.requestMessages,
+		RawResponse:     turn.content,
+		ResponseFormat:  turn.responseFormat,
+		ResponsePreview: previewModelResponse(turn.content),
+		StartedAt:       turn.startedAt,
+		EndedAt:         turn.endedAt,
+	})
+	session.turns = append(session.turns,
+		assistantAttemptTurn(content),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, buildSandboxExecStaticOutputCorrectionMessage()),
+	)
+	session.sandboxExecRetryRequired = true
+	session.sandboxExecRetryMessage = "final answer attempted after invalid sandbox_exec"
+	session.sandboxExecRetryCorrection = buildSandboxExecStaticOutputCorrectionMessage()
+
+	return RunResult{}, false, nil
+}
+
+func handleUnverifiedNumericalSandboxExecToolCall(
+	session *runSession,
+	turn modelTurnContext,
+	toolName string,
+	content string,
+) (RunResult, bool, error) {
+	message := "sandbox_exec numerical solve did not verify residual"
+	correctionMessage := buildSandboxExecUnverifiedNumericalSolveCorrectionMessage()
+	session.recordTurn(TurnRecord{
+		Index:           turn.index,
+		Status:          run.AgentTurnStatusInvalidToolCall,
+		ActionType:      run.AgentTurnActionTypeToolCall,
+		ToolName:        toolName,
+		Message:         message,
+		RequestMessages: turn.requestMessages,
+		RawResponse:     turn.content,
+		ResponseFormat:  turn.responseFormat,
+		ResponsePreview: previewModelResponse(turn.content),
+		StartedAt:       turn.startedAt,
+		EndedAt:         turn.endedAt,
+	})
+	session.turns = append(session.turns,
+		assistantAttemptTurn(content),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
+	)
+	session.sandboxExecRetryRequired = true
+	session.sandboxExecRetryMessage = "final answer attempted after unverified sandbox_exec numerical solve"
+	session.sandboxExecRetryCorrection = correctionMessage
+
+	return RunResult{}, false, nil
+}
+
 func uploadedFilePaths(task run.TaskSpec) []string {
 	if len(task.Attachments) == 0 {
 		return nil
@@ -634,6 +724,104 @@ func uploadedFilePaths(task run.TaskSpec) []string {
 	}
 
 	return paths
+}
+
+func sandboxExecCommandOnlyPrintsStaticText(tool string, arguments map[string]string) bool {
+	if strings.TrimSpace(tool) != toolNameSandboxExec {
+		return false
+	}
+	command := strings.TrimSpace(arguments[toolArgumentCommand])
+	if command == "" || sandboxExecCommandHasDynamicShellExpansion(command) {
+		return false
+	}
+
+	lower := strings.ToLower(command)
+	switch {
+	case strings.HasPrefix(lower, "echo "):
+		return true
+	case strings.HasPrefix(lower, "printf "):
+		return true
+	case strings.HasPrefix(lower, "awk ") && sandboxExecAwkPrintsQuotedLiteral(lower):
+		return true
+	case strings.Contains(lower, "python") && sandboxExecPythonPrintsQuotedLiteral(lower):
+		return true
+	default:
+		return false
+	}
+}
+
+func sandboxExecCommandUsesUnverifiedNumericalSolve(tool string, arguments map[string]string) bool {
+	if strings.TrimSpace(tool) != toolNameSandboxExec {
+		return false
+	}
+	command := strings.ToLower(strings.TrimSpace(arguments[toolArgumentCommand]))
+	if command == "" {
+		return false
+	}
+	if strings.Contains(command, "brentq") || strings.Contains(command, "bisect") {
+		return false
+	}
+
+	return sandboxExecCommandUsesNumericalSolver(command) && !sandboxExecCommandPrintsResidual(command)
+}
+
+func sandboxExecCommandUsesNumericalSolver(command string) bool {
+	return strings.Contains(command, "fsolve") ||
+		strings.Contains(command, "scipy.optimize.root") ||
+		strings.Contains(command, "optimize.root(")
+}
+
+func sandboxExecCommandPrintsResidual(command string) bool {
+	return strings.Contains(command, "residual") ||
+		strings.Contains(command, "f(root") ||
+		strings.Contains(command, "f(x)") ||
+		strings.Contains(command, "f(mid)") ||
+		strings.Contains(command, "f(m)")
+}
+
+func sandboxExecCommandHasDynamicShellExpansion(command string) bool {
+	return strings.Contains(command, "$(") ||
+		strings.Contains(command, "${") ||
+		strings.Contains(command, "$((") ||
+		strings.Contains(command, "`")
+}
+
+func sandboxExecAwkPrintsQuotedLiteral(command string) bool {
+	if !strings.Contains(command, "begin") {
+		return false
+	}
+
+	return printCallHasOnlyQuotedLiteral(command, `print "`, `"`, "}") ||
+		printCallHasOnlyQuotedLiteral(command, `print \"`, `\"`, "}") ||
+		printCallHasOnlyQuotedLiteral(command, "print '", "'", "}")
+}
+
+func sandboxExecPythonPrintsQuotedLiteral(command string) bool {
+	return printCallHasOnlyQuotedLiteral(command, `print("`, `"`, ")") ||
+		printCallHasOnlyQuotedLiteral(command, `print('`, "'", ")") ||
+		printCallHasOnlyQuotedLiteral(command, `print(\"`, `\"`, ")") ||
+		printCallHasOnlyQuotedLiteral(command, `print(\'`, `\'`, ")")
+}
+
+func printCallHasOnlyQuotedLiteral(command string, open string, closeToken string, terminator string) bool {
+	start := strings.Index(command, open)
+	if start < 0 {
+		return false
+	}
+	afterOpen := command[start+len(open):]
+	closeIndex := strings.Index(afterOpen, closeToken)
+	if closeIndex < 0 {
+		return false
+	}
+	afterClose := strings.TrimLeft(afterOpen[closeIndex+len(closeToken):], " \t;")
+	if strings.HasPrefix(afterClose, terminator) {
+		return true
+	}
+	if terminator == "}" && strings.HasPrefix(afterClose, `}`) {
+		return true
+	}
+
+	return false
 }
 
 func (r *Runner) handleToolCall(ctx context.Context, session *runSession, content string, parsed action) (RunResult, bool, error) {
@@ -695,6 +883,12 @@ func (r *Runner) handleNativeToolCalls(
 		}
 		if placeholders := placeholderArgumentValues(call.Arguments); len(placeholders) > 0 {
 			return handlePlaceholderNativeToolCall(session, turn, call, placeholders)
+		}
+		if sandboxExecCommandOnlyPrintsStaticText(call.Name, call.Arguments) {
+			return handleStaticOutputSandboxExecToolCall(session, turn, call.Name, turn.content)
+		}
+		if sandboxExecCommandUsesUnverifiedNumericalSolve(call.Name, call.Arguments) {
+			return handleUnverifiedNumericalSandboxExecToolCall(session, turn, call.Name, turn.content)
 		}
 	}
 
@@ -1178,7 +1372,7 @@ func isPlaceholderName(name string) bool {
 
 	compact := strings.NewReplacer("_", "", "-", "", " ", "").Replace(normalized)
 	switch compact {
-	case "command", "filename", "filepath", "key", "path", "toolname", "value":
+	case toolArgumentCommand, "filename", "filepath", "key", "path", "toolname", "value":
 		return true
 	default:
 		return strings.Contains(compact, "file") || strings.Contains(compact, "path")

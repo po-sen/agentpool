@@ -90,11 +90,32 @@ func buildPlaceholderToolArgumentCorrectionMessage(request placeholderToolArgume
 	return builder.String()
 }
 
+func buildSandboxExecStaticOutputCorrectionMessage() string {
+	return `Tool call error:
+The previous sandbox_exec command only printed static text instead of computing or inspecting the answer.
+Your next response must be a sandbox_exec tool_call, not final.
+Call sandbox_exec again with a command that performs the calculation, numerical solve, search, test, or file inspection.
+Do not use echo, printf, awk, Python, or another command only to print a guessed final answer. awk and Python are fine when they actually compute.
+For equations or roots, run a numerical method or another real computation and print computed evidence such as a root candidate and residual.
+Example shape for a root task: python3 -c 'def f(x): return ...; lo, hi = ..., ...; ...; print("root=", x, "residual=", f(x))'
+Return exactly one JSON object.`
+}
+
+func buildSandboxExecUnverifiedNumericalSolveCorrectionMessage() string {
+	return `Tool call error:
+The previous sandbox_exec command used an unverified numerical solve and printed only a solver candidate.
+Your next response must be a sandbox_exec tool_call, not final.
+For one-variable equations, use a bracketed method such as bisection or scipy.optimize.brentq after finding an interval where f(lo) and f(hi) have opposite signs.
+Print both the root candidate and the residual f(root).
+Do not use an arbitrary initial guess and print only the solver candidate.
+Return exactly one JSON object.`
+}
+
 func buildSandboxExecErrorFinalCorrectionMessage() string {
 	return `Tool call error:
 The previous sandbox_exec command failed, so the exact or verifiable answer is not verified yet.
 Call sandbox_exec again with a corrected command before returning final.
 For integer-only expressions, POSIX shell arithmetic is acceptable.
-For roots, decimals, or math functions, use a command that supports them, such as awk.
+For roots, decimals, or math functions, use python3 or awk.
 Return exactly one JSON object.`
 }

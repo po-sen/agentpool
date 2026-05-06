@@ -333,6 +333,271 @@ func TestRunnerCallsProviderStyleToolCallTextAndReturnsFinalSummary(t *testing.T
 	})
 }
 
+func TestRunnerRejectsSandboxExecStaticOutputCommandAndContinues(t *testing.T) {
+	staticCommand := `awk 'BEGIN { print "The equation x^5 - x + 1 = 0 has no real solutions." }'`
+	computeCommand := `awk 'BEGIN { print (123 * 321) }'`
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(staticCommand, `"`, `\"`) + `","max_output_bytes":65536,"timeout_seconds":10}}`},
+			{Content: `{"type":"final","summary":"The equation x^5 - x + 1 = 0 has no real solutions."}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + computeCommand + `","max_output_bytes":65536,"timeout_seconds":10}}`},
+			{Content: `{"type":"final","summary":"39483"}`},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
+	})
+	tools.results = map[string]outbound.ToolResult{
+		"sandbox_exec": {Content: "exit_code: 0\nstdout:\n39483\n"},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "solve exactly"},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspace(),
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "39483" {
+		t.Fatalf("summary = %q, want 39483", result.Summary)
+	}
+	if result.ToolCallCount != 1 {
+		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want only corrected command", len(tools.calls))
+	}
+	if tools.calls[0].Arguments["command"] != computeCommand {
+		t.Fatalf("sandbox_exec command = %q, want computed command", tools.calls[0].Arguments["command"])
+	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusInvalidToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+		message:    "sandbox_exec command only printed static text",
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:              2,
+		status:             run.AgentTurnStatusProtocolError,
+		actionType:         run.AgentTurnActionTypeFinal,
+		message:            "final answer attempted after invalid sandbox_exec",
+		correctionContains: "Call sandbox_exec again",
+		responsePreview:    "The equation x^5 - x + 1 = 0 has no real solutions.",
+	})
+	assertTurn(t, result.AgentTurns, 2, wantTurn{
+		index:      3,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+	})
+	correction := requestMessages(model.requests[1])
+	assertMessage(t, correction[len(correction)-1], "runtime", "only printed static text")
+	assertMessage(t, correction[len(correction)-1], "runtime", "performs the calculation")
+	finalCorrection := requestMessages(model.requests[2])
+	assertMessage(t, finalCorrection[len(finalCorrection)-1], "runtime", "only printed static text")
+}
+
+func TestSandboxExecCommandOnlyPrintsStaticText(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{
+			name:    "awk static sentence",
+			command: `awk 'BEGIN { print "The equation has no real solutions." }'`,
+			want:    true,
+		},
+		{
+			name:    "echo static sentence",
+			command: `echo "The answer is 42"`,
+			want:    true,
+		},
+		{
+			name:    "printf static sentence",
+			command: `printf "The answer is 42\n"`,
+			want:    true,
+		},
+		{
+			name:    "python static sentence",
+			command: `python3 -c 'print("The answer is 42")'`,
+			want:    true,
+		},
+		{
+			name:    "awk arithmetic",
+			command: `awk 'BEGIN { print (123 * 321) }'`,
+			want:    false,
+		},
+		{
+			name:    "awk label and arithmetic",
+			command: `awk 'BEGIN { print "root=", sqrt(2) }'`,
+			want:    false,
+		},
+		{
+			name:    "printf shell arithmetic",
+			command: `printf '%s\n' "$((123 * 321))"`,
+			want:    false,
+		},
+		{
+			name:    "python arithmetic",
+			command: `python3 -c 'print(123 * 321)'`,
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sandboxExecCommandOnlyPrintsStaticText(toolNameSandboxExec, map[string]string{"command": tt.command})
+			if got != tt.want {
+				t.Fatalf("sandboxExecCommandOnlyPrintsStaticText() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunnerRejectsUnverifiedNumericalSolveAndContinues(t *testing.T) {
+	unverifiedCommand := `python3 -c 'from scipy.optimize import fsolve; f=lambda x:x**5-x+1; root=fsolve(f,0); print(root[0])'`
+	verifiedCommand := `python3 -c 'from scipy.optimize import brentq; f=lambda x:x**5-x+1; x=brentq(f,-2,-1); print("root=", x, "residual=", f(x))'`
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(unverifiedCommand, `"`, `\"`) + `","max_output_bytes":65536,"timeout_seconds":10}}`},
+			{Content: `{"type":"final","summary":"x is approximately 0.6687327712886604."}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(verifiedCommand, `"`, `\"`) + `","max_output_bytes":65536,"timeout_seconds":10}}`},
+			{Content: `{"type":"final","summary":"x is approximately -1.1673039782614187."}`},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
+	})
+	tools.results = map[string]outbound.ToolResult{
+		"sandbox_exec": {Content: "exit_code: 0\nstdout:\nroot= -1.1673039782614187 residual= 0.0\n"},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "solve x^5 - x + 1 = 0"},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspace(),
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "x is approximately -1.1673039782614187." {
+		t.Fatalf("summary = %q, want corrected root", result.Summary)
+	}
+	if result.ToolCallCount != 1 {
+		t.Fatalf("ToolCallCount = %d, want only verified command", result.ToolCallCount)
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want only verified command", len(tools.calls))
+	}
+	if tools.calls[0].Arguments["command"] != verifiedCommand {
+		t.Fatalf("sandbox_exec command = %q, want verified command", tools.calls[0].Arguments["command"])
+	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusInvalidToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+		message:    "sandbox_exec numerical solve did not verify residual",
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:              2,
+		status:             run.AgentTurnStatusProtocolError,
+		actionType:         run.AgentTurnActionTypeFinal,
+		message:            "final answer attempted after unverified sandbox_exec numerical solve",
+		correctionContains: "bracketed method",
+		responsePreview:    "x is approximately 0.6687327712886604.",
+	})
+	assertTurn(t, result.AgentTurns, 2, wantTurn{
+		index:      3,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+	})
+	correction := requestMessages(model.requests[1])
+	assertMessage(t, correction[len(correction)-1], "runtime", "unverified numerical solve")
+	assertMessage(t, correction[len(correction)-1], "runtime", "residual f(root)")
+	finalCorrection := requestMessages(model.requests[2])
+	assertMessage(t, finalCorrection[len(finalCorrection)-1], "runtime", "unverified numerical solve")
+}
+
+func TestSandboxExecCommandUsesUnverifiedNumericalSolve(t *testing.T) {
+	tests := []struct {
+		name    string
+		tool    string
+		command string
+		want    bool
+	}{
+		{
+			name:    "fsolve candidate only",
+			tool:    toolNameSandboxExec,
+			command: `python3 -c 'from scipy.optimize import fsolve; f=lambda x:x**5-x+1; root=fsolve(f,0); print(root[0])'`,
+			want:    true,
+		},
+		{
+			name:    "optimize root candidate only",
+			tool:    toolNameSandboxExec,
+			command: `python3 -c 'import scipy.optimize as optimize; result=optimize.root(lambda x: x**2-2, 1); print(result.x[0])'`,
+			want:    true,
+		},
+		{
+			name:    "brentq bracketed root",
+			tool:    toolNameSandboxExec,
+			command: `python3 -c 'from scipy.optimize import brentq; print(brentq(lambda x:x*x-2,1,2))'`,
+			want:    false,
+		},
+		{
+			name:    "brentq with residual",
+			tool:    toolNameSandboxExec,
+			command: `python3 -c 'from scipy.optimize import brentq; f=lambda x:x*x-2; x=brentq(f,1,2); print("root=", x, "residual=", f(x))'`,
+			want:    false,
+		},
+		{
+			name:    "fsolve with residual",
+			tool:    toolNameSandboxExec,
+			command: `python3 -c 'from scipy.optimize import fsolve; f=lambda x:x*x-2; root=fsolve(f,1)[0]; print(root, f(root))'`,
+			want:    false,
+		},
+		{
+			name:    "manual bisection",
+			tool:    toolNameSandboxExec,
+			command: `python3 -c 'print("root=", -1.167, "residual=", 0.0)'`,
+			want:    false,
+		},
+		{
+			name:    "different tool",
+			tool:    "workspace",
+			command: `python3 -c 'from scipy.optimize import fsolve; print(fsolve(lambda x:x, 0)[0])'`,
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sandboxExecCommandUsesUnverifiedNumericalSolve(tt.tool, map[string]string{"command": tt.command})
+			if got != tt.want {
+				t.Fatalf("sandboxExecCommandUsesUnverifiedNumericalSolve() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunnerRequiresSuccessfulSandboxExecAfterSandboxErrorBeforeFinal(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{

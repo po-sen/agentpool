@@ -25,7 +25,9 @@ func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 		builder.WriteString("- If sandbox_exec is available and the task has an exact or verifiable answer, call sandbox_exec before final. Do not guess exact answers when sandbox_exec can verify them.\n")
 		builder.WriteString("- Use sandbox_exec for arithmetic, counts, searches, file content inspection, data transforms, tests, builds, linters, and code behavior checks.\n")
 		builder.WriteString("- The sandbox_exec command must compute or inspect the answer; do not use it to echo an unverified guess.\n")
-		builder.WriteString("- Use shell arithmetic only for integer-only expressions; use a command with math functions, such as awk, for roots or decimals.\n")
+		builder.WriteString("- Use shell arithmetic only for integer-only expressions; use python3 or awk for decimals, math functions, or numerical methods.\n")
+		builder.WriteString("- For equations or roots, prefer a bracketed method such as bisection or brentq and base the final answer on computed output that includes a root candidate and residual.\n")
+		builder.WriteString("- Preserve significant digits from numeric tool output; do not round away verified evidence.\n")
 		builder.WriteString("- After a sandbox_exec error, call sandbox_exec again with a corrected command before final.\n")
 	}
 	builder.WriteString("- For subjective discussion, architecture advice, brainstorming, or simple conversation, return a final JSON action directly when no command is needed.\n")
