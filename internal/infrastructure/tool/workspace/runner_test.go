@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,8 +38,8 @@ func TestRunnerAdvertisesWorkspaceControlPlane(t *testing.T) {
 	if tools[0].Description != "Manages authorized input sources and staged files for the mutable /workspace." {
 		t.Fatalf("description = %q", tools[0].Description)
 	}
-	if len(tools[0].Arguments) != 3 {
-		t.Fatalf("arguments = %#v, want operation, source_id, path", tools[0].Arguments)
+	if len(tools[0].Arguments) != 4 {
+		t.Fatalf("arguments = %#v, want operation, source_id, source_ids, path", tools[0].Arguments)
 	}
 }
 
@@ -115,6 +116,88 @@ func TestRunnerStagesSourceAtCustomPath(t *testing.T) {
 	if materializer.requests[0].Path != "docs/README.md" {
 		t.Fatalf("materialize path = %q, want docs/README.md", materializer.requests[0].Path)
 	}
+}
+
+func TestRunnerStagesManySources(t *testing.T) {
+	materializer := &fakeMaterializer{}
+	workspace := testWorkspaceWithSources(t, []outbound.WorkspaceSource{
+		{ID: "input_001", Path: "README.md", SizeBytes: 4, Checksum: "sha256:readme"},
+		{ID: "input_002", Path: "docs/spec.md", SizeBytes: 8, Checksum: "sha256:spec"},
+	})
+
+	result := runWorkspaceTool(t, newTestRunner(t, materializer), workspace, map[string]string{
+		argumentOperation: operationStageMany,
+		argumentSourceIDs: "input_001,input_002",
+	})
+	if result.IsError {
+		t.Fatalf("result = %#v, want success", result)
+	}
+	if len(materializer.requests) != 2 {
+		t.Fatalf("materialize request count = %d, want 2", len(materializer.requests))
+	}
+	for index, want := range []struct {
+		sourceID string
+		path     string
+	}{
+		{sourceID: "input_001", path: "README.md"},
+		{sourceID: "input_002", path: "docs/spec.md"},
+	} {
+		if materializer.requests[index].SourceID != want.sourceID ||
+			materializer.requests[index].Path != want.path ||
+			materializer.requests[index].Overwrite {
+			t.Fatalf("materialize request %d = %#v, want source %s path %s no overwrite",
+				index,
+				materializer.requests[index],
+				want.sourceID,
+				want.path,
+			)
+		}
+	}
+	assertContains(t, result.Content, "staged:")
+	assertContains(t, result.Content, "source_id: input_001")
+	assertContains(t, result.Content, "virtual_path: /workspace/README.md")
+	assertContains(t, result.Content, "source_id: input_002")
+	assertContains(t, result.Content, "virtual_path: /workspace/docs/spec.md")
+}
+
+func TestRunnerStageManyRejectsUnknownSourceBeforeMaterializing(t *testing.T) {
+	materializer := &fakeMaterializer{}
+
+	result := runWorkspaceTool(t, newTestRunner(t, materializer), testWorkspace(t), map[string]string{
+		argumentOperation: operationStageMany,
+		argumentSourceIDs: "input_001,input_404",
+	})
+	if !result.IsError || !strings.Contains(result.Content, "workspace source is not available: input_404") {
+		t.Fatalf("result = %#v, want unknown source error", result)
+	}
+	if len(materializer.requests) != 0 {
+		t.Fatalf("materialize request count = %d, want 0", len(materializer.requests))
+	}
+}
+
+func TestRunnerStageManyReportsPartialFailure(t *testing.T) {
+	materializer := &fakeMaterializer{errorsBySource: map[string]error{
+		"input_002": errors.New("workspace path already exists; use restore to overwrite"),
+	}}
+	workspace := testWorkspaceWithSources(t, []outbound.WorkspaceSource{
+		{ID: "input_001", Path: "README.md", SizeBytes: 4, Checksum: "sha256:readme"},
+		{ID: "input_002", Path: "docs/spec.md", SizeBytes: 8, Checksum: "sha256:spec"},
+	})
+
+	result := runWorkspaceTool(t, newTestRunner(t, materializer), workspace, map[string]string{
+		argumentOperation: operationStageMany,
+		argumentSourceIDs: "input_001 input_002 input_001",
+	})
+	if !result.IsError {
+		t.Fatalf("result = %#v, want partial failure", result)
+	}
+	if len(materializer.requests) != 2 {
+		t.Fatalf("materialize request count = %d, want deduped count 2", len(materializer.requests))
+	}
+	assertContains(t, result.Content, "source_id: input_001")
+	assertContains(t, result.Content, "failed:")
+	assertContains(t, result.Content, "source_id: input_002")
+	assertContains(t, result.Content, "workspace path already exists; use restore to overwrite")
 }
 
 func TestRunnerRestoresByPath(t *testing.T) {
@@ -277,18 +360,24 @@ func runWorkspaceTool(t *testing.T, runner *Runner, workspace outbound.Workspace
 func testWorkspace(t *testing.T) outbound.Workspace {
 	t.Helper()
 
+	return testWorkspaceWithSources(t, []outbound.WorkspaceSource{
+		{
+			ID:        "input_001",
+			Path:      "README.md",
+			MediaType: "text/markdown",
+			SizeBytes: 4,
+			Checksum:  "sha256:readme",
+		},
+	})
+}
+
+func testWorkspaceWithSources(t *testing.T, sources []outbound.WorkspaceSource) outbound.Workspace {
+	t.Helper()
+
 	return outbound.Workspace{
 		RootPath:  t.TempDir(),
 		StatePath: t.TempDir(),
-		Sources: []outbound.WorkspaceSource{
-			{
-				ID:        "input_001",
-				Path:      "README.md",
-				MediaType: "text/markdown",
-				SizeBytes: 4,
-				Checksum:  "sha256:readme",
-			},
-		},
+		Sources:   sources,
 	}
 }
 
@@ -321,9 +410,10 @@ func assertNotContains(t *testing.T, got string, want string) {
 }
 
 type fakeMaterializer struct {
-	requests []outbound.WorkspaceMaterializeRequest
-	staged   []outbound.WorkspaceStagedFile
-	err      error
+	requests       []outbound.WorkspaceMaterializeRequest
+	staged         []outbound.WorkspaceStagedFile
+	err            error
+	errorsBySource map[string]error
 }
 
 func (m *fakeMaterializer) MaterializeWorkspaceSource(
@@ -333,6 +423,9 @@ func (m *fakeMaterializer) MaterializeWorkspaceSource(
 	m.requests = append(m.requests, request)
 	if m.err != nil {
 		return outbound.WorkspaceStagedFile{}, m.err
+	}
+	if err := m.errorsBySource[request.SourceID]; err != nil {
+		return outbound.WorkspaceStagedFile{}, err
 	}
 
 	return outbound.WorkspaceStagedFile{

@@ -33,7 +33,7 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		"echo: Returns text",
 		"Arguments: none",
 		"workspace: Manages authorized input sources and staged files for the mutable /workspace.",
-		`operation (required): Operation to run. Supported values: "list_sources", "stage", "restore", or "list". Example: list_sources`,
+		`operation (required): Operation to run. Supported values: "list_sources", "stage", "stage_many", "restore", or "list". Example: list_sources`,
 		"sandbox_exec: Runs commands in a general-purpose sandbox from /workspace.",
 		`command (required): Command to run from /workspace using installed sandbox tools and scripts. Stage authorized inputs with workspace before reading them. Example: pwd`,
 		"timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10",
@@ -50,7 +50,7 @@ func TestBuildSystemPromptListsPriorityToolPolicy(t *testing.T) {
 	for _, want := range []string{
 		"Tool policy:",
 		"workspace is a control-plane tool for authorized input sources and the mutable /workspace working copy.",
-		"Use workspace list_sources to discover inputs; stage only needed files; restore damaged staged files.",
+		"Use workspace list_sources to discover inputs; stage only needed files; use stage_many when several known sources are needed; restore damaged staged files.",
 		"If the task needs source file contents, call workspace stage before sandbox_exec or final.",
 		"workspace does not read file contents or execute commands.",
 		"For exact or externally checkable work, prefer sandbox_exec before final;",
@@ -121,7 +121,7 @@ func testPromptTools() []outbound.ToolDefinition {
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        "operation",
-					Description: `Operation to run. Supported values: "list_sources", "stage", "restore", or "list".`,
+					Description: `Operation to run. Supported values: "list_sources", "stage", "stage_many", "restore", or "list".`,
 					Required:    true,
 					Example:     "list_sources",
 				},

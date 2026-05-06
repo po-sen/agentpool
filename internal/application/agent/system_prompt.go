@@ -25,7 +25,7 @@ func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 	builder.WriteString("Tool policy:\n")
 	if toolIsDefined(tools, "workspace") {
 		builder.WriteString("- workspace is a control-plane tool for authorized input sources and the mutable /workspace working copy.\n")
-		builder.WriteString("- Use workspace list_sources to discover inputs; stage only needed files; restore damaged staged files.\n")
+		builder.WriteString("- Use workspace list_sources to discover inputs; stage only needed files; use stage_many when several known sources are needed; restore damaged staged files.\n")
 		builder.WriteString("- If the task needs source file contents, call workspace stage before sandbox_exec or final.\n")
 		builder.WriteString("- workspace does not read file contents or execute commands.\n")
 	}

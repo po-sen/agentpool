@@ -19,10 +19,12 @@ const (
 
 	argumentOperation = "operation"
 	argumentSourceID  = "source_id"
+	argumentSourceIDs = "source_ids"
 	argumentPath      = "path"
 
 	operationListSources = "list_sources"
 	operationStage       = "stage"
+	operationStageMany   = "stage_many"
 	operationRestore     = "restore"
 	operationList        = "list"
 
@@ -30,6 +32,10 @@ const (
 
 	virtualWorkspaceRoot = "/workspace"
 	messagePathUnsafe    = "path is unsafe"
+
+	formatSourceIDLine = "- source_id: "
+	formatIndentedPath = "\n  path: "
+	formatIndentedSize = "\n  size_bytes: "
 )
 
 var errTooManyFiles = errors.New("too many files")
@@ -74,7 +80,7 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        argumentOperation,
-					Description: `Operation to run. Supported values: "list_sources", "stage", "restore", or "list".`,
+					Description: `Operation to run. Supported values: "list_sources", "stage", "stage_many", "restore", or "list".`,
 					Required:    true,
 					Example:     "list_sources",
 				},
@@ -85,8 +91,14 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 					Example:     "input_001",
 				},
 				{
+					Name:        argumentSourceIDs,
+					Description: `Comma-separated authorized source ids to stage with "stage_many".`,
+					Required:    false,
+					Example:     "input_001,input_002",
+				},
+				{
 					Name:        argumentPath,
-					Description: `Safe relative /workspace path, or a full /workspace virtual path. Defaults to the source path for stage and restore, and "." for list.`,
+					Description: `Safe relative /workspace path, or a full /workspace virtual path. Defaults to the source path for stage and restore, and "." for list. Not used by "stage_many".`,
 					Required:    false,
 					Example:     "README.md",
 				},
@@ -114,6 +126,8 @@ func (r *Runner) RunTool(ctx context.Context, call outbound.ToolCall) (outbound.
 		return r.listSources(ctx, call.Context.Workspace), nil
 	case operationStage:
 		return r.stage(ctx, call.Context.Workspace, call.Arguments), nil
+	case operationStageMany:
+		return r.stageMany(ctx, call.Context.Workspace, call.Arguments), nil
 	case operationRestore:
 		return r.restore(ctx, call.Context.Workspace, call.Arguments), nil
 	case operationList:
@@ -141,9 +155,9 @@ func (r *Runner) listSources(ctx context.Context, workspace outbound.Workspace) 
 	var builder strings.Builder
 	builder.WriteString("sources:\n")
 	for _, source := range workspace.Sources {
-		builder.WriteString("- source_id: ")
+		builder.WriteString(formatSourceIDLine)
 		builder.WriteString(source.ID)
-		builder.WriteString("\n  path: ")
+		builder.WriteString(formatIndentedPath)
 		builder.WriteString(source.Path)
 		builder.WriteString("\n  virtual_path: ")
 		builder.WriteString(virtualPath(source.Path))
@@ -151,7 +165,7 @@ func (r *Runner) listSources(ctx context.Context, workspace outbound.Workspace) 
 			builder.WriteString("\n  media_type: ")
 			builder.WriteString(source.MediaType)
 		}
-		builder.WriteString("\n  size_bytes: ")
+		builder.WriteString(formatIndentedSize)
 		_, _ = fmt.Fprintf(&builder, "%d", source.SizeBytes)
 		if source.Checksum != "" {
 			builder.WriteString("\n  checksum: ")
@@ -199,6 +213,50 @@ func (r *Runner) stage(
 	}
 
 	return outbound.ToolResult{Content: formatMaterializedFile("staged", staged)}
+}
+
+func (r *Runner) stageMany(
+	ctx context.Context,
+	workspace outbound.Workspace,
+	arguments map[string]string,
+) outbound.ToolResult {
+	sourceIDs := parseSourceIDs(arguments[argumentSourceIDs])
+	if len(sourceIDs) == 0 {
+		return outbound.ToolResult{Content: "missing source_ids argument", IsError: true}
+	}
+	if len(sourceIDs) > r.maxFiles {
+		return outbound.ToolResult{Content: "too many source_ids", IsError: true}
+	}
+
+	sources, message := findSources(workspace.Sources, sourceIDs)
+	if message != "" {
+		return outbound.ToolResult{Content: message, IsError: true}
+	}
+
+	stagedFiles := make([]outbound.WorkspaceStagedFile, 0, len(sources))
+	failures := make([]workspaceSourceFailure, 0)
+	for _, source := range sources {
+		staged, err := r.materializer.MaterializeWorkspaceSource(ctx, outbound.WorkspaceMaterializeRequest{
+			Workspace: workspace,
+			SourceID:  source.ID,
+			Path:      source.Path,
+			Overwrite: false,
+		})
+		if err != nil {
+			failures = append(failures, workspaceSourceFailure{
+				sourceID: source.ID,
+				message:  safeWorkspaceError(err),
+			})
+
+			continue
+		}
+		stagedFiles = append(stagedFiles, staged)
+	}
+
+	return outbound.ToolResult{
+		Content: formatMaterializedFiles("staged", stagedFiles, failures),
+		IsError: len(failures) > 0,
+	}
 }
 
 func (r *Runner) restore(
@@ -279,6 +337,11 @@ func (r *Runner) list(ctx context.Context, workspace outbound.Workspace, rawPath
 type workspaceFile struct {
 	path      string
 	sizeBytes int64
+}
+
+type workspaceSourceFailure struct {
+	sourceID string
+	message  string
 }
 
 func (r *Runner) collectFiles(
@@ -375,20 +438,65 @@ func formatWorkspaceFiles(
 }
 
 func formatMaterializedFile(label string, staged outbound.WorkspaceStagedFile) string {
+	return formatMaterializedFiles(label, []outbound.WorkspaceStagedFile{staged}, nil)
+}
+
+func formatMaterializedFiles(
+	label string,
+	stagedFiles []outbound.WorkspaceStagedFile,
+	failures []workspaceSourceFailure,
+) string {
 	var builder strings.Builder
 	builder.WriteString(label)
-	builder.WriteString(":\nsource_id: ")
-	builder.WriteString(staged.SourceID)
-	builder.WriteString("\nvirtual_path: ")
-	builder.WriteString(virtualPath(staged.Path))
-	builder.WriteString("\npath: ")
-	builder.WriteString(staged.Path)
-	builder.WriteString("\nsize_bytes: ")
-	_, _ = fmt.Fprintf(&builder, "%d", staged.SizeBytes)
-	if staged.Checksum != "" {
-		builder.WriteString("\nchecksum: ")
-		builder.WriteString(staged.Checksum)
+	builder.WriteString(":\n")
+	if len(stagedFiles) == 1 && len(failures) == 0 {
+		builder.WriteString("source_id: ")
+		builder.WriteString(stagedFiles[0].SourceID)
+		builder.WriteString("\nvirtual_path: ")
+		builder.WriteString(virtualPath(stagedFiles[0].Path))
+		builder.WriteString("\npath: ")
+		builder.WriteString(stagedFiles[0].Path)
+		builder.WriteString("\nsize_bytes: ")
+		_, _ = fmt.Fprintf(&builder, "%d", stagedFiles[0].SizeBytes)
+		if stagedFiles[0].Checksum != "" {
+			builder.WriteString("\nchecksum: ")
+			builder.WriteString(stagedFiles[0].Checksum)
+		}
+		builder.WriteString("\n")
+
+		return builder.String()
 	}
+
+	if len(stagedFiles) == 0 {
+		builder.WriteString("none\n")
+	} else {
+		for _, staged := range stagedFiles {
+			builder.WriteString(formatSourceIDLine)
+			builder.WriteString(staged.SourceID)
+			builder.WriteString("\n  virtual_path: ")
+			builder.WriteString(virtualPath(staged.Path))
+			builder.WriteString(formatIndentedPath)
+			builder.WriteString(staged.Path)
+			builder.WriteString(formatIndentedSize)
+			_, _ = fmt.Fprintf(&builder, "%d", staged.SizeBytes)
+			if staged.Checksum != "" {
+				builder.WriteString("\n  checksum: ")
+				builder.WriteString(staged.Checksum)
+			}
+			builder.WriteString("\n")
+		}
+	}
+	if len(failures) > 0 {
+		builder.WriteString("failed:\n")
+		for _, failure := range failures {
+			builder.WriteString(formatSourceIDLine)
+			builder.WriteString(failure.sourceID)
+			builder.WriteString("\n  error: ")
+			builder.WriteString(failure.message)
+			builder.WriteString("\n")
+		}
+	}
+
 	builder.WriteString("\n")
 
 	return builder.String()
@@ -480,6 +588,47 @@ func findSource(sources []outbound.WorkspaceSource, sourceID string) (outbound.W
 	}
 
 	return outbound.WorkspaceSource{}, false
+}
+
+func findSources(
+	sources []outbound.WorkspaceSource,
+	sourceIDs []string,
+) ([]outbound.WorkspaceSource, string) {
+	found := make([]outbound.WorkspaceSource, 0, len(sourceIDs))
+	for _, sourceID := range sourceIDs {
+		source, ok := findSource(sources, sourceID)
+		if !ok {
+			return nil, fmt.Sprintf("workspace source is not available: %s", sourceID)
+		}
+		found = append(found, source)
+	}
+
+	return found, ""
+}
+
+func parseSourceIDs(rawValue string) []string {
+	parts := strings.FieldsFunc(rawValue, func(value rune) bool {
+		return value == ',' || value == '\n' || value == '\t' || value == ' '
+	})
+	if len(parts) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(parts))
+	sourceIDs := make([]string, 0, len(parts))
+	for _, part := range parts {
+		sourceID := strings.TrimSpace(part)
+		if sourceID == "" {
+			continue
+		}
+		if _, ok := seen[sourceID]; ok {
+			continue
+		}
+		seen[sourceID] = struct{}{}
+		sourceIDs = append(sourceIDs, sourceID)
+	}
+
+	return sourceIDs
 }
 
 func findStagedPath(

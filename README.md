@@ -96,7 +96,7 @@ Completed runs include the one-shot model response summary:
     {
       "name": "workspace",
       "status": "completed",
-      "message": "Prepared empty workspace",
+      "message": "Prepared empty /workspace",
       "started_at": "2026-04-30T08:00:00Z",
       "ended_at": "2026-04-30T08:00:00Z"
     },
@@ -130,7 +130,7 @@ Failed runs keep the public `failure_reason` sanitized and may include safe diag
     {
       "name": "workspace",
       "status": "completed",
-      "message": "Prepared empty workspace",
+      "message": "Prepared empty /workspace",
       "started_at": "2026-04-30T08:00:00Z",
       "ended_at": "2026-04-30T08:00:00Z"
     },
@@ -544,7 +544,7 @@ The agent protocol accepts only `tool_call` and `final` JSON actions. Models mus
 
 AgentPool exposes exactly two model-facing tools:
 
-- `workspace`: control-plane. It lists authorized input sources, stages selected sources into `/workspace`, restores staged files from their source, and lists currently staged/generated workspace files. It does not read file contents.
+- `workspace`: control-plane. It lists authorized input sources, stages selected sources into `/workspace`, restores staged files from their source, and lists currently staged/generated workspace files. It can stage one source or a known batch of source ids. It does not read file contents.
 - `sandbox_exec`: execution/data-plane. It runs commands through a command-capable sandbox from `/workspace`.
 
 Each run gets one mutable workspace:
@@ -553,7 +553,7 @@ Each run gets one mutable workspace:
 /workspace  disposable agent working copy
 ```
 
-Run attachments become authorized input sources first. They are not automatically readable by sandbox commands until the agent stages them with `workspace`. Once staged, files are normal mutable copies under `/workspace`; the agent may modify, move, delete, or restore source-backed files. `workspace` accepts safe relative paths or full virtual paths such as `/workspace/README.md`. It never returns host temp paths. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
+Run attachments become authorized input sources first. They are not automatically readable by sandbox commands until the agent stages them with `workspace`. Once staged, files are normal mutable copies under `/workspace`; the agent may modify, move, delete, or restore source-backed files. `workspace` accepts safe relative paths or full virtual paths such as `/workspace/README.md`. When several needed sources are already known, the agent can use `stage_many` with comma-separated `source_ids` to avoid one tool turn per file. It never returns host temp paths. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
 
 When `sandbox_exec` is available, exact or verifiable tasks should be checked through sandbox execution instead of guessed. That includes exact arithmetic, counting or searching files, transforming data, and running small scripts, tests, builds, or linters. Subjective discussion, design advice, brainstorming, and simple conversation can return a final JSON action directly when no command is needed.
 
@@ -577,9 +577,10 @@ Advertised tools include minimal argument hints in the system prompt while execu
 Available tools:
 - workspace: Manages authorized input sources and staged files for the mutable /workspace.
   Arguments:
-  - operation (required): Operation to run. Supported values: "list_sources", "stage", "restore", or "list". Example: list_sources
+  - operation (required): Operation to run. Supported values: "list_sources", "stage", "stage_many", "restore", or "list". Example: list_sources
   - source_id (optional): Authorized source id to stage or restore. Example: input_001
-  - path (optional): Safe relative /workspace path, or a full /workspace virtual path. Example: README.md
+  - source_ids (optional): Comma-separated authorized source ids to stage with "stage_many". Example: input_001,input_002
+  - path (optional): Safe relative /workspace path, or a full /workspace virtual path. Not used by "stage_many". Example: README.md
 - sandbox_exec: Runs commands in a general-purpose sandbox from /workspace.
   Arguments:
   - command (required): Command to run from /workspace. Example: wc -l /workspace/README.md

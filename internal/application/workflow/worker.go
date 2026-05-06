@@ -556,10 +556,10 @@ func agentCompletedMessage(toolCallCount int) string {
 
 func workspaceCompletedMessage(attachmentCount int) string {
 	if attachmentCount <= 0 {
-		return "Prepared empty workspace"
+		return "Prepared empty /workspace"
 	}
 
-	return fmt.Sprintf("Prepared workspace with %d authorized input source(s)", attachmentCount)
+	return fmt.Sprintf("Prepared empty /workspace; registered %d authorized input source(s)", attachmentCount)
 }
 
 func toDomainToolCalls(records []agent.ToolCallRecord) []run.ToolCall {

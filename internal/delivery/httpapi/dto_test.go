@@ -188,7 +188,7 @@ func TestRunResponseJSONIncludesCompletedSteps(t *testing.T) {
 			{
 				Name:      "workspace",
 				Status:    "completed",
-				Message:   "Prepared empty workspace",
+				Message:   "Prepared empty /workspace",
 				StartedAt: time.Unix(101, 0).UTC(),
 				EndedAt:   &endedAt,
 			},

@@ -41,7 +41,7 @@ func TestWorkerProcessOneCompletesQueuedRun(t *testing.T) {
 		{
 			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared empty workspace",
+			message: "Prepared empty /workspace",
 			ended:   true,
 		},
 		{
@@ -114,7 +114,7 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 		{
 			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared empty workspace",
+			message: "Prepared empty /workspace",
 			ended:   true,
 		},
 		{
@@ -240,7 +240,7 @@ func TestWorkerPassesPromptOnlyWorkspaceContextToAgentTools(t *testing.T) {
 		{
 			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared empty workspace",
+			message: "Prepared empty /workspace",
 			ended:   true,
 		},
 		{
@@ -509,7 +509,7 @@ func TestWorkerPreparesWorkspaceForAttachmentsAndPassesPathToAgentTools(t *testi
 		{
 			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared workspace with 1 authorized input source(s)",
+			message: "Prepared empty /workspace; registered 1 authorized input source(s)",
 			ended:   true,
 		},
 		{
@@ -681,7 +681,7 @@ func TestWorkerProcessOneKeepsCompletedRunWhenCompletedEventFails(t *testing.T) 
 		{
 			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared empty workspace",
+			message: "Prepared empty /workspace",
 			ended:   true,
 		},
 		{
@@ -742,7 +742,7 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 		{
 			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared empty workspace",
+			message: "Prepared empty /workspace",
 			ended:   true,
 		},
 		{
@@ -1024,7 +1024,7 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationDuringExecution(t *testing.
 		{
 			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared empty workspace",
+			message: "Prepared empty /workspace",
 			ended:   true,
 		},
 		{
@@ -1111,7 +1111,7 @@ func TestWorkerProcessOneDoesNotOverwriteCancellationWhenExecutionFails(t *testi
 		{
 			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared empty workspace",
+			message: "Prepared empty /workspace",
 			ended:   true,
 		},
 		{
