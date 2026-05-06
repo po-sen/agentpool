@@ -19,6 +19,8 @@ const defaultMaxTurns = 8
 
 var errToolRunnerRequired = errors.New("tool runner is required")
 
+const toolNameSandboxExec = "sandbox_exec"
+
 const agentTurnPreviewTruncatedMarker = "\n... [truncated]"
 
 const (
@@ -107,6 +109,7 @@ type runSession struct {
 	toolCallCount      int
 	toolCalls          []ToolCallRecord
 	turnRecords        []TurnRecord
+	sandboxExecErrored bool
 }
 
 type modelTurnContext struct {
@@ -335,6 +338,28 @@ func (r *Runner) handleAction(
 
 			return session.partialResult(), false, newAgentError(ErrorCodeFinalSummaryInvalid, "", err)
 		}
+		if session.sandboxExecErrored {
+			correctionMessage := buildSandboxExecErrorFinalCorrectionMessage()
+			session.recordTurn(TurnRecord{
+				Index:             turn.index,
+				Status:            run.AgentTurnStatusProtocolError,
+				ActionType:        run.AgentTurnActionTypeFinal,
+				Message:           "final answer attempted after failed sandbox_exec",
+				RequestMessages:   turn.requestMessages,
+				RawResponse:       turn.content,
+				ResponseFormat:    turn.responseFormat,
+				CorrectionMessage: correctionMessage,
+				ResponsePreview:   previewModelResponse(parsed.Summary),
+				StartedAt:         turn.startedAt,
+				EndedAt:           turn.endedAt,
+			})
+			session.turns = append(session.turns,
+				assistantAttemptTurn(turn.content),
+				runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
+			)
+
+			return RunResult{}, false, nil
+		}
 		session.recordTurn(TurnRecord{
 			Index:           turn.index,
 			Status:          run.AgentTurnStatusFinal,
@@ -510,6 +535,14 @@ func (s *runSession) finalResult(summary string) RunResult {
 	}
 }
 
+func (s *runSession) recordSandboxExecResult(tool string, result outbound.ToolResult) {
+	if tool != toolNameSandboxExec {
+		return
+	}
+
+	s.sandboxExecErrored = result.IsError
+}
+
 func (s *runSession) partialResult() RunResult {
 	return RunResult{
 		ToolCallCount: s.toolCallCount,
@@ -635,6 +668,7 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 	}
 	session.toolCallCount++
 	session.recordToolCall(parsed.Tool, parsed.Arguments, result.Content, result.IsError, startedAt, endedAt)
+	session.recordSandboxExecResult(parsed.Tool, result)
 
 	session.turns = append(session.turns, toolResultTurn([]outbound.ModelPart{{
 		Kind:       outbound.ModelPartKindToolResult,
@@ -702,6 +736,7 @@ func (r *Runner) handleNativeToolCalls(
 		}
 		session.toolCallCount++
 		session.recordToolCall(call.Name, call.Arguments, result.Content, result.IsError, startedAt, endedAt)
+		session.recordSandboxExecResult(call.Name, result)
 		resultParts = append(resultParts, outbound.ModelPart{
 			Kind:       outbound.ModelPartKindToolResult,
 			Text:       buildToolObservation(call.Name, result),

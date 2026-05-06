@@ -80,6 +80,22 @@ func TestBuildUnavailableToolCorrectionMessageListsAvailableTools(t *testing.T) 
 	}
 }
 
+func TestBuildSandboxExecErrorFinalCorrectionMessageRequiresRetry(t *testing.T) {
+	message := buildSandboxExecErrorFinalCorrectionMessage()
+
+	for _, want := range []string{
+		"previous sandbox_exec command failed",
+		"not verified yet",
+		"Call sandbox_exec again with a corrected command before returning final.",
+		"such as awk",
+		"Return exactly one JSON object.",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
 func TestBuildPlaceholderToolArgumentCorrectionMessageUsesUploadedFiles(t *testing.T) {
 	message := buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
 		Placeholders:    []string{"command=<file_path>"},

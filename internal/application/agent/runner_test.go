@@ -339,6 +339,88 @@ func TestRunnerCallsProviderStyleToolCallTextAndReturnsFinalSummary(t *testing.T
 	})
 }
 
+func TestRunnerRequiresSuccessfulSandboxExecAfterSandboxErrorBeforeFinal(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"bad math"}}`},
+			{Content: `{"type":"final","summary":"x = 7 or x = 9"}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"awk 'BEGIN { print 7; print 9 }'"}}`},
+			{Content: `{"type":"final","summary":"x = 7 or x = 9"}`},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
+	})
+	tools.resultQueue = []outbound.ToolResult{
+		{Content: "exit_code: 2\nstderr:\n/bin/sh: arithmetic syntax error\n", IsError: true},
+		{Content: "exit_code: 0\nstdout:\n7\n9\n"},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "請幫我解這個一元二次方程式，x^2-16x+63=0 求x?"},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspace(),
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "x = 7 or x = 9" {
+		t.Fatalf("summary = %q, want verified final", result.Summary)
+	}
+	if result.ToolCallCount != 2 {
+		t.Fatalf("ToolCallCount = %d, want 2", result.ToolCallCount)
+	}
+	if len(result.ToolCalls) != 2 {
+		t.Fatalf("len(ToolCalls) = %d, want 2", len(result.ToolCalls))
+	}
+	if !result.ToolCalls[0].IsError {
+		t.Fatal("first sandbox_exec IsError = false, want true")
+	}
+	if result.ToolCalls[1].IsError {
+		t.Fatal("second sandbox_exec IsError = true, want false")
+	}
+	if len(tools.calls) != 2 {
+		t.Fatalf("len(tool calls) = %d, want 2", len(tools.calls))
+	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:              2,
+		status:             run.AgentTurnStatusProtocolError,
+		actionType:         run.AgentTurnActionTypeFinal,
+		message:            "final answer attempted after failed sandbox_exec",
+		correctionContains: "Call sandbox_exec again with a corrected command before returning final.",
+		responsePreview:    "x = 7 or x = 9",
+	})
+	assertTurn(t, result.AgentTurns, 2, wantTurn{
+		index:      3,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+	})
+	assertTurn(t, result.AgentTurns, 3, wantTurn{
+		index:      4,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+	})
+	if len(model.requests) != 4 {
+		t.Fatalf("len(model requests) = %d, want 4", len(model.requests))
+	}
+	correction := requestMessages(model.requests[2])[len(requestMessages(model.requests[2]))-1]
+	assertMessage(t, correction, "runtime", "previous sandbox_exec command failed")
+}
+
 func TestRunnerCallsNativeToolAndReturnsFinalSummary(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
@@ -1281,6 +1363,7 @@ type fakeToolRunner struct {
 	tools        []outbound.ToolDefinition
 	toolsSet     bool
 	results      map[string]outbound.ToolResult
+	resultQueue  []outbound.ToolResult
 	listRequests []outbound.ToolListRequest
 	calls        []outbound.ToolCall
 }
@@ -1313,6 +1396,12 @@ func (r *fakeToolRunner) RunTool(_ context.Context, call outbound.ToolCall) (out
 	r.calls = append(r.calls, call)
 	if r.runErr != nil {
 		return outbound.ToolResult{}, r.runErr
+	}
+	if len(r.resultQueue) > 0 {
+		result := r.resultQueue[0]
+		r.resultQueue = r.resultQueue[1:]
+
+		return result, nil
 	}
 	if result, ok := r.results[call.Name]; ok {
 		return result, nil

@@ -97,9 +97,9 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        argumentCommand,
-					Description: "Command to run inside the sandbox. For arithmetic, compute with shell arithmetic instead of echoing a guessed result.",
+					Description: "Command to run inside the sandbox. For integer arithmetic, shell arithmetic is fine; for roots, decimals, or math functions, use a command that supports them such as awk.",
 					Required:    true,
-					Example:     `printf '%s\n' "$((123 * 321))"`,
+					Example:     `awk 'BEGIN { print 123 * 321 }'`,
 				},
 				{
 					Name:        argumentTimeoutSeconds,

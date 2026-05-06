@@ -89,3 +89,12 @@ func buildPlaceholderToolArgumentCorrectionMessage(request placeholderToolArgume
 
 	return builder.String()
 }
+
+func buildSandboxExecErrorFinalCorrectionMessage() string {
+	return `Tool call error:
+The previous sandbox_exec command failed, so the exact or verifiable answer is not verified yet.
+Call sandbox_exec again with a corrected command before returning final.
+For integer-only expressions, POSIX shell arithmetic is acceptable.
+For roots, decimals, or math functions, use a command that supports them, such as awk.
+Return exactly one JSON object.`
+}
