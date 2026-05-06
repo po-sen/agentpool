@@ -60,35 +60,37 @@ func NewClient(cfg Config) (*Client, error) {
 
 // Generate sends a generateContent request and returns generated content.
 func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbound.ModelResponse, error) {
+	requestMessages := toModelRequestMessages(req)
 	request := toGenerateContentRequest(req)
 	body, err := json.Marshal(request)
 	if err != nil {
-		return outbound.ModelResponse{}, err
+		return outbound.ModelResponse{RequestMessages: requestMessages}, err
 	}
 
 	endpoint := fmt.Sprintf("%s/models/%s:generateContent", c.baseURL, url.PathEscape(c.model))
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return outbound.ModelResponse{}, err
+		return outbound.ModelResponse{RequestMessages: requestMessages}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-goog-api-key", c.apiKey)
 
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return outbound.ModelResponse{}, err
+		return outbound.ModelResponse{RequestMessages: requestMessages}, err
 	}
 	defer func() {
 		_ = httpResp.Body.Close()
 	}()
 
 	if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
-		return outbound.ModelResponse{}, fmt.Errorf("gemini request failed: status %d: %s", httpResp.StatusCode, readBodySnippet(httpResp.Body))
+		return outbound.ModelResponse{RequestMessages: requestMessages},
+			fmt.Errorf("gemini request failed: status %d: %s", httpResp.StatusCode, readBodySnippet(httpResp.Body))
 	}
 
 	var decoded generateContentResponse
 	if err := json.NewDecoder(httpResp.Body).Decode(&decoded); err != nil {
-		return outbound.ModelResponse{}, fmt.Errorf("decode gemini response: %w", err)
+		return outbound.ModelResponse{RequestMessages: requestMessages}, fmt.Errorf("decode gemini response: %w", err)
 	}
 	for _, candidate := range decoded.Candidates {
 		texts := []string{}
@@ -114,12 +116,12 @@ func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbo
 			return outbound.ModelResponse{
 				Content:         strings.Join(texts, "\n\n"),
 				ToolCalls:       toolCalls,
-				RequestMessages: toModelRequestMessages(req),
+				RequestMessages: requestMessages,
 			}, nil
 		}
 	}
 
-	return outbound.ModelResponse{}, errors.New("gemini response has no text content")
+	return outbound.ModelResponse{RequestMessages: requestMessages}, errors.New("gemini response has no text content")
 }
 
 type generateContentRequest struct {

@@ -60,6 +60,7 @@ func NewClient(cfg Config) (*Client, error) {
 
 // Generate sends a Messages API request and returns generated content.
 func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbound.ModelResponse, error) {
+	requestMessages := toModelRequestMessages(req)
 	system := toAnthropicSystem(req)
 	messages := toAnthropicMessages(req.Turns)
 	body, err := json.Marshal(messagesRequest{
@@ -70,12 +71,12 @@ func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbo
 		Tools:     toAnthropicTools(req.Tools),
 	})
 	if err != nil {
-		return outbound.ModelResponse{}, err
+		return outbound.ModelResponse{RequestMessages: requestMessages}, err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
-		return outbound.ModelResponse{}, err
+		return outbound.ModelResponse{RequestMessages: requestMessages}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", c.apiKey)
@@ -83,19 +84,20 @@ func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbo
 
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return outbound.ModelResponse{}, err
+		return outbound.ModelResponse{RequestMessages: requestMessages}, err
 	}
 	defer func() {
 		_ = httpResp.Body.Close()
 	}()
 
 	if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
-		return outbound.ModelResponse{}, fmt.Errorf("anthropic request failed: status %d: %s", httpResp.StatusCode, readBodySnippet(httpResp.Body))
+		return outbound.ModelResponse{RequestMessages: requestMessages},
+			fmt.Errorf("anthropic request failed: status %d: %s", httpResp.StatusCode, readBodySnippet(httpResp.Body))
 	}
 
 	var decoded messagesResponse
 	if err := json.NewDecoder(httpResp.Body).Decode(&decoded); err != nil {
-		return outbound.ModelResponse{}, fmt.Errorf("decode anthropic response: %w", err)
+		return outbound.ModelResponse{RequestMessages: requestMessages}, fmt.Errorf("decode anthropic response: %w", err)
 	}
 	texts := []string{}
 	toolCalls := []outbound.ModelToolCall{}
@@ -121,11 +123,11 @@ func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbo
 		return outbound.ModelResponse{
 			Content:         strings.Join(texts, "\n\n"),
 			ToolCalls:       toolCalls,
-			RequestMessages: toModelRequestMessages(req),
+			RequestMessages: requestMessages,
 		}, nil
 	}
 
-	return outbound.ModelResponse{}, errors.New("anthropic response has no text content")
+	return outbound.ModelResponse{RequestMessages: requestMessages}, errors.New("anthropic response has no text content")
 }
 
 type messagesRequest struct {

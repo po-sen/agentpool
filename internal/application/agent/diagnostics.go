@@ -223,10 +223,9 @@ func copyModelRequestMessages(instructions string, turns []outbound.ModelTurn) [
 		})
 	}
 	for _, turn := range turns {
-		role := string(turn.Role)
 		for _, part := range turn.Parts {
 			copied = append(copied, TurnMessageRecord{
-				Role:       role,
+				Role:       requestMessageRole(turn.Role, part.Kind),
 				Kind:       string(part.Kind),
 				Content:    part.Text,
 				ToolCallID: part.ToolCallID,
@@ -236,6 +235,14 @@ func copyModelRequestMessages(instructions string, turns []outbound.ModelTurn) [
 	}
 
 	return copyTurnMessageRecords(copied)
+}
+
+func requestMessageRole(role outbound.ModelRole, _ outbound.ModelPartKind) string {
+	if role == outbound.ModelRoleRuntime {
+		return "user"
+	}
+
+	return string(role)
 }
 
 func copyTurnMessageRecords(messages []TurnMessageRecord) []TurnMessageRecord {

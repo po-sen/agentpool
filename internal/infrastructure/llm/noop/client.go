@@ -28,15 +28,14 @@ func toModelRequestMessages(request outbound.ModelRequest) []outbound.ModelReque
 	messages := []outbound.ModelRequestMessage{}
 	if request.Instructions != "" {
 		messages = append(messages, outbound.ModelRequestMessage{
-			Role:    "runtime",
+			Role:    "system",
 			Content: request.Instructions,
 		})
 	}
 	for _, turn := range request.Turns {
 		for _, part := range turn.Parts {
 			messages = append(messages, outbound.ModelRequestMessage{
-				Role:       string(turn.Role),
-				Kind:       string(part.Kind),
+				Role:       toModelRequestRole(turn.Role),
 				Content:    part.Text,
 				ToolCallID: part.ToolCallID,
 				ToolName:   part.ToolName,
@@ -45,4 +44,12 @@ func toModelRequestMessages(request outbound.ModelRequest) []outbound.ModelReque
 	}
 
 	return messages
+}
+
+func toModelRequestRole(role outbound.ModelRole) string {
+	if role == outbound.ModelRoleRuntime {
+		return "user"
+	}
+
+	return string(role)
 }

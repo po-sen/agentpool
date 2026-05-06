@@ -201,10 +201,11 @@ func TestClientGenerateHandlesNon2xx(t *testing.T) {
 	defer server.Close()
 
 	client := newClient(t, server.URL)
-	_, err := client.Generate(context.Background(), outbound.ModelRequest{})
+	response, err := client.Generate(context.Background(), diagnosticModelRequest())
 	if err == nil {
 		t.Fatal("Generate() error = nil, want error")
 	}
+	assertAnthropicRequestDiagnostics(t, response.RequestMessages)
 }
 
 func TestClientGenerateHandlesNoText(t *testing.T) {
@@ -233,6 +234,43 @@ func newClient(t *testing.T, baseURL string) *Client {
 	}
 
 	return client
+}
+
+func diagnosticModelRequest() outbound.ModelRequest {
+	return outbound.ModelRequest{
+		Instructions: "follow protocol",
+		Turns: []outbound.ModelTurn{
+			{
+				Role: outbound.ModelRoleUser,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindTaskPrompt, Text: "do work"},
+				},
+			},
+			{
+				Role: outbound.ModelRoleRuntime,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindProtocolCorrection, Text: "return JSON"},
+				},
+			},
+		},
+	}
+}
+
+func assertAnthropicRequestDiagnostics(t *testing.T, messages []outbound.ModelRequestMessage) {
+	t.Helper()
+
+	if len(messages) != 2 {
+		t.Fatalf("len(RequestMessages) = %d, want provider-facing diagnostics", len(messages))
+	}
+	if messages[0].Role != "system" ||
+		!strings.Contains(messages[0].Content, "follow protocol") ||
+		!strings.Contains(messages[0].Content, "return JSON") ||
+		messages[0].Kind != "" {
+		t.Fatalf("RequestMessages[0] = %#v, want system diagnostics without application kind", messages[0])
+	}
+	if messages[1].Role != "user" || !strings.Contains(messages[1].Content, "do work") || messages[1].Kind != "" {
+		t.Fatalf("RequestMessages[1] = %#v, want user task without application kind", messages[1])
+	}
 }
 
 func writeJSON(t *testing.T, w http.ResponseWriter, value any) {

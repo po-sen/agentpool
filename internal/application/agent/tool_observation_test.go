@@ -18,9 +18,15 @@ func TestBuildToolObservationFormatsSuccess(t *testing.T) {
 
 func TestBuildToolObservationFormatsError(t *testing.T) {
 	got := buildToolObservation("workspace", nil, outbound.ToolResult{Content: "path is not available", IsError: true})
-	want := "Tool error for workspace:\npath is not available"
-	if got != want {
-		t.Fatalf("observation = %q, want %q", got, want)
+	for _, want := range []string{
+		"Tool error for workspace:",
+		"This may be partial or expected",
+		"try a different approach before final.",
+		"path is not available",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("observation = %q, want substring %q", got, want)
+		}
 	}
 }
 

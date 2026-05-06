@@ -98,29 +98,44 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 		)
 		return RunResult{}, false, nil
 	}
-	session.turns = append(session.turns, assistantTurn(content))
+	modelCalls := normalizeModelToolCalls([]outbound.ModelToolCall{{
+		Name:      parsed.Tool,
+		Arguments: parsed.Arguments,
+	}})
+	if len(modelCalls) == 0 {
+		session.turns = append(session.turns,
+			assistantAttemptTurn(content),
+			runtimeTurn(outbound.ModelPartKindToolCorrection, "Tool error:\nmissing usable tool call"),
+		)
+		return RunResult{}, false, nil
+	}
+	modelCall := modelCalls[0]
+	session.turns = append(session.turns, assistantToolCallTurn("", []outbound.ModelToolCall{modelCall}))
 
 	startedAt := r.clock()
 	call := outbound.ToolCall{
 		RunID:     session.request.RunID,
 		Context:   session.request.Context,
-		Name:      parsed.Tool,
-		Arguments: parsed.Arguments,
+		Name:      modelCall.Name,
+		Arguments: modelCall.Arguments,
 	}
 	result, err := r.tools.RunTool(ctx, call)
 	endedAt := r.clock()
 	if err != nil {
-		session.recordToolCall(parsed.Tool, parsed.Arguments, "tool execution failed", true, startedAt, endedAt)
+		session.recordToolCall(modelCall.Name, modelCall.Arguments, "tool execution failed", true, startedAt, endedAt)
 
 		return session.partialResult(), false, newAgentError(ErrorCodeToolExecutionFailed, "", err)
 	}
 	session.toolCallCount++
-	session.recordToolCall(parsed.Tool, parsed.Arguments, result.Content, result.IsError, startedAt, endedAt)
+	session.recordToolCall(modelCall.Name, modelCall.Arguments, result.Content, result.IsError, startedAt, endedAt)
 
-	session.turns = append(session.turns, runtimeTurn(
-		outbound.ModelPartKindToolObservation,
-		buildToolObservation(parsed.Tool, parsed.Arguments, result),
-	))
+	session.turns = append(session.turns, toolResultTurn([]outbound.ModelPart{{
+		Kind:       outbound.ModelPartKindToolResult,
+		Text:       buildToolObservation(modelCall.Name, modelCall.Arguments, result),
+		ToolCallID: modelCall.ID,
+		ToolName:   modelCall.Name,
+		IsError:    result.IsError,
+	}}))
 
 	return RunResult{}, false, nil
 }

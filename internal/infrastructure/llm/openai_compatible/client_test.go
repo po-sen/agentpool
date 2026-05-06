@@ -71,8 +71,8 @@ func TestClientGenerateSendsChatCompletionRequest(t *testing.T) {
 	if response.RequestMessages[0].Role != "system" || response.RequestMessages[0].Content != "follow protocol" {
 		t.Fatalf("RequestMessages[0] = %#v, want system instructions", response.RequestMessages[0])
 	}
-	if response.RequestMessages[2].Role != "system" || response.RequestMessages[2].Content != "return JSON" {
-		t.Fatalf("RequestMessages[2] = %#v, want system correction", response.RequestMessages[2])
+	if response.RequestMessages[2].Role != "user" || response.RequestMessages[2].Content != "return JSON" {
+		t.Fatalf("RequestMessages[2] = %#v, want user correction", response.RequestMessages[2])
 	}
 	if auth != "Bearer test-key" {
 		t.Fatalf("authorization = %q, want bearer token", auth)
@@ -92,15 +92,15 @@ func TestClientGenerateSendsChatCompletionRequest(t *testing.T) {
 	}
 	messages, ok := received["messages"].([]any)
 	if !ok || len(messages) != 3 {
-		t.Fatalf("messages = %#v, want system, user, and system correction messages", received["messages"])
+		t.Fatalf("messages = %#v, want system, user, and user correction messages", received["messages"])
 	}
 	system, ok := messages[0].(map[string]any)
 	if !ok || system["role"] != "system" || system["content"] != "follow protocol" {
 		t.Fatalf("messages[0] = %#v, want system instructions", messages[0])
 	}
 	correction, ok := messages[2].(map[string]any)
-	if !ok || correction["role"] != "system" || correction["content"] != "return JSON" {
-		t.Fatalf("messages[2] = %#v, want system correction", messages[2])
+	if !ok || correction["role"] != "user" || correction["content"] != "return JSON" {
+		t.Fatalf("messages[2] = %#v, want user correction", messages[2])
 	}
 }
 
@@ -148,7 +148,7 @@ func TestToChatMessagesMapsNativeToolCallsAndResults(t *testing.T) {
 	}
 }
 
-func TestToChatMessagesMapsLegacyToolObservationAsRuntimeText(t *testing.T) {
+func TestToChatMessagesMapsLegacyToolObservationAsUserText(t *testing.T) {
 	messages := toChatMessages(outbound.ModelRequest{
 		Turns: []outbound.ModelTurn{
 			{
@@ -167,13 +167,13 @@ func TestToChatMessagesMapsLegacyToolObservationAsRuntimeText(t *testing.T) {
 	})
 
 	if len(messages) != 2 {
-		t.Fatalf("len(messages) = %d, want assistant text and runtime observation", len(messages))
+		t.Fatalf("len(messages) = %d, want assistant text and user observation", len(messages))
 	}
 	if messages[0].Role != "assistant" || len(messages[0].ToolCalls) != 0 {
 		t.Fatalf("messages[0] = %#v, want assistant text without native tool_calls", messages[0])
 	}
-	if messages[1].Role != "system" || !strings.Contains(messages[1].Content, "Tool result for workspace") {
-		t.Fatalf("messages[1] = %#v, want system observation text", messages[1])
+	if messages[1].Role != "user" || !strings.Contains(messages[1].Content, "Tool result for workspace") {
+		t.Fatalf("messages[1] = %#v, want user observation text", messages[1])
 	}
 }
 
@@ -234,10 +234,11 @@ func TestClientGenerateHandlesNon2xx(t *testing.T) {
 	defer server.Close()
 
 	client := newClient(t, server.URL)
-	_, err := client.Generate(context.Background(), outbound.ModelRequest{})
+	response, err := client.Generate(context.Background(), diagnosticModelRequest())
 	if err == nil {
 		t.Fatal("Generate() error = nil, want error")
 	}
+	assertCompatibleRequestDiagnostics(t, response.RequestMessages)
 }
 
 func TestClientGenerateHandlesNoChoices(t *testing.T) {
@@ -274,6 +275,43 @@ func newClient(t *testing.T, baseURL string) *Client {
 	}
 
 	return client
+}
+
+func diagnosticModelRequest() outbound.ModelRequest {
+	return outbound.ModelRequest{
+		Instructions: "follow protocol",
+		Turns: []outbound.ModelTurn{
+			{
+				Role: outbound.ModelRoleUser,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindTaskPrompt, Text: "do work"},
+				},
+			},
+			{
+				Role: outbound.ModelRoleRuntime,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindProtocolCorrection, Text: "return JSON"},
+				},
+			},
+		},
+	}
+}
+
+func assertCompatibleRequestDiagnostics(t *testing.T, messages []outbound.ModelRequestMessage) {
+	t.Helper()
+
+	if len(messages) != 3 {
+		t.Fatalf("len(RequestMessages) = %d, want provider-facing diagnostics", len(messages))
+	}
+	if messages[0].Role != "system" || messages[0].Content != "follow protocol" || messages[0].Kind != "" {
+		t.Fatalf("RequestMessages[0] = %#v, want system instructions without application kind", messages[0])
+	}
+	if messages[1].Role != "user" || messages[1].Content != "do work" || messages[1].Kind != "" {
+		t.Fatalf("RequestMessages[1] = %#v, want user task without application kind", messages[1])
+	}
+	if messages[2].Role != "user" || messages[2].Content != "return JSON" || messages[2].Kind != "" {
+		t.Fatalf("RequestMessages[2] = %#v, want user correction without application kind", messages[2])
+	}
 }
 
 func writeJSON(t *testing.T, w http.ResponseWriter, value any) {

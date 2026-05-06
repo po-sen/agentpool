@@ -57,6 +57,7 @@ func NewClient(cfg Config) (*Client, error) {
 
 // Generate sends a chat completion request and returns generated content.
 func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbound.ModelResponse, error) {
+	requestMessages := toModelRequestMessages(req)
 	messages := toChatMessages(req)
 	body, err := json.Marshal(chatCompletionRequest{
 		Model:          c.model,
@@ -67,12 +68,12 @@ func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbo
 		Stream:         false,
 	})
 	if err != nil {
-		return outbound.ModelResponse{}, err
+		return outbound.ModelResponse{RequestMessages: requestMessages}, err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return outbound.ModelResponse{}, err
+		return outbound.ModelResponse{RequestMessages: requestMessages}, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
@@ -81,34 +82,35 @@ func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbo
 
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return outbound.ModelResponse{}, err
+		return outbound.ModelResponse{RequestMessages: requestMessages}, err
 	}
 	defer func() {
 		_ = httpResp.Body.Close()
 	}()
 
 	if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
-		return outbound.ModelResponse{}, fmt.Errorf("openai-compatible request failed: status %d: %s", httpResp.StatusCode, readBodySnippet(httpResp.Body))
+		return outbound.ModelResponse{RequestMessages: requestMessages},
+			fmt.Errorf("openai-compatible request failed: status %d: %s", httpResp.StatusCode, readBodySnippet(httpResp.Body))
 	}
 
 	var decoded chatCompletionResponse
 	if err := json.NewDecoder(httpResp.Body).Decode(&decoded); err != nil {
-		return outbound.ModelResponse{}, fmt.Errorf("decode openai-compatible response: %w", err)
+		return outbound.ModelResponse{RequestMessages: requestMessages}, fmt.Errorf("decode openai-compatible response: %w", err)
 	}
 	if len(decoded.Choices) == 0 {
-		return outbound.ModelResponse{}, errors.New("openai-compatible response has no choices")
+		return outbound.ModelResponse{RequestMessages: requestMessages}, errors.New("openai-compatible response has no choices")
 	}
 	message := decoded.Choices[0].Message
 	content := strings.TrimSpace(message.Content)
 	toolCalls := toModelToolCalls(message.ToolCalls)
 	if content == "" && len(toolCalls) == 0 {
-		return outbound.ModelResponse{}, errors.New("openai-compatible response content is empty")
+		return outbound.ModelResponse{RequestMessages: requestMessages}, errors.New("openai-compatible response content is empty")
 	}
 
 	return outbound.ModelResponse{
 		Content:         content,
 		ToolCalls:       toolCalls,
-		RequestMessages: toModelRequestMessages(req),
+		RequestMessages: requestMessages,
 	}, nil
 }
 
@@ -240,7 +242,7 @@ func toChatRole(role outbound.ModelRole) string {
 	case outbound.ModelRoleAssistant:
 		return "assistant"
 	case outbound.ModelRoleRuntime:
-		return chatRoleSystem
+		return "user"
 	case outbound.ModelRoleTool:
 		return "tool"
 	default:

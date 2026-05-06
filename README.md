@@ -583,7 +583,7 @@ Available tools:
   - path (optional): Safe relative /workspace path, or a full /workspace virtual path. Not used by "stage_many". Example: README.md
 - sandbox_exec: Runs commands in a general-purpose sandbox from /workspace.
   Arguments:
-  - command (required): Command to run from /workspace. Example: wc -l /workspace/README.md
+  - command (required): Command to run from /workspace. Stage inputs first; for multi-file checks, continue across files. Example: wc -l /workspace/README.md
   - timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10
   - max_output_bytes (optional): Optional maximum combined stdout and stderr bytes returned by the tool. Example: 65536
 ```
