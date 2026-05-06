@@ -27,7 +27,7 @@ func buildProtocolCorrectionMessage(parseErr actionParseError) string {
 	}
 	hint := parseErr.Hint
 	if hint == "" {
-		hint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}.`
+		hint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"workspace","arguments":{"operation":"list_sources"}}.`
 	}
 
 	return `Protocol error:
@@ -71,7 +71,7 @@ func buildPlaceholderToolArgumentCorrectionMessage(request placeholderToolArgume
 	if len(request.UploadedFileIDs) > 0 {
 		builder.WriteString("Uploaded files: ")
 		builder.WriteString(strings.Join(request.UploadedFileIDs, ", "))
-		builder.WriteString(". Uploaded paths are under /workspace/input.\n")
+		builder.WriteString(". Stage authorized sources into /workspace before using file contents.\n")
 	} else {
 		builder.WriteString("If a file path is needed, discover it with an available workspace tool first.\n")
 	}

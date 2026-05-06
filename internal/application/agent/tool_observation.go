@@ -8,7 +8,7 @@ import (
 
 const maxToolObservationLength = 8 << 10
 
-func buildToolObservation(tool string, arguments map[string]string, result outbound.ToolResult) string {
+func buildToolObservation(tool string, _ map[string]string, result outbound.ToolResult) string {
 	content := result.Content
 	if result.IsError {
 		prefix := fmt.Sprintf("Tool error for %s:\n", tool)

@@ -25,7 +25,15 @@ func TestBuildInitialTurnsIncludesPromptAndWorkspaceContext(t *testing.T) {
 	if turns[0].Parts[0].Kind != outbound.ModelPartKindTaskPrompt || turns[0].Parts[0].Text != "read input" {
 		t.Fatalf("prompt part = %#v, want original task prompt", turns[0].Parts[0])
 	}
-	if !strings.Contains(turns[0].Parts[1].Text, "/workspace/input/README.md") {
-		t.Fatalf("workspace context = %q, want uploaded virtual path", turns[0].Parts[1].Text)
+	for _, want := range []string{
+		"Authorized input sources available through workspace:",
+		"source_id: input_001",
+		"target_path_after_stage: /workspace/README.md",
+		"source metadata only",
+		"call workspace stage with the source_id above before using file contents",
+	} {
+		if !strings.Contains(turns[0].Parts[1].Text, want) {
+			t.Fatalf("workspace context = %q, want %q", turns[0].Parts[1].Text, want)
+		}
 	}
 }

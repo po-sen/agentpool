@@ -34,8 +34,8 @@ const (
 
 const (
 	finalActionHint    = `Return {"type":"final","summary":"..."}`
-	protocolActionHint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}`
-	toolCallActionHint = `Return {"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}`
+	protocolActionHint = `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"workspace","arguments":{"operation":"list_sources"}}`
+	toolCallActionHint = `Return {"type":"tool_call","tool":"workspace","arguments":{"operation":"list_sources"}}`
 )
 
 const (

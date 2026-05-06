@@ -612,8 +612,8 @@ func preferredArgumentKeys() []string {
 	return []string{
 		timelineArgumentCommand,
 		"operation",
+		"source_id",
 		"path",
-		"area",
 		"timeout_seconds",
 		"max_output_bytes",
 	}

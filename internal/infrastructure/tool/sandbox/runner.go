@@ -93,11 +93,11 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 	return []outbound.ToolDefinition{
 		{
 			Name:        toolNameSandboxExec,
-			Description: "Runs commands in a general-purpose sandbox from /workspace/work.",
+			Description: "Runs commands in a general-purpose sandbox from /workspace.",
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        argumentCommand,
-					Description: "Command to run from /workspace/work using installed sandbox tools and scripts. Read inputs from /workspace/input and write generated files under /workspace/work.",
+					Description: "Command to run from /workspace using installed sandbox tools and scripts. Stage authorized inputs with workspace before reading them.",
 					Required:    true,
 					Example:     "pwd",
 				},
@@ -170,7 +170,7 @@ func sandboxExecAvailable(context outbound.ToolContext) bool {
 }
 
 func workspaceAvailable(workspace outbound.Workspace) bool {
-	return strings.TrimSpace(workspace.InputPath) != "" && strings.TrimSpace(workspace.WorkPath) != ""
+	return strings.TrimSpace(workspace.RootPath) != ""
 }
 
 func (r *Runner) parseTimeout(arguments map[string]string) (time.Duration, error) {

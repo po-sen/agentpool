@@ -366,7 +366,7 @@ func TestRunResponseJSONIncludesToolCalls(t *testing.T) {
 				Arguments: map[string]string{
 					"command": "pwd && ls -la",
 				},
-				Result:    "exit_code: 0\nstdout:\n/workspace/work\n",
+				Result:    "exit_code: 0\nstdout:\n/workspace\n",
 				StartedAt: time.Unix(101, 0).UTC(),
 				EndedAt:   time.Unix(102, 0).UTC(),
 			},
@@ -386,7 +386,7 @@ func TestRunResponseJSONIncludesToolCalls(t *testing.T) {
 	if !strings.Contains(got, `"command":"pwd \u0026\u0026 ls -la"`) {
 		t.Fatalf("response does not contain tool arguments: %s", got)
 	}
-	if !strings.Contains(got, `"result":"exit_code: 0\nstdout:\n/workspace/work\n"`) {
+	if !strings.Contains(got, `"result":"exit_code: 0\nstdout:\n/workspace\n"`) {
 		t.Fatalf("response does not contain tool result: %s", got)
 	}
 }
@@ -522,7 +522,7 @@ func TestRunResponseJSONIncludesEmptyToolArgumentsObject(t *testing.T) {
 		ToolCalls: []inbound.ToolCallView{
 			{
 				Name:      "workspace",
-				Result:    "files:\n/workspace/input/README.md",
+				Result:    "files:\n/workspace/README.md",
 				StartedAt: time.Unix(101, 0).UTC(),
 				EndedAt:   time.Unix(102, 0).UTC(),
 			},

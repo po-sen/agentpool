@@ -85,11 +85,13 @@ func buildWorkspaceContextPart(task run.TaskSpec) string {
 	}
 
 	var builder strings.Builder
-	builder.WriteString("Workspace input files available to tools:\n")
-	for _, attachment := range task.Attachments {
-		builder.WriteString("- path: ")
+	builder.WriteString("Authorized input sources available through workspace:\n")
+	for index, attachment := range task.Attachments {
+		builder.WriteString("- source_id: ")
+		builder.WriteString(workspaceSourceID(index))
+		builder.WriteString("; path: ")
 		builder.WriteString(attachment.Filename)
-		builder.WriteString("; virtual_path: /workspace/input/")
+		builder.WriteString("; target_path_after_stage: /workspace/")
 		builder.WriteString(attachment.Filename)
 		if attachment.MediaType != "" {
 			builder.WriteString("; media_type: ")
@@ -99,11 +101,21 @@ func buildWorkspaceContextPart(task run.TaskSpec) string {
 		builder.WriteString(strconv.FormatInt(attachmentSizeBytes(attachment), 10))
 		builder.WriteString("\n")
 	}
+	builder.WriteString("These are source metadata only; their file contents are not available in /workspace until staged.\n")
 	if len(task.Attachments) == 1 {
-		builder.WriteString("If the user refers to this file without naming it, use the uploaded path above.\n")
+		builder.WriteString("If the user refers to this file without naming it, call workspace stage with the source_id above before using file contents.\n")
 	}
 
 	return builder.String()
+}
+
+func workspaceSourceID(index int) string {
+	id := strconv.Itoa(index + 1)
+	if len(id) >= 3 {
+		return "input_" + id
+	}
+
+	return "input_" + strings.Repeat("0", 3-len(id)) + id
 }
 
 func attachmentSizeBytes(attachment run.TaskAttachment) int64 {

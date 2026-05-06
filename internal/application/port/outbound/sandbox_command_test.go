@@ -10,7 +10,7 @@ func TestSandboxCommandRunnerContract(t *testing.T) {
 
 	result, err := runner.RunCommand(context.Background(), SandboxCommandRequest{
 		Sandbox:   Sandbox{ID: "sandbox_test"},
-		Workspace: Workspace{RootPath: "/tmp/workspace", InputPath: "/tmp/workspace/input", WorkPath: "/tmp/workspace/work"},
+		Workspace: Workspace{RootPath: "/tmp/workspace"},
 		Command:   "true",
 	})
 	if err != nil {

@@ -9,8 +9,8 @@ import (
 )
 
 func TestBuildToolObservationFormatsSuccess(t *testing.T) {
-	got := buildToolObservation("workspace", nil, outbound.ToolResult{Content: "files:\n/workspace/input/README.md\n"})
-	want := "Tool result for workspace:\nfiles:\n/workspace/input/README.md\n"
+	got := buildToolObservation("workspace", nil, outbound.ToolResult{Content: "files:\n/workspace/README.md\n"})
+	want := "Tool result for workspace:\nfiles:\n/workspace/README.md\n"
 	if got != want {
 		t.Fatalf("observation = %q, want %q", got, want)
 	}

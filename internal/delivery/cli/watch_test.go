@@ -22,7 +22,7 @@ func TestWriteRunTimelineUpdateIncludesTurnAndToolDetails(t *testing.T) {
 				ActionType:  "tool_call",
 				ToolName:    "sandbox_exec",
 				Message:     "model requested tool call",
-				RawResponse: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -l /workspace/input/README.md","timeout_seconds":"10"}}`,
+				RawResponse: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -l /workspace/README.md","timeout_seconds":"10"}}`,
 				StartedAt:   startedAt,
 				EndedAt:     endedAt,
 			},
@@ -30,8 +30,8 @@ func TestWriteRunTimelineUpdateIncludesTurnAndToolDetails(t *testing.T) {
 		ToolCalls: []ToolCallResponse{
 			{
 				Name:      "sandbox_exec",
-				Arguments: map[string]string{"command": "wc -l /workspace/input/README.md"},
-				Result:    "12 /workspace/input/README.md",
+				Arguments: map[string]string{"command": "wc -l /workspace/README.md"},
+				Result:    "12 /workspace/README.md",
 				StartedAt: startedAt,
 				EndedAt:   endedAt,
 			},
@@ -48,11 +48,11 @@ func TestWriteRunTimelineUpdateIncludesTurnAndToolDetails(t *testing.T) {
 		"agent [turn 2]",
 		"tool_call",
 		"sandbox_exec",
-		"request:\n    command: wc -l /workspace/input/README.md",
+		"request:\n    command: wc -l /workspace/README.md",
 		"response:\n    type: tool_call\n    tool: sandbox_exec",
 		"message:\n    model requested tool call",
 		"tool [tool 1]",
-		"response:\n    12 /workspace/input/README.md",
+		"response:\n    12 /workspace/README.md",
 	} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("timeline missing %q:\n%s", want, output.String())
@@ -67,7 +67,7 @@ func TestWriteRunTimelineUpdateIncludesTurnAndToolDetails(t *testing.T) {
 	for _, want := range []string{
 		"Run: run_timeline\n\n",
 		"    model requested tool call\n",
-		"    12 /workspace/input/README.md\n\n",
+		"    12 /workspace/README.md\n\n",
 	} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("timeline missing blank-line spacing around %q:\n%s", want, output.String())

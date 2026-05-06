@@ -196,13 +196,13 @@ func TestWorkerStoresWorkspaceAndSandboxExecToolCallHistory(t *testing.T) {
 			t.Fatalf("ToolCalls[%d].Name = %q, want %q", i, stored.ToolCalls[i].Name, want)
 		}
 	}
-	if stored.ToolCalls[0].Arguments["operation"] != "list" {
-		t.Fatalf("workspace operation = %q, want list", stored.ToolCalls[0].Arguments["operation"])
+	if stored.ToolCalls[0].Arguments["operation"] != "list_sources" {
+		t.Fatalf("workspace operation = %q, want list_sources", stored.ToolCalls[0].Arguments["operation"])
 	}
-	if stored.ToolCalls[1].Arguments["command"] != "pwd && ls -la /workspace/input" {
-		t.Fatalf("sandbox_exec command = %q, want pwd && ls -la /workspace/input", stored.ToolCalls[1].Arguments["command"])
+	if stored.ToolCalls[1].Arguments["command"] != "pwd && ls -la /workspace" {
+		t.Fatalf("sandbox_exec command = %q, want pwd && ls -la /workspace", stored.ToolCalls[1].Arguments["command"])
 	}
-	if stored.ToolCalls[1].Result != "exit_code: 0\nstdout:\n/workspace/work\n" {
+	if stored.ToolCalls[1].Result != "exit_code: 0\nstdout:\n/workspace\n" {
 		t.Fatalf("sandbox_exec result = %q, want command output", stored.ToolCalls[1].Result)
 	}
 	assertAgentTurnStatuses(t, stored.AgentTurns, []string{
@@ -259,11 +259,11 @@ func TestWorkerPassesPromptOnlyWorkspaceContextToAgentTools(t *testing.T) {
 	if len(tools.listRequests) == 0 {
 		t.Fatal("tool list request was not recorded")
 	}
-	if tools.listRequests[0].Context.Workspace != workspace.workspace(false) {
+	if !sameWorkspace(tools.listRequests[0].Context.Workspace, workspace.workspace(false)) {
 		t.Fatalf("list workspace = %#v, want %#v", tools.listRequests[0].Context.Workspace, workspace.workspace(false))
 	}
-	if tools.listRequests[0].Context.Workspace.HasFiles {
-		t.Fatal("list workspace HasFiles = true, want false")
+	if len(tools.listRequests[0].Context.Workspace.Sources) != 0 {
+		t.Fatalf("list workspace sources = %#v, want none", tools.listRequests[0].Context.Workspace.Sources)
 	}
 	if tools.listRequests[0].Context.Sandbox.ID != "" {
 		t.Fatalf("list sandbox id = %q, want empty", tools.listRequests[0].Context.Sandbox.ID)
@@ -271,11 +271,11 @@ func TestWorkerPassesPromptOnlyWorkspaceContextToAgentTools(t *testing.T) {
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
-	if tools.calls[0].Context.Workspace != workspace.workspace(false) {
+	if !sameWorkspace(tools.calls[0].Context.Workspace, workspace.workspace(false)) {
 		t.Fatalf("tool workspace = %#v, want %#v", tools.calls[0].Context.Workspace, workspace.workspace(false))
 	}
-	if tools.calls[0].Context.Workspace.HasFiles {
-		t.Fatal("tool workspace HasFiles = true, want false")
+	if len(tools.calls[0].Context.Workspace.Sources) != 0 {
+		t.Fatalf("tool workspace sources = %#v, want none", tools.calls[0].Context.Workspace.Sources)
 	}
 	if tools.calls[0].Context.Sandbox.ID != "" {
 		t.Fatalf("tool sandbox id = %q, want empty", tools.calls[0].Context.Sandbox.ID)
@@ -429,7 +429,7 @@ func TestWorkerPreparesCommandSandboxForPromptOnlyRun(t *testing.T) {
 	if !sandbox.prepareCalled {
 		t.Fatal("sandbox prepare was not called")
 	}
-	if sandbox.workspace != workspace.workspace(false) {
+	if !sameWorkspace(sandbox.workspace, workspace.workspace(false)) {
 		t.Fatalf("sandbox workspace = %#v, want %#v", sandbox.workspace, workspace.workspace(false))
 	}
 	if !sandbox.cleanupCalled {
@@ -509,7 +509,7 @@ func TestWorkerPreparesWorkspaceForAttachmentsAndPassesPathToAgentTools(t *testi
 		{
 			name:    "workspace",
 			status:  run.StatusCompleted,
-			message: "Prepared workspace with 1 uploaded file(s)",
+			message: "Prepared workspace with 1 authorized input source(s)",
 			ended:   true,
 		},
 		{
@@ -537,20 +537,20 @@ func TestWorkerPreparesWorkspaceForAttachmentsAndPassesPathToAgentTools(t *testi
 	if len(tools.listRequests) == 0 {
 		t.Fatal("tool list request was not recorded")
 	}
-	if tools.listRequests[0].Context.Workspace != workspace.workspace(true) {
+	if !sameWorkspace(tools.listRequests[0].Context.Workspace, workspace.workspace(true)) {
 		t.Fatalf("list workspace = %#v, want %#v", tools.listRequests[0].Context.Workspace, workspace.workspace(true))
 	}
-	if !tools.listRequests[0].Context.Workspace.HasFiles {
-		t.Fatal("list workspace HasFiles = false, want true")
+	if len(tools.listRequests[0].Context.Workspace.Sources) != 1 {
+		t.Fatalf("list workspace sources = %#v, want one source", tools.listRequests[0].Context.Workspace.Sources)
 	}
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
-	if tools.calls[0].Context.Workspace != workspace.workspace(true) {
+	if !sameWorkspace(tools.calls[0].Context.Workspace, workspace.workspace(true)) {
 		t.Fatalf("tool workspace = %#v, want %#v", tools.calls[0].Context.Workspace, workspace.workspace(true))
 	}
-	if !tools.calls[0].Context.Workspace.HasFiles {
-		t.Fatal("tool workspace HasFiles = false, want true")
+	if len(tools.calls[0].Context.Workspace.Sources) != 1 {
+		t.Fatalf("tool workspace sources = %#v, want one source", tools.calls[0].Context.Workspace.Sources)
 	}
 	if tools.calls[0].Context.Sandbox.ID != "" {
 		t.Fatalf("tool sandbox id = %q, want empty", tools.calls[0].Context.Sandbox.ID)
@@ -626,7 +626,7 @@ func TestWorkerPreparesCommandSandboxForAttachments(t *testing.T) {
 	if sandbox.runID != item.ID {
 		t.Fatalf("sandbox run ID = %s, want %s", sandbox.runID, item.ID)
 	}
-	if sandbox.workspace != workspace.workspace(true) {
+	if !sameWorkspace(sandbox.workspace, workspace.workspace(true)) {
 		t.Fatalf("sandbox workspace = %#v, want %#v", sandbox.workspace, workspace.workspace(true))
 	}
 	if !sandbox.cleanupCalled {
@@ -1442,11 +1442,11 @@ func (c *workspaceAndSandboxToolCallingModelClient) Generate(
 	switch c.calls {
 	case 1:
 		return outbound.ModelResponse{
-			Content: `{"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}`,
+			Content: `{"type":"tool_call","tool":"workspace","arguments":{"operation":"list_sources"}}`,
 		}, nil
 	case 2:
 		return outbound.ModelResponse{
-			Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"pwd && ls -la /workspace/input"}}`,
+			Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"pwd && ls -la /workspace"}}`,
 		}, nil
 	default:
 		return outbound.ModelResponse{Content: `{"type":"final","summary":"done with tools"}`}, nil
@@ -1507,14 +1507,6 @@ type fakePolicyDecision struct{}
 
 func (p fakePolicyDecision) Decide(context.Context, outbound.PolicyDecisionRequest) (outbound.PolicyDecision, error) {
 	return outbound.PolicyDecision{Allowed: true}, nil
-}
-
-var errPolicyFailed = errors.New("policy failed: product ACL details")
-
-type failingPolicyDecision struct{}
-
-func (p failingPolicyDecision) Decide(context.Context, outbound.PolicyDecisionRequest) (outbound.PolicyDecision, error) {
-	return outbound.PolicyDecision{}, errPolicyFailed
 }
 
 type cancellingPolicyDecision struct {
@@ -1593,12 +1585,30 @@ func (p *recordingWorkspaceProvider) CollectArtifacts(context.Context, outbound.
 }
 
 func (p *recordingWorkspaceProvider) workspace(hasFiles bool) outbound.Workspace {
-	return outbound.Workspace{
+	workspace := outbound.Workspace{
 		RootPath:  p.path,
-		InputPath: p.path + "/input",
-		WorkPath:  p.path + "/work",
-		HasFiles:  hasFiles,
+		StatePath: p.path + "-state",
 	}
+	if hasFiles {
+		workspace.Sources = []outbound.WorkspaceSource{
+			{ID: "input_001", Path: "README.md", MediaType: "text/markdown", SizeBytes: 7},
+		}
+	}
+
+	return workspace
+}
+
+func sameWorkspace(got outbound.Workspace, want outbound.Workspace) bool {
+	if got.RootPath != want.RootPath || got.StatePath != want.StatePath || len(got.Sources) != len(want.Sources) {
+		return false
+	}
+	for index := range got.Sources {
+		if got.Sources[index] != want.Sources[index] {
+			return false
+		}
+	}
+
+	return true
 }
 
 type recordingSandboxProvider struct {
@@ -1642,17 +1652,17 @@ type fakeToolRunner struct{}
 func (r fakeToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
 	return []outbound.ToolDefinition{
 		{Name: "echo", Description: "Returns text"},
-		{Name: "workspace", Description: "Lists or stats workspace paths without reading file contents."},
-		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
+		{Name: "workspace", Description: "Manages authorized input sources and staged files for the mutable /workspace."},
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace."},
 	}, nil
 }
 
 func (r fakeToolRunner) RunTool(_ context.Context, call outbound.ToolCall) (outbound.ToolResult, error) {
 	switch call.Name {
 	case "workspace":
-		return outbound.ToolResult{Content: "files:\n/workspace/input/README.md"}, nil
+		return outbound.ToolResult{Content: "sources:\n- source_id: input_001\n  path: README.md\n"}, nil
 	case "sandbox_exec":
-		return outbound.ToolResult{Content: "exit_code: 0\nstdout:\n/workspace/work\n"}, nil
+		return outbound.ToolResult{Content: "exit_code: 0\nstdout:\n/workspace\n"}, nil
 	default:
 		return outbound.ToolResult{Content: "tool result"}, nil
 	}

@@ -15,8 +15,15 @@ func TestRunnerImplementsToolRunner(_ *testing.T) {
 	var _ outbound.ToolRunner = (*Runner)(nil)
 }
 
-func TestRunnerAdvertisesOnlyWorkspace(t *testing.T) {
-	runner := NewRunner(Config{})
+func TestNewRunnerRequiresMaterializer(t *testing.T) {
+	_, err := NewRunner(nil, Config{})
+	if err == nil || !strings.Contains(err.Error(), "workspace materializer is required") {
+		t.Fatalf("NewRunner() error = %v, want materializer error", err)
+	}
+}
+
+func TestRunnerAdvertisesWorkspaceControlPlane(t *testing.T) {
+	runner := newTestRunner(t, nil)
 
 	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{
 		Context: outbound.ToolContext{Workspace: testWorkspace(t)},
@@ -27,13 +34,16 @@ func TestRunnerAdvertisesOnlyWorkspace(t *testing.T) {
 	if len(tools) != 1 || tools[0].Name != toolNameWorkspace {
 		t.Fatalf("tools = %#v, want workspace", tools)
 	}
+	if tools[0].Description != "Manages authorized input sources and staged files for the mutable /workspace." {
+		t.Fatalf("description = %q", tools[0].Description)
+	}
 	if len(tools[0].Arguments) != 3 {
-		t.Fatalf("arguments = %#v, want operation, area, path", tools[0].Arguments)
+		t.Fatalf("arguments = %#v, want operation, source_id, path", tools[0].Arguments)
 	}
 }
 
 func TestRunnerDoesNotAdvertiseWithoutWorkspace(t *testing.T) {
-	runner := NewRunner(Config{})
+	runner := newTestRunner(t, nil)
 
 	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{})
 	if err != nil {
@@ -44,158 +54,118 @@ func TestRunnerDoesNotAdvertiseWithoutWorkspace(t *testing.T) {
 	}
 }
 
-func TestRunnerListsInputFiles(t *testing.T) {
-	workspace := testWorkspace(t)
-	writeFile(t, workspace.InputPath, "README.md", "demo")
-	writeFile(t, workspace.WorkPath, "scratch.txt", "scratch")
-
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationList,
-		argumentArea:      areaInput,
-	})
-	if result.IsError {
-		t.Fatalf("result = %#v, want success", result)
+func TestRunnerListsSources(t *testing.T) {
+	materializer := &fakeMaterializer{
+		staged: []outbound.WorkspaceStagedFile{{SourceID: "input_001", Path: "README.md", SizeBytes: 4}},
 	}
-	assertContains(t, result.Content, "/workspace/input/README.md")
-	assertContains(t, result.Content, "area: input")
-	assertContains(t, result.Content, "relative_path: README.md")
-	assertContains(t, result.Content, "size_bytes: 4")
-	assertNotContains(t, result.Content, "/workspace/work/scratch.txt")
-	assertNotContains(t, result.Content, workspace.InputPath)
-}
-
-func TestRunnerListsWorkFiles(t *testing.T) {
-	workspace := testWorkspace(t)
-	writeFile(t, workspace.InputPath, "README.md", "demo")
-	writeFile(t, workspace.WorkPath, "scratch.txt", "scratch")
-
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationList,
-		argumentArea:      areaWork,
-	})
-	if result.IsError {
-		t.Fatalf("result = %#v, want success", result)
-	}
-	assertContains(t, result.Content, "/workspace/work/scratch.txt")
-	assertNotContains(t, result.Content, "/workspace/input/README.md")
-	assertNotContains(t, result.Content, workspace.WorkPath)
-}
-
-func TestRunnerListsAllFiles(t *testing.T) {
-	workspace := testWorkspace(t)
-	writeFile(t, workspace.InputPath, "README.md", "demo")
-	writeFile(t, workspace.WorkPath, "scratch.txt", "scratch")
-
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationList,
-	})
-	if result.IsError {
-		t.Fatalf("result = %#v, want success", result)
-	}
-	assertContains(t, result.Content, "/workspace/input/README.md")
-	assertContains(t, result.Content, "/workspace/work/scratch.txt")
-}
-
-func TestRunnerStatsInputFile(t *testing.T) {
-	workspace := testWorkspace(t)
-	writeFile(t, workspace.InputPath, "README.md", "demo")
-
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationStat,
-		argumentArea:      areaInput,
-		argumentPath:      "README.md",
+	result := runWorkspaceTool(t, newTestRunner(t, materializer), testWorkspace(t), map[string]string{
+		argumentOperation: operationListSources,
 	})
 	if result.IsError {
 		t.Fatalf("result = %#v, want success", result)
 	}
 	for _, want := range []string{
-		"virtual_path: /workspace/input/README.md",
-		"area: input",
-		"relative_path: README.md",
+		"sources:",
+		"source_id: input_001",
+		"path: README.md",
+		"virtual_path: /workspace/README.md",
+		"media_type: text/markdown",
 		"size_bytes: 4",
-		"type: file",
+		"checksum: sha256:readme",
+		"staged: true",
+		"staged_paths: /workspace/README.md",
 	} {
 		assertContains(t, result.Content, want)
 	}
-	assertNotContains(t, result.Content, workspace.InputPath)
 }
 
-func TestRunnerStatsInputFileWithVirtualPath(t *testing.T) {
+func TestRunnerStagesSource(t *testing.T) {
+	materializer := &fakeMaterializer{}
 	workspace := testWorkspace(t)
-	writeFile(t, workspace.InputPath, "README.md", "demo")
 
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationStat,
-		argumentPath:      "/workspace/input/README.md",
+	result := runWorkspaceTool(t, newTestRunner(t, materializer), workspace, map[string]string{
+		argumentOperation: operationStage,
+		argumentSourceID:  "input_001",
 	})
 	if result.IsError {
 		t.Fatalf("result = %#v, want success", result)
 	}
-	assertContains(t, result.Content, "virtual_path: /workspace/input/README.md")
-	assertContains(t, result.Content, "area: input")
-	assertContains(t, result.Content, "relative_path: README.md")
-	assertNotContains(t, result.Content, workspace.InputPath)
+	if materializer.requests[0].SourceID != "input_001" || materializer.requests[0].Path != "README.md" {
+		t.Fatalf("materialize request = %#v, want README.md source", materializer.requests[0])
+	}
+	if materializer.requests[0].Overwrite {
+		t.Fatal("stage Overwrite = true, want false")
+	}
+	assertContains(t, result.Content, "staged:")
+	assertContains(t, result.Content, "virtual_path: /workspace/README.md")
 }
 
-func TestRunnerStatsWorkFile(t *testing.T) {
+func TestRunnerStagesSourceAtCustomPath(t *testing.T) {
+	materializer := &fakeMaterializer{}
 	workspace := testWorkspace(t)
-	writeFile(t, workspace.WorkPath, "scratch.txt", "scratch")
 
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationStat,
-		argumentArea:      areaWork,
-		argumentPath:      "scratch.txt",
+	result := runWorkspaceTool(t, newTestRunner(t, materializer), workspace, map[string]string{
+		argumentOperation: operationStage,
+		argumentSourceID:  "input_001",
+		argumentPath:      "/workspace/docs/README.md",
 	})
 	if result.IsError {
 		t.Fatalf("result = %#v, want success", result)
 	}
-	assertContains(t, result.Content, "virtual_path: /workspace/work/scratch.txt")
-	assertContains(t, result.Content, "area: work")
-	assertContains(t, result.Content, "type: file")
-	assertNotContains(t, result.Content, workspace.WorkPath)
+	if materializer.requests[0].Path != "docs/README.md" {
+		t.Fatalf("materialize path = %q, want docs/README.md", materializer.requests[0].Path)
+	}
 }
 
-func TestRunnerStatsWorkFileWithVirtualPath(t *testing.T) {
-	workspace := testWorkspace(t)
-	writeFile(t, workspace.WorkPath, "scratch.txt", "scratch")
+func TestRunnerRestoresByPath(t *testing.T) {
+	materializer := &fakeMaterializer{
+		staged: []outbound.WorkspaceStagedFile{{SourceID: "input_001", Path: "README.md", SizeBytes: 4}},
+	}
 
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationStat,
-		argumentPath:      "/workspace/work/scratch.txt",
+	result := runWorkspaceTool(t, newTestRunner(t, materializer), testWorkspace(t), map[string]string{
+		argumentOperation: operationRestore,
+		argumentPath:      "README.md",
 	})
 	if result.IsError {
 		t.Fatalf("result = %#v, want success", result)
 	}
-	assertContains(t, result.Content, "virtual_path: /workspace/work/scratch.txt")
-	assertContains(t, result.Content, "area: work")
-	assertContains(t, result.Content, "relative_path: scratch.txt")
-	assertNotContains(t, result.Content, workspace.WorkPath)
+	if materializer.requests[0].SourceID != "input_001" || materializer.requests[0].Path != "README.md" {
+		t.Fatalf("restore request = %#v, want README.md from input_001", materializer.requests[0])
+	}
+	if !materializer.requests[0].Overwrite {
+		t.Fatal("restore Overwrite = false, want true")
+	}
+	assertContains(t, result.Content, "restored:")
 }
 
-func TestRunnerStatsDirectory(t *testing.T) {
+func TestRunnerListsWorkspaceFiles(t *testing.T) {
 	workspace := testWorkspace(t)
+	writeFile(t, workspace.RootPath, "README.md", "demo")
+	writeFile(t, workspace.RootPath, "scratch.txt", "scratch")
+	materializer := &fakeMaterializer{
+		staged: []outbound.WorkspaceStagedFile{{SourceID: "input_001", Path: "README.md", SizeBytes: 4}},
+	}
 
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationStat,
-		argumentArea:      areaInput,
-		argumentPath:      ".",
+	result := runWorkspaceTool(t, newTestRunner(t, materializer), workspace, map[string]string{
+		argumentOperation: operationList,
 	})
 	if result.IsError {
 		t.Fatalf("result = %#v, want success", result)
 	}
-	assertContains(t, result.Content, "virtual_path: /workspace/input")
-	assertContains(t, result.Content, "type: directory")
+	assertContains(t, result.Content, "/workspace/README.md")
+	assertContains(t, result.Content, "source_id: input_001")
+	assertContains(t, result.Content, "/workspace/scratch.txt")
+	assertNotContains(t, result.Content, workspace.RootPath)
 }
 
 func TestRunnerRejectsUnsafePaths(t *testing.T) {
 	workspace := testWorkspace(t)
-	runner := NewRunner(Config{})
+	runner := newTestRunner(t, nil)
 
 	for _, unsafePath := range []string{"/tmp/file", "../secret", "a/../b", `a\b`, "C:/tmp/file", "./README.md"} {
 		t.Run(unsafePath, func(t *testing.T) {
 			result := runWorkspaceTool(t, runner, workspace, map[string]string{
-				argumentOperation: operationStat,
-				argumentArea:      areaInput,
+				argumentOperation: operationList,
 				argumentPath:      unsafePath,
 			})
 			if !result.IsError || !strings.Contains(result.Content, "path is unsafe") {
@@ -205,33 +175,8 @@ func TestRunnerRejectsUnsafePaths(t *testing.T) {
 	}
 }
 
-func TestRunnerRejectsConflictingAreaAndVirtualPath(t *testing.T) {
-	workspace := testWorkspace(t)
-	writeFile(t, workspace.InputPath, "README.md", "demo")
-
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationStat,
-		argumentArea:      areaWork,
-		argumentPath:      "/workspace/input/README.md",
-	})
-	if !result.IsError || !strings.Contains(result.Content, "conflicts with virtual path area") {
-		t.Fatalf("result = %#v, want conflict error", result)
-	}
-	assertNotContains(t, result.Content, workspace.RootPath)
-}
-
-func TestRunnerRejectsUnknownArea(t *testing.T) {
-	result := runWorkspaceTool(t, NewRunner(Config{}), testWorkspace(t), map[string]string{
-		argumentOperation: operationList,
-		argumentArea:      "logs",
-	})
-	if !result.IsError || !strings.Contains(result.Content, "unknown workspace area") {
-		t.Fatalf("result = %#v, want unknown area error", result)
-	}
-}
-
 func TestRunnerRejectsUnknownOperation(t *testing.T) {
-	result := runWorkspaceTool(t, NewRunner(Config{}), testWorkspace(t), map[string]string{
+	result := runWorkspaceTool(t, newTestRunner(t, nil), testWorkspace(t), map[string]string{
 		argumentOperation: "read",
 	})
 	if !result.IsError || !strings.Contains(result.Content, "unknown workspace operation: read") {
@@ -240,7 +185,7 @@ func TestRunnerRejectsUnknownOperation(t *testing.T) {
 }
 
 func TestRunnerRequiresOperation(t *testing.T) {
-	result := runWorkspaceTool(t, NewRunner(Config{}), testWorkspace(t), nil)
+	result := runWorkspaceTool(t, newTestRunner(t, nil), testWorkspace(t), nil)
 	if !result.IsError || !strings.Contains(result.Content, "missing operation argument") {
 		t.Fatalf("result = %#v, want missing operation error", result)
 	}
@@ -249,12 +194,11 @@ func TestRunnerRequiresOperation(t *testing.T) {
 func TestRunnerBoundsListOutput(t *testing.T) {
 	workspace := testWorkspace(t)
 	for i := 0; i < 3; i++ {
-		writeFile(t, workspace.InputPath, fmt.Sprintf("file-%d.txt", i), "demo")
+		writeFile(t, workspace.RootPath, fmt.Sprintf("file-%d.txt", i), "demo")
 	}
 
-	result := runWorkspaceTool(t, NewRunner(Config{MaxFiles: 2}), workspace, map[string]string{
+	result := runWorkspaceTool(t, newTestRunnerWithConfig(t, nil, Config{MaxFiles: 2}), workspace, map[string]string{
 		argumentOperation: operationList,
-		argumentArea:      areaInput,
 	})
 	if !result.IsError || !strings.Contains(result.Content, "too many files") {
 		t.Fatalf("result = %#v, want bounded output error", result)
@@ -262,84 +206,29 @@ func TestRunnerBoundsListOutput(t *testing.T) {
 }
 
 func TestRunnerDefaultListLimitMatchesPOCUploadLimit(t *testing.T) {
-	runner := NewRunner(Config{})
+	runner := newTestRunner(t, nil)
 	if runner.maxFiles != 500 {
 		t.Fatalf("default max files = %d, want 500", runner.maxFiles)
 	}
 }
 
-func TestRunnerListMissingInputPathReturnsSafeError(t *testing.T) {
+func TestRunnerListMissingPathReturnsSafeError(t *testing.T) {
 	workspace := testWorkspace(t)
 
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
+	result := runWorkspaceTool(t, newTestRunner(t, nil), workspace, map[string]string{
 		argumentOperation: operationList,
-		argumentArea:      areaInput,
 		argumentPath:      "missing",
 	})
 
-	assertMissingPathError(t, result, workspace)
-}
-
-func TestRunnerListMissingWorkPathReturnsSafeError(t *testing.T) {
-	workspace := testWorkspace(t)
-
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationList,
-		argumentArea:      areaWork,
-		argumentPath:      "missing",
-	})
-
-	assertMissingPathError(t, result, workspace)
-}
-
-func TestRunnerListMissingAllPathReturnsSafeError(t *testing.T) {
-	workspace := testWorkspace(t)
-
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationList,
-		argumentArea:      areaAll,
-		argumentPath:      "missing",
-	})
-
-	assertMissingPathError(t, result, workspace)
-}
-
-func TestRunnerListAllPathReturnsPartialMatches(t *testing.T) {
-	workspace := testWorkspace(t)
-	writeFile(t, workspace.WorkPath, "scratch.txt", "scratch")
-
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationList,
-		argumentArea:      areaAll,
-		argumentPath:      "scratch.txt",
-	})
-	if result.IsError {
-		t.Fatalf("result = %#v, want partial success", result)
+	if !result.IsError || !strings.Contains(result.Content, "path is not available") {
+		t.Fatalf("result = %#v, want missing path error", result)
 	}
-	assertContains(t, result.Content, "virtual_path: /workspace/work/scratch.txt")
-	assertNotContains(t, result.Content, "path is not available")
-	assertNotContains(t, result.Content, workspace.WorkPath)
-}
-
-func TestRunnerStatAllPathReturnsPartialMatches(t *testing.T) {
-	workspace := testWorkspace(t)
-	writeFile(t, workspace.WorkPath, "scratch.txt", "scratch")
-
-	result := runWorkspaceTool(t, NewRunner(Config{}), workspace, map[string]string{
-		argumentOperation: operationStat,
-		argumentArea:      areaAll,
-		argumentPath:      "scratch.txt",
-	})
-	if result.IsError {
-		t.Fatalf("result = %#v, want partial success", result)
-	}
-	assertContains(t, result.Content, "virtual_path: /workspace/work/scratch.txt")
-	assertNotContains(t, result.Content, "path is not available")
-	assertNotContains(t, result.Content, workspace.WorkPath)
+	assertNotContains(t, result.Content, workspace.RootPath)
 }
 
 func TestRunnerRejectsUnknownToolName(t *testing.T) {
-	result, err := NewRunner(Config{}).RunTool(context.Background(), outbound.ToolCall{
+	runner := newTestRunner(t, nil)
+	result, err := runner.RunTool(context.Background(), outbound.ToolCall{
 		Name:    "unknown_tool",
 		Context: outbound.ToolContext{Workspace: testWorkspace(t)},
 	})
@@ -349,6 +238,25 @@ func TestRunnerRejectsUnknownToolName(t *testing.T) {
 	if !result.IsError || result.Content != "unknown tool: unknown_tool" {
 		t.Fatalf("result = %#v, want unknown tool error", result)
 	}
+}
+
+func newTestRunner(t *testing.T, materializer *fakeMaterializer) *Runner {
+	t.Helper()
+
+	return newTestRunnerWithConfig(t, materializer, Config{})
+}
+
+func newTestRunnerWithConfig(t *testing.T, materializer *fakeMaterializer, cfg Config) *Runner {
+	t.Helper()
+	if materializer == nil {
+		materializer = &fakeMaterializer{}
+	}
+	runner, err := NewRunner(materializer, cfg)
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	return runner
 }
 
 func runWorkspaceTool(t *testing.T, runner *Runner, workspace outbound.Workspace, arguments map[string]string) outbound.ToolResult {
@@ -369,20 +277,18 @@ func runWorkspaceTool(t *testing.T, runner *Runner, workspace outbound.Workspace
 func testWorkspace(t *testing.T) outbound.Workspace {
 	t.Helper()
 
-	root := t.TempDir()
-	inputPath := filepath.Join(root, "input")
-	workPath := filepath.Join(root, "work")
-	if err := os.Mkdir(inputPath, 0o700); err != nil {
-		t.Fatalf("mkdir input: %v", err)
-	}
-	if err := os.Mkdir(workPath, 0o700); err != nil {
-		t.Fatalf("mkdir work: %v", err)
-	}
-
 	return outbound.Workspace{
-		RootPath:  root,
-		InputPath: inputPath,
-		WorkPath:  workPath,
+		RootPath:  t.TempDir(),
+		StatePath: t.TempDir(),
+		Sources: []outbound.WorkspaceSource{
+			{
+				ID:        "input_001",
+				Path:      "README.md",
+				MediaType: "text/markdown",
+				SizeBytes: 4,
+				Checksum:  "sha256:readme",
+			},
+		},
 	}
 }
 
@@ -414,13 +320,32 @@ func assertNotContains(t *testing.T, got string, want string) {
 	}
 }
 
-func assertMissingPathError(t *testing.T, result outbound.ToolResult, workspace outbound.Workspace) {
-	t.Helper()
+type fakeMaterializer struct {
+	requests []outbound.WorkspaceMaterializeRequest
+	staged   []outbound.WorkspaceStagedFile
+	err      error
+}
 
-	if !result.IsError || !strings.Contains(result.Content, "path is not available") {
-		t.Fatalf("result = %#v, want missing path error", result)
+func (m *fakeMaterializer) MaterializeWorkspaceSource(
+	_ context.Context,
+	request outbound.WorkspaceMaterializeRequest,
+) (outbound.WorkspaceStagedFile, error) {
+	m.requests = append(m.requests, request)
+	if m.err != nil {
+		return outbound.WorkspaceStagedFile{}, m.err
 	}
-	assertNotContains(t, result.Content, workspace.RootPath)
-	assertNotContains(t, result.Content, workspace.InputPath)
-	assertNotContains(t, result.Content, workspace.WorkPath)
+
+	return outbound.WorkspaceStagedFile{
+		SourceID:  request.SourceID,
+		Path:      request.Path,
+		SizeBytes: 4,
+		Checksum:  "sha256:readme",
+	}, nil
+}
+
+func (m *fakeMaterializer) ListWorkspaceStagedFiles(
+	context.Context,
+	outbound.Workspace,
+) ([]outbound.WorkspaceStagedFile, error) {
+	return append([]outbound.WorkspaceStagedFile(nil), m.staged...), m.err
 }

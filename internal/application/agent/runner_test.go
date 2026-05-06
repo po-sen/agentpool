@@ -61,8 +61,8 @@ func TestRunnerRejectsNaturalLanguageResponseAndContinues(t *testing.T) {
 	}
 	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "Available tools")
 	assertInstruction(t, model.requests[0], "Available tools")
-	assertInstruction(t, model.requests[0], "workspace: Lists or stats workspace paths without reading file contents.")
-	assertInstruction(t, model.requests[0], "sandbox_exec: Runs commands in a general-purpose sandbox from /workspace/work.")
+	assertInstruction(t, model.requests[0], "workspace: Manages authorized input sources and staged files for the mutable /workspace.")
+	assertInstruction(t, model.requests[0], "sandbox_exec: Runs commands in a general-purpose sandbox from /workspace.")
 	if len(model.requests[0].Tools) != 3 {
 		t.Fatalf("len(model Tools) = %d, want advertised tools", len(model.requests[0].Tools))
 	}
@@ -159,8 +159,8 @@ func TestRunnerExposesGenericSandboxPolicyToModel(t *testing.T) {
 		responses: []outbound.ModelResponse{{Content: `{"type":"final","summary":"done"}`}},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "workspace", Description: "Lists or stats workspace paths without reading file contents."},
-		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace/work."},
+		{Name: "workspace", Description: "Manages authorized input sources and staged files for the mutable /workspace."},
+		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace."},
 	})
 	runner := NewRunner(model, tools)
 
@@ -181,9 +181,44 @@ func TestRunnerExposesGenericSandboxPolicyToModel(t *testing.T) {
 	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "exact or externally checkable work")
 	assertInstruction(t, model.requests[0], "prefer sandbox_exec before final")
 	assertInstruction(t, model.requests[0], "base final.summary on observed tool output")
-	assertInstruction(t, model.requests[0], "sandbox_exec is a general-purpose command environment running from /workspace/work")
-	assertInstruction(t, model.requests[0], "inspect files, search text, compute, transform data, run project checks")
+	assertInstruction(t, model.requests[0], "workspace is a control-plane tool for authorized input sources")
+	assertInstruction(t, model.requests[0], "stage only needed files")
+	assertInstruction(t, model.requests[0], "sandbox_exec is a general-purpose command environment running from /workspace")
+	assertInstruction(t, model.requests[0], "inspect staged files, search text, compute, transform data, run project checks")
 	assertInstruction(t, model.requests[0], "decide whether to retry with a better command or explain the limit")
+}
+
+func TestRunnerInstructsModelToStageAuthorizedSourcesBeforeReading(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{{Content: `{"type":"final","summary":"done"}`}},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "workspace", Description: "Manages authorized input sources and staged files for the mutable /workspace."},
+		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace."},
+	})
+	runner := NewRunner(model, tools)
+
+	_, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task: run.TaskSpec{
+			Prompt: "summarize the uploaded file",
+			Attachments: []run.TaskAttachment{
+				{Filename: "README.md", MediaType: "text/markdown", SizeBytes: 7},
+			},
+		},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspaceWithFiles(),
+			Sandbox:   outbound.Sandbox{ID: "sandbox_test", SupportsCommands: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+
+	assertInstruction(t, model.requests[0], "call workspace stage before sandbox_exec or final")
+	initialMessages := requestMessages(model.requests[0])
+	assertMessage(t, initialMessages[2], "user", "source_id: input_001")
+	assertMessage(t, initialMessages[2], "user", "file contents are not available in /workspace until staged")
 }
 
 func TestRunnerReturnsJSONFinalActionSummary(t *testing.T) {
@@ -245,9 +280,10 @@ func TestRunnerIncludesUploadedFileMetadataInInitialMessage(t *testing.T) {
 	if workspaceContext.Kind != string(outbound.ModelPartKindWorkspaceContext) {
 		t.Fatalf("workspace context kind = %q, want %q", workspaceContext.Kind, outbound.ModelPartKindWorkspaceContext)
 	}
-	assertMessage(t, workspaceContext, "user", "Workspace input files available to tools:")
-	assertMessage(t, workspaceContext, "user", "path: README.md; virtual_path: /workspace/input/README.md; media_type: text/markdown; size_bytes: 7")
-	assertMessage(t, workspaceContext, "user", "If the user refers to this file without naming it")
+	assertMessage(t, workspaceContext, "user", "Authorized input sources available through workspace:")
+	assertMessage(t, workspaceContext, "user", "source_id: input_001; path: README.md; target_path_after_stage: /workspace/README.md; media_type: text/markdown; size_bytes: 7")
+	assertMessage(t, workspaceContext, "user", "source metadata only")
+	assertMessage(t, workspaceContext, "user", "call workspace stage with the source_id above before using file contents")
 	if strings.Contains(workspaceContext.Content, "# Demo") {
 		t.Fatalf("initial workspace context exposed attachment content: %q", workspaceContext.Content)
 	}
@@ -326,7 +362,7 @@ func TestRunnerCallsProviderStyleToolCallTextAndReturnsFinalSummary(t *testing.T
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace/work."},
+		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace."},
 	})
 	tools.results = map[string]outbound.ToolResult{
 		"sandbox_exec": {Content: "exit_code: 0\nstdout:\n39483\n"},
@@ -381,7 +417,7 @@ func TestRunnerRecordsSandboxExecErrorAndAllowsFinal(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace/work."},
+		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace."},
 	})
 	tools.resultQueue = []outbound.ToolResult{
 		{Content: "exit_code: 2\nstderr:\n/bin/sh: arithmetic syntax error\n", IsError: true},
@@ -445,7 +481,7 @@ func TestRunnerAllowsRepeatedToolCallsWithoutSemanticPolicy(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace/work."},
+		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace."},
 	})
 	tools.resultQueue = []outbound.ToolResult{
 		{Content: "exit_code: 0\nstdout:\n42\n"},
@@ -645,12 +681,12 @@ func TestRunnerRejectsUnavailableToolBeforeToolRunner(t *testing.T) {
 func TestRunnerRecordsExistingToolResultError(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
-			{Content: `{"type":"tool_call","tool":"workspace","arguments":{"operation":"stat","area":"input","path":"missing.md"}}`},
+			{Content: `{"type":"tool_call","tool":"workspace","arguments":{"operation":"list","path":"missing.md"}}`},
 			{Content: `{"type":"final","summary":"handled tool error"}`},
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "workspace", Description: "Lists or stats workspace paths without reading file contents."},
+		{Name: "workspace", Description: "Manages authorized input sources and staged files for the mutable /workspace."},
 	})
 	tools.results = map[string]outbound.ToolResult{
 		"workspace": {Content: "path is not available", IsError: true},
@@ -690,16 +726,16 @@ func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
 			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -m <file_path>"}}`},
-			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -m /workspace/input/README.md"}}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -m /workspace/README.md"}}`},
 			{Content: `{"type":"final","summary":"README.md has 123 characters"}`},
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "workspace", Description: "Lists or stats workspace paths without reading file contents."},
-		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace/work."},
+		{Name: "workspace", Description: "Manages authorized input sources and staged files for the mutable /workspace."},
+		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace."},
 	})
 	tools.results = map[string]outbound.ToolResult{
-		"sandbox_exec": {Content: "exit_code: 0\nstdout:\n123 /workspace/input/README.md\n"},
+		"sandbox_exec": {Content: "exit_code: 0\nstdout:\n123 /workspace/README.md\n"},
 	}
 	runner := NewRunner(model, tools)
 
@@ -731,7 +767,7 @@ func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want only corrected shell call", len(tools.calls))
 	}
-	if tools.calls[0].Arguments["command"] != "wc -m /workspace/input/README.md" {
+	if tools.calls[0].Arguments["command"] != "wc -m /workspace/README.md" {
 		t.Fatalf("sandbox_exec command = %q, want corrected file path", tools.calls[0].Arguments["command"])
 	}
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
@@ -762,10 +798,10 @@ func TestRunnerAllowsAdvertisedSandboxExecTool(t *testing.T) {
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
-		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace/work."},
+		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace."},
 	})
 	tools.results = map[string]outbound.ToolResult{
-		"sandbox_exec": {Content: "exit_code: 0\nstdout:\n/workspace/work\n"},
+		"sandbox_exec": {Content: "exit_code: 0\nstdout:\n/workspace\n"},
 	}
 	runner := NewRunner(model, tools)
 
@@ -1482,8 +1518,8 @@ func (r *fakeToolRunner) ListTools(_ context.Context, request outbound.ToolListR
 
 	return []outbound.ToolDefinition{
 		{Name: "echo", Description: "Returns text"},
-		{Name: "workspace", Description: "Lists or stats workspace paths without reading file contents."},
-		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace/work."},
+		{Name: "workspace", Description: "Manages authorized input sources and staged files for the mutable /workspace."},
+		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace."},
 	}, nil
 }
 
@@ -1658,7 +1694,7 @@ func assertEchoToolInvocation(t *testing.T, tools *fakeToolRunner) {
 	if len(tools.listRequests) != 1 {
 		t.Fatalf("len(list requests) = %d, want 1", len(tools.listRequests))
 	}
-	if tools.listRequests[0].Context.Workspace != testToolWorkspace() {
+	if tools.listRequests[0].Context.Workspace.RootPath != testToolWorkspace().RootPath {
 		t.Fatalf("list tools workspace = %#v, want test workspace", tools.listRequests[0].Context.Workspace)
 	}
 	if len(tools.calls) != 1 {
@@ -1673,22 +1709,22 @@ func assertEchoToolInvocation(t *testing.T, tools *fakeToolRunner) {
 	if tools.calls[0].Context.Sandbox.ID != "sandbox_test" {
 		t.Fatalf("tool sandbox = %q, want sandbox_test", tools.calls[0].Context.Sandbox.ID)
 	}
-	if tools.calls[0].Context.Workspace != testToolWorkspace() {
+	if tools.calls[0].Context.Workspace.RootPath != testToolWorkspace().RootPath {
 		t.Fatalf("tool workspace = %#v, want test workspace", tools.calls[0].Context.Workspace)
 	}
 }
 
 func testToolWorkspace() outbound.Workspace {
 	return outbound.Workspace{
-		RootPath:  "/tmp/workspace",
-		InputPath: "/tmp/workspace/input",
-		WorkPath:  "/tmp/workspace/work",
+		RootPath: "/tmp/workspace",
 	}
 }
 
 func testToolWorkspaceWithFiles() outbound.Workspace {
-	workspace := testToolWorkspace()
-	workspace.HasFiles = true
-
-	return workspace
+	return outbound.Workspace{
+		RootPath: "/tmp/workspace",
+		Sources: []outbound.WorkspaceSource{
+			{ID: "input_001", Path: "README.md", MediaType: "text/markdown", SizeBytes: 123},
+		},
+	}
 }

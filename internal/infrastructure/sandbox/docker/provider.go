@@ -93,7 +93,7 @@ func (p *Provider) RunCommand(
 	output := p.executor.Run(
 		ctx,
 		dockerBinary,
-		dockerRunArgs(p.image, request.Workspace.InputPath, request.Workspace.WorkPath, request.Command)...,
+		dockerRunArgs(p.image, request.Workspace.RootPath, request.Command)...,
 	)
 	result := outbound.SandboxCommandResult{
 		Stdout:   output.stdout,
@@ -116,28 +116,23 @@ func (p *Provider) RunCommand(
 }
 
 func validateWorkspace(workspace outbound.Workspace) error {
-	if strings.TrimSpace(workspace.InputPath) == "" {
-		return errors.New("workspace input path is required")
-	}
-	if strings.TrimSpace(workspace.WorkPath) == "" {
-		return errors.New("workspace work path is required")
+	if strings.TrimSpace(workspace.RootPath) == "" {
+		return errors.New("workspace root path is required")
 	}
 
 	return nil
 }
 
-func dockerRunArgs(image string, inputPath string, workPath string, command string) []string {
+func dockerRunArgs(image string, workspacePath string, command string) []string {
 	return []string{
 		"run",
 		"--rm",
 		"--network",
 		"none",
 		"-v",
-		inputPath + ":/workspace/input:ro",
-		"-v",
-		workPath + ":/workspace/work:rw",
+		workspacePath + ":/workspace:rw",
 		"-w",
-		"/workspace/work",
+		"/workspace",
 		image,
 		"/bin/sh",
 		"-lc",

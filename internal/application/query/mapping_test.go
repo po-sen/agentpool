@@ -35,8 +35,8 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	item.ToolCalls = []run.ToolCall{
 		{
 			Name:      "workspace",
-			Arguments: map[string]string{"operation": "stat", "area": "input", "path": "README.md"},
-			Result:    "virtual_path: /workspace/input/README.md\n",
+			Arguments: map[string]string{"operation": "list_sources"},
+			Result:    "source_id: input_001\npath: README.md\n",
 			StartedAt: time.Unix(104, 0).UTC(),
 			EndedAt:   time.Unix(105, 0).UTC(),
 		},
@@ -101,12 +101,12 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	if len(view.ToolCalls) != 1 {
 		t.Fatalf("len(ToolCalls) = %d, want 1", len(view.ToolCalls))
 	}
-	if view.ToolCalls[0].Arguments["path"] != "README.md" {
-		t.Fatalf("ToolCalls[0] path = %q, want README.md", view.ToolCalls[0].Arguments["path"])
+	if view.ToolCalls[0].Arguments["operation"] != "list_sources" {
+		t.Fatalf("ToolCalls[0] operation = %q, want list_sources", view.ToolCalls[0].Arguments["operation"])
 	}
-	view.ToolCalls[0].Arguments["path"] = "changed.md"
-	if item.ToolCalls[0].Arguments["path"] != "README.md" {
-		t.Fatalf("domain tool call path = %q, want README.md", item.ToolCalls[0].Arguments["path"])
+	view.ToolCalls[0].Arguments["operation"] = "changed"
+	if item.ToolCalls[0].Arguments["operation"] != "list_sources" {
+		t.Fatalf("domain tool call operation = %q, want list_sources", item.ToolCalls[0].Arguments["operation"])
 	}
 	assertMappedAgentTurn(t, view.AgentTurns)
 	assertMappedArtifacts(t, view.Artifacts)

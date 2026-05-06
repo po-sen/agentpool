@@ -354,7 +354,7 @@ func (w *Worker) cleanupWorkspace(ctx context.Context, workspace outbound.Worksp
 }
 
 func (w *Worker) collectArtifacts(ctx context.Context, workspace outbound.Workspace) []run.Artifact {
-	if w.workspace == nil || workspace.WorkPath == "" {
+	if w.workspace == nil || workspace.RootPath == "" {
 		return nil
 	}
 
@@ -374,7 +374,7 @@ func (w *Worker) prepareSandbox(
 	item *run.Run,
 	workspace outbound.Workspace,
 ) (outbound.Sandbox, error) {
-	if workspace.InputPath == "" || workspace.WorkPath == "" || !sandboxSupportsCommands(w.sandbox) {
+	if workspace.RootPath == "" || !sandboxSupportsCommands(w.sandbox) {
 		return outbound.Sandbox{}, nil
 	}
 
@@ -559,7 +559,7 @@ func workspaceCompletedMessage(attachmentCount int) string {
 		return "Prepared empty workspace"
 	}
 
-	return fmt.Sprintf("Prepared workspace with %d uploaded file(s)", attachmentCount)
+	return fmt.Sprintf("Prepared workspace with %d authorized input source(s)", attachmentCount)
 }
 
 func toDomainToolCalls(records []agent.ToolCallRecord) []run.ToolCall {

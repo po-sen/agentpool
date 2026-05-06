@@ -37,7 +37,7 @@ func TestBuildProtocolCorrectionMessageUsesFallbacks(t *testing.T) {
 	if !strings.Contains(message, "model response did not match AgentPool action protocol") {
 		t.Fatalf("message does not contain fallback parse error:\n%s", message)
 	}
-	if !strings.Contains(message, `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}.`) {
+	if !strings.Contains(message, `Return {"type":"final","summary":"..."} or {"type":"tool_call","tool":"workspace","arguments":{"operation":"list_sources"}}.`) {
 		t.Fatalf("message does not contain fallback hint:\n%s", message)
 	}
 }
@@ -85,7 +85,7 @@ func TestBuildPlaceholderToolArgumentCorrectionMessageUsesUploadedFiles(t *testi
 		"placeholder argument values: command=<file_path>",
 		"Replace placeholders with concrete values before calling a tool.",
 		"Uploaded files: README.md.",
-		"Uploaded paths are under /workspace/input.",
+		"Stage authorized sources into /workspace before using file contents.",
 		"Available tools: workspace, sandbox_exec",
 		"Return exactly one JSON object.",
 	} {

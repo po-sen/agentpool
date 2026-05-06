@@ -18,15 +18,13 @@ const (
 	toolNameWorkspace = "workspace"
 
 	argumentOperation = "operation"
-	argumentArea      = "area"
+	argumentSourceID  = "source_id"
 	argumentPath      = "path"
 
-	operationList = "list"
-	operationStat = "stat"
-
-	areaInput = "input"
-	areaWork  = "work"
-	areaAll   = "all"
+	operationListSources = "list_sources"
+	operationStage       = "stage"
+	operationRestore     = "restore"
+	operationList        = "list"
 
 	defaultMaxFiles = 500
 
@@ -36,29 +34,34 @@ const (
 
 var errTooManyFiles = errors.New("too many files")
 
-// Config controls workspace metadata tool limits.
+// Config controls workspace control-plane tool limits.
 type Config struct {
 	MaxFiles int
 }
 
-// Runner exposes workspace metadata operations.
+// Runner exposes workspace source staging and metadata operations.
 type Runner struct {
-	maxFiles int
+	materializer outbound.WorkspaceMaterializer
+	maxFiles     int
 }
 
 var _ outbound.ToolRunner = (*Runner)(nil)
 
-// NewRunner creates a workspace metadata tool runner.
-func NewRunner(cfg Config) *Runner {
+// NewRunner creates a workspace control-plane tool runner.
+func NewRunner(materializer outbound.WorkspaceMaterializer, cfg Config) (*Runner, error) {
+	if materializer == nil {
+		return nil, errors.New("workspace materializer is required")
+	}
+
 	maxFiles := cfg.MaxFiles
 	if maxFiles <= 0 {
 		maxFiles = defaultMaxFiles
 	}
 
-	return &Runner{maxFiles: maxFiles}
+	return &Runner{materializer: materializer, maxFiles: maxFiles}, nil
 }
 
-// ListTools exposes workspace when structured workspace paths are available.
+// ListTools exposes workspace when a structured workspace is available.
 func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
 	if !workspaceAvailable(request.Context.Workspace) {
 		return nil, nil
@@ -67,32 +70,32 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 	return []outbound.ToolDefinition{
 		{
 			Name:        toolNameWorkspace,
-			Description: "Lists or stats workspace paths without reading file contents.",
+			Description: "Manages authorized input sources and staged files for the mutable /workspace.",
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        argumentOperation,
-					Description: `Operation to run. Supported values: "list" or "stat".`,
+					Description: `Operation to run. Supported values: "list_sources", "stage", "restore", or "list".`,
 					Required:    true,
-					Example:     "list",
+					Example:     "list_sources",
 				},
 				{
-					Name:        argumentArea,
-					Description: `Workspace area to inspect. Supported values: "input", "work", or "all". Defaults to "all".`,
+					Name:        argumentSourceID,
+					Description: `Authorized source id to stage or restore. Required for "stage"; optional for "restore" when path identifies a staged file.`,
 					Required:    false,
-					Example:     "input",
+					Example:     "input_001",
 				},
 				{
 					Name:        argumentPath,
-					Description: `Safe relative path inside the selected area, or a /workspace/input|work virtual path. Defaults to ".".`,
+					Description: `Safe relative /workspace path, or a full /workspace virtual path. Defaults to the source path for stage and restore, and "." for list.`,
 					Required:    false,
-					Example:     "/workspace/input/README.md",
+					Example:     "README.md",
 				},
 			},
 		},
 	}, nil
 }
 
-// RunTool executes a workspace metadata operation.
+// RunTool executes a workspace control-plane operation.
 func (r *Runner) RunTool(ctx context.Context, call outbound.ToolCall) (outbound.ToolResult, error) {
 	if call.Name != toolNameWorkspace {
 		return outbound.ToolResult{Content: fmt.Sprintf("unknown tool: %s", call.Name), IsError: true}, nil
@@ -105,222 +108,185 @@ func (r *Runner) RunTool(ctx context.Context, call outbound.ToolCall) (outbound.
 	if operation == "" {
 		return outbound.ToolResult{Content: "missing operation argument", IsError: true}, nil
 	}
-	areas, relativePath, selectionMessage := resolveSelection(
-		call.Context.Workspace,
-		call.Arguments[argumentArea],
-		call.Arguments[argumentPath],
-	)
-	if selectionMessage != "" {
-		return outbound.ToolResult{Content: selectionMessage, IsError: true}, nil
-	}
 
 	switch operation {
+	case operationListSources:
+		return r.listSources(ctx, call.Context.Workspace), nil
+	case operationStage:
+		return r.stage(ctx, call.Context.Workspace, call.Arguments), nil
+	case operationRestore:
+		return r.restore(ctx, call.Context.Workspace, call.Arguments), nil
 	case operationList:
-		return r.list(ctx, areas, relativePath), nil
-	case operationStat:
-		return r.stat(areas, relativePath), nil
+		return r.list(ctx, call.Context.Workspace, call.Arguments[argumentPath]), nil
 	default:
 		return outbound.ToolResult{Content: fmt.Sprintf("unknown workspace operation: %s", operation), IsError: true}, nil
 	}
 }
 
 func workspaceAvailable(workspace outbound.Workspace) bool {
-	return strings.TrimSpace(workspace.InputPath) != "" && strings.TrimSpace(workspace.WorkPath) != ""
+	return strings.TrimSpace(workspace.RootPath) != ""
 }
 
-type workspaceArea struct {
-	name string
-	root string
+func (r *Runner) listSources(ctx context.Context, workspace outbound.Workspace) outbound.ToolResult {
+	stagedFiles, err := r.materializer.ListWorkspaceStagedFiles(ctx, workspace)
+	if err != nil {
+		return outbound.ToolResult{Content: "list workspace sources failed", IsError: true}
+	}
+	stagedPathsBySource := stagedPathIndex(stagedFiles)
+
+	if len(workspace.Sources) == 0 {
+		return outbound.ToolResult{Content: "sources:\n"}
+	}
+
+	var builder strings.Builder
+	builder.WriteString("sources:\n")
+	for _, source := range workspace.Sources {
+		builder.WriteString("- source_id: ")
+		builder.WriteString(source.ID)
+		builder.WriteString("\n  path: ")
+		builder.WriteString(source.Path)
+		builder.WriteString("\n  virtual_path: ")
+		builder.WriteString(virtualPath(source.Path))
+		if source.MediaType != "" {
+			builder.WriteString("\n  media_type: ")
+			builder.WriteString(source.MediaType)
+		}
+		builder.WriteString("\n  size_bytes: ")
+		_, _ = fmt.Fprintf(&builder, "%d", source.SizeBytes)
+		if source.Checksum != "" {
+			builder.WriteString("\n  checksum: ")
+			builder.WriteString(source.Checksum)
+		}
+		if stagedPaths := stagedPathsBySource[source.ID]; len(stagedPaths) > 0 {
+			builder.WriteString("\n  staged: true")
+			builder.WriteString("\n  staged_paths: ")
+			builder.WriteString(strings.Join(stagedPaths, ", "))
+		} else {
+			builder.WriteString("\n  staged: false")
+		}
+		builder.WriteString("\n")
+	}
+
+	return outbound.ToolResult{Content: builder.String()}
 }
 
-func selectedAreas(workspace outbound.Workspace, rawArea string) ([]workspaceArea, string) {
-	area := strings.TrimSpace(rawArea)
-	if area == "" {
-		area = areaAll
+func (r *Runner) stage(
+	ctx context.Context,
+	workspace outbound.Workspace,
+	arguments map[string]string,
+) outbound.ToolResult {
+	sourceID := strings.TrimSpace(arguments[argumentSourceID])
+	if sourceID == "" {
+		return outbound.ToolResult{Content: "missing source_id argument", IsError: true}
 	}
-
-	switch area {
-	case areaInput:
-		return []workspaceArea{{name: areaInput, root: workspace.InputPath}}, ""
-	case areaWork:
-		return []workspaceArea{{name: areaWork, root: workspace.WorkPath}}, ""
-	case areaAll:
-		return []workspaceArea{
-			{name: areaInput, root: workspace.InputPath},
-			{name: areaWork, root: workspace.WorkPath},
-		}, ""
-	default:
-		return nil, fmt.Sprintf("unknown workspace area: %s", area)
+	source, ok := findSource(workspace.Sources, sourceID)
+	if !ok {
+		return outbound.ToolResult{Content: "workspace source is not available", IsError: true}
 	}
-}
-
-func resolveSelection(workspace outbound.Workspace, rawArea string, rawPath string) ([]workspaceArea, string, string) {
-	if area, relativePath, ok, message := virtualPathSelection(rawPath); ok || message != "" {
-		if message != "" {
-			return nil, "", message
-		}
-		if conflict := virtualAreaConflict(rawArea, area); conflict != "" {
-			return nil, "", conflict
-		}
-		areas, areaMessage := selectedAreas(workspace, area)
-		if areaMessage != "" {
-			return nil, "", areaMessage
-		}
-
-		return areas, relativePath, ""
-	}
-
-	areas, areaMessage := selectedAreas(workspace, rawArea)
-	if areaMessage != "" {
-		return nil, "", areaMessage
-	}
-	relativePath, pathMessage := safeRelativePath(rawPath)
+	targetPath, pathMessage := stagePath(arguments[argumentPath], source.Path)
 	if pathMessage != "" {
-		return nil, "", pathMessage
+		return outbound.ToolResult{Content: pathMessage, IsError: true}
 	}
 
-	return areas, relativePath, ""
+	staged, err := r.materializer.MaterializeWorkspaceSource(ctx, outbound.WorkspaceMaterializeRequest{
+		Workspace: workspace,
+		SourceID:  source.ID,
+		Path:      targetPath,
+		Overwrite: false,
+	})
+	if err != nil {
+		return outbound.ToolResult{Content: safeWorkspaceError(err), IsError: true}
+	}
+
+	return outbound.ToolResult{Content: formatMaterializedFile("staged", staged)}
 }
 
-func virtualPathSelection(rawPath string) (string, string, bool, string) {
-	cleanPath := strings.TrimSpace(rawPath)
-	if cleanPath == "" {
-		return "", "", false, ""
+func (r *Runner) restore(
+	ctx context.Context,
+	workspace outbound.Workspace,
+	arguments map[string]string,
+) outbound.ToolResult {
+	sourceID := strings.TrimSpace(arguments[argumentSourceID])
+	rawPath := strings.TrimSpace(arguments[argumentPath])
+	if sourceID == "" && rawPath == "" {
+		return outbound.ToolResult{Content: "missing source_id or path argument", IsError: true}
 	}
-	if strings.HasPrefix(cleanPath, virtualWorkspaceRoot+"/") || cleanPath == virtualWorkspaceRoot {
-		area, relativePath, ok := splitVirtualPath(cleanPath)
+
+	stagedFiles, err := r.materializer.ListWorkspaceStagedFiles(ctx, workspace)
+	if err != nil {
+		return outbound.ToolResult{Content: "list staged workspace files failed", IsError: true}
+	}
+
+	targetPath, pathMessage := restorePath(rawPath)
+	if pathMessage != "" {
+		return outbound.ToolResult{Content: pathMessage, IsError: true}
+	}
+	if sourceID == "" {
+		staged, ok := findStagedPath(stagedFiles, targetPath)
 		if !ok {
-			return "", "", false, messagePathUnsafe
+			return outbound.ToolResult{Content: "workspace path has no staged source", IsError: true}
 		}
-		if relativePath == "" {
-			relativePath = "."
-		}
-		if message := validateRelativePath(relativePath); message != "" {
-			return "", "", false, message
-		}
-
-		return area, relativePath, true, ""
+		sourceID = staged.SourceID
 	}
-	if path.IsAbs(cleanPath) || filepath.IsAbs(cleanPath) {
-		return "", "", false, messagePathUnsafe
+	source, ok := findSource(workspace.Sources, sourceID)
+	if !ok {
+		return outbound.ToolResult{Content: "workspace source is not available", IsError: true}
+	}
+	if targetPath == "" {
+		targetPath = source.Path
 	}
 
-	return "", "", false, ""
+	staged, err := r.materializer.MaterializeWorkspaceSource(ctx, outbound.WorkspaceMaterializeRequest{
+		Workspace: workspace,
+		SourceID:  source.ID,
+		Path:      targetPath,
+		Overwrite: true,
+	})
+	if err != nil {
+		return outbound.ToolResult{Content: safeWorkspaceError(err), IsError: true}
+	}
+
+	return outbound.ToolResult{Content: formatMaterializedFile("restored", staged)}
 }
 
-func splitVirtualPath(cleanPath string) (string, string, bool) {
-	for _, area := range []string{areaInput, areaWork} {
-		prefix := virtualWorkspaceRoot + "/" + area
-		switch {
-		case cleanPath == prefix:
-			return area, ".", true
-		case strings.HasPrefix(cleanPath, prefix+"/"):
-			return area, strings.TrimPrefix(cleanPath, prefix+"/"), true
-		}
+func (r *Runner) list(ctx context.Context, workspace outbound.Workspace, rawPath string) outbound.ToolResult {
+	relativePath, pathMessage := listPath(rawPath)
+	if pathMessage != "" {
+		return outbound.ToolResult{Content: pathMessage, IsError: true}
+	}
+	stagedFiles, err := r.materializer.ListWorkspaceStagedFiles(ctx, workspace)
+	if err != nil {
+		return outbound.ToolResult{Content: "list staged workspace files failed", IsError: true}
 	}
 
-	return "", "", false
-}
-
-func virtualAreaConflict(rawArea string, virtualArea string) string {
-	area := strings.TrimSpace(rawArea)
-	if area == "" || area == areaAll || area == virtualArea {
-		return ""
+	files, foundPath, err := r.collectFiles(ctx, workspace.RootPath, relativePath)
+	if errors.Is(err, errTooManyFiles) {
+		return outbound.ToolResult{Content: "workspace contains too many files to list", IsError: true}
 	}
-
-	return fmt.Sprintf("workspace area %q conflicts with virtual path area %q", area, virtualArea)
-}
-
-func safeRelativePath(rawPath string) (string, string) {
-	cleanPath := strings.TrimSpace(rawPath)
-	if cleanPath == "" {
-		return ".", ""
+	if err != nil {
+		return outbound.ToolResult{Content: "list workspace failed", IsError: true}
 	}
-	if message := validateRelativePath(cleanPath); message != "" {
-		return "", message
-	}
-
-	return cleanPath, ""
-}
-
-func validateRelativePath(cleanPath string) string {
-	if path.IsAbs(cleanPath) ||
-		filepath.IsAbs(cleanPath) ||
-		strings.Contains(cleanPath, "\\") ||
-		strings.Contains(cleanPath, ":") ||
-		path.Clean(cleanPath) != cleanPath {
-		return messagePathUnsafe
-	}
-	if cleanPath == "." {
-		return ""
-	}
-	for _, component := range strings.Split(cleanPath, "/") {
-		if component == "" || component == "." || component == ".." {
-			return messagePathUnsafe
-		}
-	}
-
-	return ""
-}
-
-func confinedPath(area workspaceArea, relativePath string) (string, error) {
-	target := area.root
-	if relativePath != "." {
-		target = filepath.Join(area.root, filepath.FromSlash(relativePath))
-	}
-	relative, err := filepath.Rel(area.root, target)
-	if err != nil ||
-		relative == ".." ||
-		strings.HasPrefix(relative, ".."+string(filepath.Separator)) ||
-		filepath.IsAbs(relative) {
-		return "", errors.New("path escapes workspace")
-	}
-
-	return target, nil
-}
-
-func (r *Runner) list(ctx context.Context, areas []workspaceArea, relativePath string) outbound.ToolResult {
-	var files []workspaceFile
-	foundPath := false
-	for _, area := range areas {
-		areaFiles, found, err := r.collectFiles(ctx, area, relativePath, len(files))
-		if errors.Is(err, errTooManyFiles) {
-			return outbound.ToolResult{Content: "workspace contains too many files to list", IsError: true}
-		}
-		if err != nil {
-			return outbound.ToolResult{Content: "list workspace failed", IsError: true}
-		}
-		foundPath = foundPath || found
-		files = append(files, areaFiles...)
-	}
-
 	if !foundPath {
 		return outbound.ToolResult{Content: "path is not available", IsError: true}
 	}
 	sort.Slice(files, func(i int, j int) bool {
-		return files[i].virtualPath < files[j].virtualPath
+		return files[i].path < files[j].path
 	})
-	if len(files) == 0 {
-		return outbound.ToolResult{Content: "files:\n"}
-	}
 
-	return outbound.ToolResult{Content: "files:\n" + formatWorkspaceFiles(files)}
+	return outbound.ToolResult{Content: formatWorkspaceFiles(files, stagedFileIndex(stagedFiles))}
 }
 
 type workspaceFile struct {
-	virtualPath  string
-	area         string
-	relativePath string
-	sizeBytes    int64
+	path      string
+	sizeBytes int64
 }
 
 func (r *Runner) collectFiles(
 	ctx context.Context,
-	area workspaceArea,
+	rootPath string,
 	relativePath string,
-	currentCount int,
 ) ([]workspaceFile, bool, error) {
-	root, err := confinedPath(area, relativePath)
+	root, err := confinedPath(rootPath, relativePath)
 	if err != nil {
 		return nil, false, err
 	}
@@ -334,12 +300,12 @@ func (r *Runner) collectFiles(
 
 	var files []workspaceFile
 	err = filepath.WalkDir(root, func(current string, entry fs.DirEntry, err error) error {
-		file, ok, err := collectWorkspaceFile(ctx, area, current, entry, err)
+		file, ok, err := collectWorkspaceFile(ctx, rootPath, current, entry, err)
 		if err != nil || !ok {
 			return err
 		}
 		files = append(files, file)
-		if currentCount+len(files) > r.maxFiles {
+		if len(files) > r.maxFiles {
 			return errTooManyFiles
 		}
 
@@ -351,7 +317,7 @@ func (r *Runner) collectFiles(
 
 func collectWorkspaceFile(
 	ctx context.Context,
-	area workspaceArea,
+	rootPath string,
 	current string,
 	entry fs.DirEntry,
 	walkErr error,
@@ -365,7 +331,6 @@ func collectWorkspaceFile(
 	if entry.IsDir() {
 		return workspaceFile{}, false, nil
 	}
-
 	info, err := entry.Info()
 	if err != nil {
 		return workspaceFile{}, false, err
@@ -374,84 +339,198 @@ func collectWorkspaceFile(
 		return workspaceFile{}, false, nil
 	}
 
-	relative, err := filepath.Rel(area.root, current)
+	relative, err := filepath.Rel(rootPath, current)
 	if err != nil {
 		return workspaceFile{}, false, err
 	}
-	relativePath := filepath.ToSlash(relative)
 
-	return workspaceFile{
-		virtualPath:  virtualPath(area.name, relativePath),
-		area:         area.name,
-		relativePath: relativePath,
-		sizeBytes:    info.Size(),
-	}, true, nil
+	return workspaceFile{path: filepath.ToSlash(relative), sizeBytes: info.Size()}, true, nil
 }
 
-func formatWorkspaceFiles(files []workspaceFile) string {
+func formatWorkspaceFiles(
+	files []workspaceFile,
+	stagedFiles map[string]outbound.WorkspaceStagedFile,
+) string {
+	if len(files) == 0 {
+		return "files:\n"
+	}
+
 	var builder strings.Builder
+	builder.WriteString("files:\n")
 	for _, file := range files {
 		builder.WriteString("- virtual_path: ")
-		builder.WriteString(file.virtualPath)
-		builder.WriteString("\n  area: ")
-		builder.WriteString(file.area)
-		builder.WriteString("\n  relative_path: ")
-		builder.WriteString(file.relativePath)
+		builder.WriteString(virtualPath(file.path))
+		builder.WriteString("\n  path: ")
+		builder.WriteString(file.path)
 		builder.WriteString("\n  size_bytes: ")
 		_, _ = fmt.Fprintf(&builder, "%d", file.sizeBytes)
+		if staged, ok := stagedFiles[file.path]; ok {
+			builder.WriteString("\n  source_id: ")
+			builder.WriteString(staged.SourceID)
+		}
 		builder.WriteString("\n")
 	}
 
 	return builder.String()
 }
 
-func (r *Runner) stat(areas []workspaceArea, relativePath string) outbound.ToolResult {
-	lines := make([]string, 0, len(areas)*5)
-	for _, area := range areas {
-		target, err := confinedPath(area, relativePath)
-		if err != nil {
-			return outbound.ToolResult{Content: err.Error(), IsError: true}
-		}
-		info, err := os.Lstat(target)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-
-			return outbound.ToolResult{Content: "stat workspace path failed", IsError: true}
-		}
-
-		lines = append(lines, formatStat(area, relativePath, info)...)
+func formatMaterializedFile(label string, staged outbound.WorkspaceStagedFile) string {
+	var builder strings.Builder
+	builder.WriteString(label)
+	builder.WriteString(":\nsource_id: ")
+	builder.WriteString(staged.SourceID)
+	builder.WriteString("\nvirtual_path: ")
+	builder.WriteString(virtualPath(staged.Path))
+	builder.WriteString("\npath: ")
+	builder.WriteString(staged.Path)
+	builder.WriteString("\nsize_bytes: ")
+	_, _ = fmt.Fprintf(&builder, "%d", staged.SizeBytes)
+	if staged.Checksum != "" {
+		builder.WriteString("\nchecksum: ")
+		builder.WriteString(staged.Checksum)
 	}
-	if len(lines) == 0 {
-		return outbound.ToolResult{Content: "path is not available", IsError: true}
-	}
+	builder.WriteString("\n")
 
-	return outbound.ToolResult{Content: strings.Join(lines, "\n") + "\n"}
+	return builder.String()
 }
 
-func formatStat(area workspaceArea, relativePath string, info fs.FileInfo) []string {
-	kind := "other"
-	switch {
-	case info.IsDir():
-		kind = "directory"
-	case info.Mode().IsRegular():
-		kind = "file"
+func stagePath(rawPath string, defaultPath string) (string, string) {
+	if strings.TrimSpace(rawPath) == "" {
+		return safeRelativePath(defaultPath)
 	}
 
-	return []string{
-		"virtual_path: " + virtualPath(area.name, relativePath),
-		"area: " + area.name,
-		"relative_path: " + relativePath,
-		fmt.Sprintf("size_bytes: %d", info.Size()),
-		"type: " + kind,
-	}
+	return safeRelativePath(rawPath)
 }
 
-func virtualPath(area string, relativePath string) string {
+func restorePath(rawPath string) (string, string) {
+	if strings.TrimSpace(rawPath) == "" {
+		return "", ""
+	}
+
+	return safeRelativePath(rawPath)
+}
+
+func listPath(rawPath string) (string, string) {
+	if strings.TrimSpace(rawPath) == "" {
+		return ".", ""
+	}
+	if strings.TrimSpace(rawPath) == virtualWorkspaceRoot {
+		return ".", ""
+	}
+
+	return safeRelativePath(rawPath)
+}
+
+func safeRelativePath(rawPath string) (string, string) {
+	cleanPath := strings.TrimSpace(rawPath)
+	if strings.HasPrefix(cleanPath, virtualWorkspaceRoot+"/") {
+		cleanPath = strings.TrimPrefix(cleanPath, virtualWorkspaceRoot+"/")
+	}
+	if cleanPath == "" ||
+		cleanPath == virtualWorkspaceRoot ||
+		path.IsAbs(cleanPath) ||
+		filepath.IsAbs(cleanPath) ||
+		filepath.VolumeName(cleanPath) != "" ||
+		strings.Contains(cleanPath, "\\") ||
+		strings.Contains(cleanPath, ":") ||
+		path.Clean(cleanPath) != cleanPath {
+		return "", messagePathUnsafe
+	}
+	if cleanPath == "." {
+		return cleanPath, ""
+	}
+	for _, component := range strings.Split(cleanPath, "/") {
+		if component == "" || component == "." || component == ".." {
+			return "", messagePathUnsafe
+		}
+	}
+
+	return cleanPath, ""
+}
+
+func confinedPath(rootPath string, relativePath string) (string, error) {
+	target := rootPath
+	if relativePath != "." {
+		target = filepath.Join(rootPath, filepath.FromSlash(relativePath))
+	}
+	relative, err := filepath.Rel(rootPath, target)
+	if err != nil ||
+		relative == ".." ||
+		strings.HasPrefix(relative, ".."+string(filepath.Separator)) ||
+		filepath.IsAbs(relative) {
+		return "", errors.New("path escapes workspace")
+	}
+
+	return target, nil
+}
+
+func virtualPath(relativePath string) string {
 	if relativePath == "." || relativePath == "" {
-		return virtualWorkspaceRoot + "/" + area
+		return virtualWorkspaceRoot
 	}
 
-	return virtualWorkspaceRoot + "/" + area + "/" + relativePath
+	return virtualWorkspaceRoot + "/" + relativePath
+}
+
+func findSource(sources []outbound.WorkspaceSource, sourceID string) (outbound.WorkspaceSource, bool) {
+	for _, source := range sources {
+		if source.ID == sourceID {
+			return source, true
+		}
+	}
+
+	return outbound.WorkspaceSource{}, false
+}
+
+func findStagedPath(
+	files []outbound.WorkspaceStagedFile,
+	path string,
+) (outbound.WorkspaceStagedFile, bool) {
+	for _, file := range files {
+		if file.Path == path {
+			return file, true
+		}
+	}
+
+	return outbound.WorkspaceStagedFile{}, false
+}
+
+func stagedFileIndex(files []outbound.WorkspaceStagedFile) map[string]outbound.WorkspaceStagedFile {
+	if len(files) == 0 {
+		return nil
+	}
+	index := make(map[string]outbound.WorkspaceStagedFile, len(files))
+	for _, file := range files {
+		index[file.Path] = file
+	}
+
+	return index
+}
+
+func stagedPathIndex(files []outbound.WorkspaceStagedFile) map[string][]string {
+	index := make(map[string][]string)
+	for _, file := range files {
+		index[file.SourceID] = append(index[file.SourceID], virtualPath(file.Path))
+	}
+	for sourceID := range index {
+		sort.Strings(index[sourceID])
+	}
+
+	return index
+}
+
+func safeWorkspaceError(err error) string {
+	message := strings.TrimSpace(err.Error())
+	switch {
+	case message == "":
+		return "workspace operation failed"
+	case strings.Contains(message, "already exists"):
+		return message
+	case strings.Contains(message, "source is not available"):
+		return message
+	case strings.Contains(message, "unsafe workspace file path"):
+		return messagePathUnsafe
+	default:
+		return "workspace operation failed"
+	}
 }

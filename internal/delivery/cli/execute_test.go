@@ -88,7 +88,7 @@ func TestExecuteRunWatchPrintsTimeline(t *testing.T) {
 							ActionType:  "tool_call",
 							ToolName:    "sandbox_exec",
 							Message:     "model requested tool call",
-							RawResponse: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -l /workspace/input/README.md"}}`,
+							RawResponse: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -l /workspace/README.md"}}`,
 							StartedAt:   startedAt,
 							EndedAt:     endedAt,
 						},
@@ -96,8 +96,8 @@ func TestExecuteRunWatchPrintsTimeline(t *testing.T) {
 					ToolCalls: []ToolCallResponse{
 						{
 							Name:      "sandbox_exec",
-							Arguments: map[string]string{"command": "wc -l /workspace/input/README.md"},
-							Result:    "12 /workspace/input/README.md",
+							Arguments: map[string]string{"command": "wc -l /workspace/README.md"},
+							Result:    "12 /workspace/README.md",
 							StartedAt: startedAt,
 							EndedAt:   endedAt,
 						},
@@ -129,11 +129,11 @@ func TestExecuteRunWatchPrintsTimeline(t *testing.T) {
 	for _, want := range []string{
 		"agent [turn 2]",
 		"sandbox_exec",
-		"request:\n    command: wc -l /workspace/input/README.md",
+		"request:\n    command: wc -l /workspace/README.md",
 		"response:\n    type: tool_call\n    tool: sandbox_exec",
 		"message:\n    model requested tool call",
 		"tool [tool 1]",
-		"response:\n    12 /workspace/input/README.md",
+		"response:\n    12 /workspace/README.md",
 		"done",
 	} {
 		if !strings.Contains(output.String(), want) {

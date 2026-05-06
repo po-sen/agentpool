@@ -34,11 +34,11 @@ func TestRunnerAdvertisesOnlySandboxExec(t *testing.T) {
 	if len(tools[0].Arguments) != 3 {
 		t.Fatalf("arguments = %#v, want command, timeout_seconds, max_output_bytes", tools[0].Arguments)
 	}
-	if !strings.Contains(tools[0].Arguments[0].Description, "/workspace/work") {
-		t.Fatalf("command description = %q, want writable output guidance", tools[0].Arguments[0].Description)
+	if !strings.Contains(tools[0].Arguments[0].Description, "/workspace") {
+		t.Fatalf("command description = %q, want workspace guidance", tools[0].Arguments[0].Description)
 	}
-	if !strings.Contains(tools[0].Arguments[0].Description, "/workspace/input") {
-		t.Fatalf("command description = %q, want input guidance", tools[0].Arguments[0].Description)
+	if !strings.Contains(tools[0].Arguments[0].Description, "Stage authorized inputs with workspace") {
+		t.Fatalf("command description = %q, want staging guidance", tools[0].Arguments[0].Description)
 	}
 	if !strings.Contains(tools[0].Description, "general-purpose sandbox") {
 		t.Fatalf("description = %q, want general sandbox capability", tools[0].Description)
@@ -85,9 +85,6 @@ func TestRunnerDoesNotAdvertiseWithoutWorkspace(t *testing.T) {
 	tools, err := runner.ListTools(context.Background(), outbound.ToolListRequest{
 		Context: outbound.ToolContext{
 			Sandbox: outbound.Sandbox{ID: "sandbox", SupportsCommands: true},
-			Workspace: outbound.Workspace{
-				InputPath: "/tmp/workspace/input",
-			},
 		},
 	})
 	if err != nil {
@@ -295,7 +292,7 @@ func TestRunnerPassesWorkspaceToCommandRunner(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("result = %#v, want success", result)
 	}
-	if commands.request.Workspace != toolContext.Workspace {
+	if commands.request.Workspace.RootPath != toolContext.Workspace.RootPath {
 		t.Fatalf("Workspace = %#v, want %#v", commands.request.Workspace, toolContext.Workspace)
 	}
 	if commands.request.Command != "pwd" {
@@ -356,9 +353,7 @@ func availableContext() outbound.ToolContext {
 
 func testWorkspace() outbound.Workspace {
 	return outbound.Workspace{
-		RootPath:  "/tmp/workspace",
-		InputPath: "/tmp/workspace/input",
-		WorkPath:  "/tmp/workspace/work",
+		RootPath: "/tmp/workspace",
 	}
 }
 

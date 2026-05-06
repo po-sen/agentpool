@@ -26,7 +26,7 @@ type ModelPartKind string
 const (
 	// ModelPartKindTaskPrompt contains the original user task prompt.
 	ModelPartKindTaskPrompt ModelPartKind = "task_prompt"
-	// ModelPartKindWorkspaceContext contains run workspace input metadata.
+	// ModelPartKindWorkspaceContext contains run workspace source metadata.
 	ModelPartKindWorkspaceContext ModelPartKind = "workspace_context"
 	// ModelPartKindAssistantAttempt contains a previous assistant response that failed validation.
 	ModelPartKindAssistantAttempt ModelPartKind = "assistant_attempt"

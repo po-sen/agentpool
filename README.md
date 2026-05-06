@@ -12,9 +12,9 @@ AgentPool is currently an early MVP scaffold.
 - Runs complete through noop infrastructure implementations.
 - The default sandbox provider is noop. A dev-only Docker sandbox can be enabled explicitly to verify sandbox-backed shell commands.
 - The default model client is noop.
-- Agent loop v1 supports a minimal JSON action protocol, a `workspace` metadata tool, and opt-in dev Docker `sandbox_exec`. The default runtime has no command-capable sandbox and does not expose `sandbox_exec`.
+- Agent loop v1 supports a minimal JSON action protocol, a `workspace` source-staging tool, and opt-in dev Docker `sandbox_exec`. The default runtime has no command-capable sandbox and does not expose `sandbox_exec`.
 - CLI uploads can expand selected files, directories, and small text archives into the run workspace for POC tasks.
-- Files generated under `/workspace/work` are captured as in-memory run artifacts before workspace cleanup.
+- Changed or newly-created files under `/workspace` are captured as in-memory run artifacts before workspace cleanup.
 - There is no real GitHub PR creation yet.
 - There is no persistent database or queue yet.
 
@@ -189,11 +189,9 @@ Failed runs can include partial `agent_turns` and `tool_calls` when the agent in
     {
       "name": "workspace",
       "arguments": {
-        "operation": "list",
-        "area": "all",
-        "path": "."
+        "operation": "list_sources"
       },
-      "result": "files:\n- virtual_path: /workspace/input/README.md\n  area: input\n  relative_path: README.md\n  size_bytes: 123\n",
+      "result": "sources:\n- source_id: input_001\n  path: README.md\n  virtual_path: /workspace/README.md\n  size_bytes: 123\n  staged: false\n",
       "is_error": false
     }
   ]
@@ -237,7 +235,7 @@ go run ./cmd/agentpool artifact run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1 report.md
 - `agentpool get`: fetches one run.
 - `agentpool list`: lists known runs.
 - `agentpool cancel`: cancels one run before it reaches a terminal state.
-- `agentpool artifacts`: lists captured `/workspace/work` artifacts for one run.
+- `agentpool artifacts`: lists captured `/workspace` artifacts for one run.
 - `agentpool artifact`: prints one captured artifact body.
 
 `server` and `worker` are separate process modes intended for future persistent infrastructure implementations. With the current in-memory repository and queue, separate processes do not share state.
@@ -276,16 +274,16 @@ The watch output is a log-style polling timeline:
   message:
     model requested tool call
   request:
-    command: wc -l /workspace/input/README.md
+    command: wc -l /workspace/README.md
   response:
     type: tool_call
     tool: sandbox_exec
 
 2026-05-06 10:00:02 tool [tool 1] tool_status=ok action=sandbox_exec
   request:
-    command: wc -l /workspace/input/README.md
+    command: wc -l /workspace/README.md
   response:
-    12 /workspace/input/README.md
+    12 /workspace/README.md
 ```
 
 It uses the existing `GET /v1/runs/{id}` response, so it shows newly persisted run state rather than server-pushed events. Agent turn progress is persisted while the agent loop is running, including the current `model_response` turn before a model response arrives. Use `agentpool watch <run_id>` to follow a run submitted earlier.
@@ -306,7 +304,7 @@ go run ./cmd/agentpool run \
   --dir .
 
 go run ./cmd/agentpool run \
-  --prompt "Inspect this archived project and write report.md under /workspace/work." \
+  --prompt "Inspect this archived project and write report.md under /workspace." \
   --archive project.tar.gz
 ```
 
@@ -514,7 +512,7 @@ curl -sS -X POST http://localhost:8080/v1/runs \
 
 Uploaded files must use safe relative names and are currently limited to at most 500 files, 50 MiB per file, and 200 MiB total. The HTTP multipart body limit is 256 MiB. Text-like uploads must be UTF-8. Supported text names and extensions include `.txt`, `.md`, `.csv`, `.json`, `.yaml`, `.yml`, `.xml`, `.go`, `.py`, `.js`, `.ts`, `.tsx`, `.jsx`, `.html`, `.css`, `.sh`, `.toml`, `.mod`, `.sum`, `.env.example`, `.gitignore`, `.dockerignore`, `Makefile`, and `Dockerfile`. Supported document and image extensions include `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx`, `.odt`, `.ods`, `.odp`, `.rtf`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.tif`, `.tiff`, `.bmp`, and `.heic`.
 
-AgentPool does not mutate run inputs or product files. The writable `/workspace/work` area is ephemeral run-local storage during execution. Before cleanup, AgentPool captures up to 100 regular files from `/workspace/work` as in-memory artifacts, with a 1 MiB per-file limit and 10 MiB total limit. Directories and symlinks are not captured.
+AgentPool does not mutate product files. The `/workspace` directory is an ephemeral mutable working copy during execution. Authorized inputs are staged into `/workspace` as copies. Before cleanup, AgentPool captures up to 100 changed or newly-created regular files from `/workspace` as in-memory artifacts, with a 1 MiB per-file limit and 10 MiB total limit. Unchanged staged inputs, directories, and symlinks are not captured.
 
 Artifact list response:
 
@@ -544,17 +542,16 @@ The agent protocol accepts only `tool_call` and `final` JSON actions. Models mus
 
 AgentPool exposes exactly two model-facing tools:
 
-- `workspace`: metadata/control-plane. It lists files and stats paths, but does not read file contents.
-- `sandbox_exec`: execution/data-plane. It runs commands through a command-capable sandbox.
+- `workspace`: control-plane. It lists authorized input sources, stages selected sources into `/workspace`, restores staged files from their source, and lists currently staged/generated workspace files. It does not read file contents.
+- `sandbox_exec`: execution/data-plane. It runs commands through a command-capable sandbox from `/workspace`.
 
-Each run gets a workspace with two areas:
+Each run gets one mutable workspace:
 
 ```text
-/workspace/input  read-only run inputs
-/workspace/work   read-write agent working directory
+/workspace  disposable agent working copy
 ```
 
-Run attachments are materialized under `/workspace/input` by default. `workspace` lists and stats paths only; file contents are inspected through `sandbox_exec`. `workspace` accepts either relative paths with an `area`, or full virtual paths such as `/workspace/input/README.md` and `/workspace/work/report.md`. It never returns host temp paths. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
+Run attachments become authorized input sources first. They are not automatically readable by sandbox commands until the agent stages them with `workspace`. Once staged, files are normal mutable copies under `/workspace`; the agent may modify, move, delete, or restore source-backed files. `workspace` accepts safe relative paths or full virtual paths such as `/workspace/README.md`. It never returns host temp paths. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
 
 When `sandbox_exec` is available, exact or verifiable tasks should be checked through sandbox execution instead of guessed. That includes exact arithmetic, counting or searching files, transforming data, and running small scripts, tests, builds, or linters. Subjective discussion, design advice, brainstorming, and simple conversation can return a final JSON action directly when no command is needed.
 
@@ -576,14 +573,14 @@ Advertised tools include minimal argument hints in the system prompt while execu
 
 ```text
 Available tools:
-- workspace: Lists or stats workspace paths without reading file contents.
+- workspace: Manages authorized input sources and staged files for the mutable /workspace.
   Arguments:
-  - operation (required): Operation to run. Supported values: "list" or "stat". Example: list
-  - area (optional): Workspace area to inspect. Supported values: "input", "work", or "all". Example: input
-  - path (optional): Safe relative path inside the selected area, or a /workspace/input|work virtual path. Example: /workspace/input/README.md
-- sandbox_exec: Runs a command inside the sandbox from /workspace/work.
+  - operation (required): Operation to run. Supported values: "list_sources", "stage", "restore", or "list". Example: list_sources
+  - source_id (optional): Authorized source id to stage or restore. Example: input_001
+  - path (optional): Safe relative /workspace path, or a full /workspace virtual path. Example: README.md
+- sandbox_exec: Runs commands in a general-purpose sandbox from /workspace.
   Arguments:
-  - command (required): Command to run inside the sandbox. Example: wc -l /workspace/input/README.md
+  - command (required): Command to run from /workspace. Example: wc -l /workspace/README.md
   - timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10
   - max_output_bytes (optional): Optional maximum combined stdout and stderr bytes returned by the tool. Example: 65536
 ```
@@ -668,7 +665,7 @@ Example response snippet:
       "arguments": {
         "command": "pwd && ls -la"
       },
-      "result": "exit_code: 0\ntimed_out: false\nstdout:\n/workspace/work\n...",
+      "result": "exit_code: 0\ntimed_out: false\nstdout:\n/workspace\n...",
       "is_error": false,
       "started_at": "2026-05-04T16:59:50Z",
       "ended_at": "2026-05-04T17:00:22Z"
@@ -685,7 +682,7 @@ Example prompt:
 Summarize the task and explain the next implementation step.
 ```
 
-There is still no write-back to run inputs, product files, Git, or external systems. Agents may write temporary/generated files only under `/workspace/work`; bounded artifacts are captured before workspace contents are cleaned up after the run. Shell commands are available only when the dev Docker sandbox is explicitly enabled.
+There is still no write-back to product files, Git, or external systems. Agents may freely change the disposable `/workspace` copy; bounded changed/new artifacts are captured before workspace contents are cleaned up after the run. Shell commands are available only when the dev Docker sandbox is explicitly enabled.
 
 ## Dev Docker Sandbox
 
@@ -713,7 +710,7 @@ curl -sS -X POST http://localhost:8080/v1/runs \
   -d '{"prompt":"Use sandbox_exec to calculate 234 * 887123 with sh."}'
 ```
 
-When Docker sandboxing is enabled, `sandbox_exec` is advertised to the model under `Available tools`, and the command runs inside Docker with `/workspace/work` as the current writable directory. During the POC, user-facing debug output exposes provider-facing request messages, including instructions.
+When Docker sandboxing is enabled, `sandbox_exec` is advertised to the model under `Available tools`, and the command runs inside Docker with `/workspace` as the current writable directory. During the POC, user-facing debug output exposes provider-facing request messages, including instructions.
 
 Submit an uploaded-file run that asks the agent to inspect metadata and read contents through sandbox execution:
 
@@ -726,14 +723,14 @@ curl -sS -X POST http://localhost:8080/v1/runs \
 With the default `noop` sandbox, `workspace` is available but `sandbox_exec` is unavailable. With `AGENTPOOL_SANDBOX_PROVIDER=docker`, the worker enables `sandbox_exec` for the run workspace, and each command runs through:
 
 ```text
-docker run --rm --network none -v <input>:/workspace/input:ro -v <work>:/workspace/work:rw -w /workspace/work <image> /bin/sh -lc <command>
+docker run --rm --network none -v <workspace>:/workspace:rw -w /workspace <image> /bin/sh -lc <command>
 ```
 
-Docker must be installed and running. Run inputs are mounted read-only at `/workspace/input`, agent work is mounted read-write at `/workspace/work`, networking is disabled with `--network none`, and no secrets are passed into the container. This provider is dev-only and does not provide persistent storage or production sandbox hardening.
+Docker must be installed and running. The mutable run workspace is mounted read-write at `/workspace`, networking is disabled with `--network none`, and no secrets are passed into the container. This provider is dev-only and does not provide persistent storage or production sandbox hardening.
 
 ## Run Artifacts
 
-Completed and failed runs can expose in-memory artifacts captured from `/workspace/work` before workspace cleanup. This is POC-only storage, not persistent object storage.
+Completed and failed runs can expose in-memory artifacts captured from changed or newly-created `/workspace` files before workspace cleanup. This is POC-only storage, not persistent object storage.
 
 ```sh
 curl -sS http://localhost:8080/v1/runs/run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1/artifacts

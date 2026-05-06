@@ -38,8 +38,8 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 		ToolCalls: []ToolCallView{
 			{
 				Name:      "workspace",
-				Arguments: map[string]string{"operation": "stat", "area": "input", "path": "README.md"},
-				Result:    "virtual_path: /workspace/input/README.md\n",
+				Arguments: map[string]string{"operation": "list_sources"},
+				Result:    "source_id: input_001\npath: README.md\n",
 				StartedAt: time.Unix(104, 0).UTC(),
 				EndedAt:   time.Unix(105, 0).UTC(),
 			},
@@ -95,8 +95,8 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	if view.Steps[0].EndedAt == nil || !view.Steps[0].EndedAt.Equal(endedAt) {
 		t.Fatalf("EndedAt = %v, want %v", view.Steps[0].EndedAt, endedAt)
 	}
-	if view.ToolCalls[0].Arguments["operation"] != "stat" {
-		t.Fatalf("ToolCalls[0] operation = %q, want stat", view.ToolCalls[0].Arguments["operation"])
+	if view.ToolCalls[0].Arguments["operation"] != "list_sources" {
+		t.Fatalf("ToolCalls[0] operation = %q, want list_sources", view.ToolCalls[0].Arguments["operation"])
 	}
 	if view.AgentTurns[0].ToolName != "workspace" {
 		t.Fatalf("AgentTurns[0].ToolName = %q, want workspace", view.AgentTurns[0].ToolName)

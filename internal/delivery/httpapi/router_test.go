@@ -262,8 +262,8 @@ func TestGetRunIncludesToolCalls(t *testing.T) {
 			ToolCalls: []inbound.ToolCallView{
 				{
 					Name:      "workspace",
-					Arguments: map[string]string{"operation": "stat", "area": "input", "path": "README.md"},
-					Result:    "virtual_path: /workspace/input/README.md\n",
+					Arguments: map[string]string{"operation": "list_sources"},
+					Result:    "source_id: input_001\npath: README.md\n",
 					StartedAt: time.Unix(101, 0).UTC(),
 					EndedAt:   time.Unix(102, 0).UTC(),
 				},
@@ -290,7 +290,7 @@ func TestGetRunIncludesToolCalls(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `"tool_calls":[{"name":"workspace"`) {
 		t.Fatalf("response missing tool_calls: %s", response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"operation":"stat"`) {
+	if !strings.Contains(response.Body.String(), `"operation":"list_sources"`) {
 		t.Fatalf("response missing tool arguments: %s", response.Body.String())
 	}
 }

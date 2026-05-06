@@ -301,7 +301,7 @@ type dynamicToolRunner struct {
 }
 
 func (r dynamicToolRunner) ListTools(_ context.Context, request outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
-	if request.Context.Workspace.InputPath == "" || request.Context.Workspace.WorkPath == "" {
+	if request.Context.Workspace.RootPath == "" {
 		return nil, nil
 	}
 
@@ -314,9 +314,6 @@ func (r dynamicToolRunner) RunTool(context.Context, outbound.ToolCall) (outbound
 
 func testWorkspace() outbound.Workspace {
 	return outbound.Workspace{
-		RootPath:  "/tmp/repo",
-		InputPath: "/tmp/repo/input",
-		WorkPath:  "/tmp/repo/work",
-		HasFiles:  true,
+		RootPath: "/tmp/repo",
 	}
 }

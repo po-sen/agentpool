@@ -16,7 +16,7 @@ const (
 	MaxTotalArtifactSizeBytes int64 = 10 << 20
 )
 
-// Artifact is a bounded file captured from /workspace/work for POC run output access.
+// Artifact is a bounded changed or newly-created workspace file captured for POC run output access.
 type Artifact struct {
 	Path      string
 	MediaType string

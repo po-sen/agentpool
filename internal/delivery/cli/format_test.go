@@ -64,11 +64,11 @@ func TestFormatRunDebugIncludesDetails(t *testing.T) {
 			},
 		},
 		ToolCalls: []ToolCallResponse{
-			{Name: "workspace", Arguments: map[string]string{"operation": "list", "path": "."}, Result: "/workspace/input/README.md"},
+			{Name: "workspace", Arguments: map[string]string{"operation": "list_sources"}, Result: "/workspace/README.md"},
 		},
 	}, OutputOptions{Debug: true})
 
-	for _, want := range []string{"response_format: plain_text", "protocol_error_code: invalid_json", "correction_message: Protocol error:", "request_messages:", "1. user: do work", "raw_response: done", "response_preview:", "operation: list", "path: .", "result: /workspace/input/README.md"} {
+	for _, want := range []string{"response_format: plain_text", "protocol_error_code: invalid_json", "correction_message: Protocol error:", "request_messages:", "1. user: do work", "raw_response: done", "response_preview:", "operation: list_sources", "result: /workspace/README.md"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}

@@ -142,7 +142,11 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 	if err != nil {
 		return nil, err
 	}
-	workspaceTools := toolworkspace.NewRunner(toolworkspace.Config{})
+	workspaceProvider := workspacetemp.NewProvider(workspacetemp.Config{})
+	workspaceTools, err := toolworkspace.NewRunner(workspaceProvider, toolworkspace.Config{})
+	if err != nil {
+		return nil, err
+	}
 	toolRunner, err := registry.New(workspaceTools, sandboxTools)
 	if err != nil {
 		return nil, err
@@ -152,7 +156,6 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		toolRunner,
 		applicationagent.WithMaxTurns(a.config.Agent.MaxTurns),
 	)
-	workspaceProvider := workspacetemp.NewProvider(workspacetemp.Config{})
 	policyDecision := allowall.NewDecision()
 	secretBroker := secretnoop.NewBroker()
 

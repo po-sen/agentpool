@@ -66,11 +66,9 @@ func TestProviderRunCommandBuildsDockerRun(t *testing.T) {
 		"--network",
 		"none",
 		"-v",
-		"/tmp/workspace/input:/workspace/input:ro",
-		"-v",
-		"/tmp/workspace/work:/workspace/work:rw",
+		"/tmp/workspace:/workspace:rw",
 		"-w",
-		"/workspace/work",
+		"/workspace",
 		"busybox:1.36",
 		"/bin/sh",
 		"-lc",
@@ -160,33 +158,15 @@ func TestProviderCleanupIsNoop(t *testing.T) {
 	}
 }
 
-func TestProviderRunCommandRejectsMissingInputPath(t *testing.T) {
+func TestProviderRunCommandRejectsMissingWorkspaceRootPath(t *testing.T) {
 	provider := newProviderWithExecutor(Config{}, &recordingExecutor{})
 
 	_, err := provider.RunCommand(context.Background(), outbound.SandboxCommandRequest{
 		Sandbox: commandCapableSandbox(),
-		Workspace: outbound.Workspace{
-			WorkPath: "/tmp/workspace/work",
-		},
 		Command: "pwd",
 	})
-	if err == nil || !strings.Contains(err.Error(), "workspace input path is required") {
-		t.Fatalf("RunCommand() error = %v, want missing input path", err)
-	}
-}
-
-func TestProviderRunCommandRejectsMissingWorkPath(t *testing.T) {
-	provider := newProviderWithExecutor(Config{}, &recordingExecutor{})
-
-	_, err := provider.RunCommand(context.Background(), outbound.SandboxCommandRequest{
-		Sandbox: commandCapableSandbox(),
-		Workspace: outbound.Workspace{
-			InputPath: "/tmp/workspace/input",
-		},
-		Command: "pwd",
-	})
-	if err == nil || !strings.Contains(err.Error(), "workspace work path is required") {
-		t.Fatalf("RunCommand() error = %v, want missing work path", err)
+	if err == nil || !strings.Contains(err.Error(), "workspace root path is required") {
+		t.Fatalf("RunCommand() error = %v, want missing workspace root path", err)
 	}
 }
 
@@ -206,7 +186,7 @@ func TestProviderPrepareRejectsMissingWorkspace(t *testing.T) {
 	provider := NewProvider(Config{})
 
 	_, err := provider.Prepare(context.Background(), outbound.SandboxRequest{RunID: "run_test"})
-	if err == nil || !strings.Contains(err.Error(), "workspace input path is required") {
+	if err == nil || !strings.Contains(err.Error(), "workspace root path is required") {
 		t.Fatalf("Prepare() error = %v, want missing workspace path", err)
 	}
 }
@@ -217,9 +197,7 @@ func commandCapableSandbox() outbound.Sandbox {
 
 func testWorkspace() outbound.Workspace {
 	return outbound.Workspace{
-		RootPath:  "/tmp/workspace",
-		InputPath: "/tmp/workspace/input",
-		WorkPath:  "/tmp/workspace/work",
+		RootPath: "/tmp/workspace",
 	}
 }
 

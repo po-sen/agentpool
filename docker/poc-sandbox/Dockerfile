@@ -19,6 +19,6 @@ RUN apt-get update \
 		sed \
 	&& rm -rf /var/lib/apt/lists/*
 
-WORKDIR /workspace/work
+WORKDIR /workspace
 
 CMD ["/bin/bash"]
