@@ -16,6 +16,8 @@ func Execute(ctx context.Context, command Command, stdout io.Writer) error {
 	switch command.Kind {
 	case CommandRun:
 		return executeRun(ctx, client, command, stdout)
+	case CommandWatch:
+		return executeWatch(ctx, client, command, stdout)
 	case CommandGet:
 		return executeGet(ctx, client, command, stdout)
 	case CommandList:
@@ -32,6 +34,9 @@ func Execute(ctx context.Context, command Command, stdout io.Writer) error {
 }
 
 func executeRun(ctx context.Context, client *Client, command Command, stdout io.Writer) error {
+	if command.Run.Watch && (!command.Run.Wait || command.Output.JSON) {
+		return ErrUsage
+	}
 	created, err := client.CreateRun(ctx, CreateRunRequest{
 		Prompt:   command.Run.Prompt,
 		Files:    command.Run.Files,
@@ -45,13 +50,31 @@ func executeRun(ctx context.Context, client *Client, command Command, stdout io.
 	if command.Run.Wait {
 		waitCtx, cancel := context.WithTimeout(ctx, command.Run.Timeout)
 		defer cancel()
-		response, err = client.WaitRun(waitCtx, created.ID, command.Run.PollInterval)
+		if command.Run.Watch {
+			response, err = watchRun(waitCtx, client, created.ID, &created, command.Run.PollInterval, stdout, command.Output)
+		} else {
+			response, err = client.WaitRun(waitCtx, created.ID, command.Run.PollInterval)
+		}
 		if err != nil {
 			return err
 		}
 	}
+	if command.Run.Watch {
+		return nil
+	}
 
 	return WriteRunOutput(stdout, response, command.Output)
+}
+
+func executeWatch(ctx context.Context, client *Client, command Command, stdout io.Writer) error {
+	if command.Output.JSON {
+		return ErrUsage
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, command.Run.Timeout)
+	defer cancel()
+	_, err := watchRun(waitCtx, client, command.RunID, nil, command.Run.PollInterval, stdout, command.Output)
+
+	return err
 }
 
 func executeGet(ctx context.Context, client *Client, command Command, stdout io.Writer) error {

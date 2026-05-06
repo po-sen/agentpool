@@ -109,6 +109,44 @@ func TestRunnerRecordsProviderRequestMessagesFromModelResponse(t *testing.T) {
 	assertMessage(t, messages[1], "user", "do work")
 }
 
+func TestRunnerReportsProgressBeforeAndAfterModelTurn(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{{Content: `{"type":"final","summary":"done"}`}},
+	}
+	runner := NewRunner(model, newFakeToolRunner())
+	progress := []RunProgress{}
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+		ProgressObserver: func(_ context.Context, item RunProgress) error {
+			progress = append(progress, item)
+
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "done" {
+		t.Fatalf("summary = %q, want done", result.Summary)
+	}
+	if len(progress) != 2 {
+		t.Fatalf("len(progress) = %d, want 2", len(progress))
+	}
+	assertTurn(t, progress[0].AgentTurns, 0, wantTurn{
+		index:   1,
+		status:  run.AgentTurnStatusModelResponse,
+		message: "waiting for model response",
+	})
+	assertTurn(t, progress[1].AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+		message:    "model returned final answer",
+	})
+}
+
 func TestNewRunnerUsesSixteenDefaultMaxTurns(t *testing.T) {
 	runner := NewRunner(nil, newFakeToolRunner())
 	if runner.maxTurns != 16 {

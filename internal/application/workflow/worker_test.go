@@ -126,6 +126,39 @@ func TestWorkerProcessOneRecordsToolCallCountInAgentStep(t *testing.T) {
 	})
 }
 
+func TestWorkerPersistsAgentProgressDuringAgentRun(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeRunRepository()
+	queue := &fakeRunQueue{}
+	publisher := &recordingPublisher{}
+	now := time.Unix(100, 0).UTC()
+
+	item := queueRun(ctx, t, repo, queue, now)
+	model := &progressInspectingModelClient{repo: repo, id: item.ID}
+	tools := &progressInspectingToolRunner{repo: repo, id: item.ID}
+	worker := newWorkerWithAgent(
+		queue,
+		repo,
+		publisher,
+		now,
+		applicationagent.NewRunner(model, tools),
+	)
+	if err := worker.ProcessOne(ctx); err != nil {
+		t.Fatalf("process one: %v", err)
+	}
+	if !model.sawModelResponseProgress {
+		t.Fatal("model did not observe persisted model_response progress before generating")
+	}
+	if !tools.sawToolCallProgress {
+		t.Fatal("tool did not observe persisted tool_call progress before executing")
+	}
+	stored := findRun(ctx, t, repo, item.ID)
+	assertAgentTurnStatuses(t, stored.AgentTurns, []string{
+		run.AgentTurnStatusToolCall,
+		run.AgentTurnStatusFinal,
+	})
+}
+
 func TestWorkerStoresWorkspaceAndSandboxExecToolCallHistory(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRunRepository()
@@ -1336,6 +1369,33 @@ func (c *toolCallingModelClient) Generate(context.Context, outbound.ModelRequest
 	return outbound.ModelResponse{Content: `{"type":"final","summary":"done with tool"}`}, nil
 }
 
+type progressInspectingModelClient struct {
+	repo                     *fakeRunRepository
+	id                       run.RunID
+	calls                    int
+	sawModelResponseProgress bool
+}
+
+func (c *progressInspectingModelClient) Generate(
+	ctx context.Context,
+	_ outbound.ModelRequest,
+) (outbound.ModelResponse, error) {
+	c.calls++
+	if c.calls == 1 {
+		stored, err := c.repo.FindByID(ctx, c.id)
+		if err != nil {
+			return outbound.ModelResponse{}, err
+		}
+		c.sawModelResponseProgress = hasAgentTurnStatus(stored.AgentTurns, run.AgentTurnStatusModelResponse)
+
+		return outbound.ModelResponse{
+			Content: `{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}`,
+		}, nil
+	}
+
+	return outbound.ModelResponse{Content: `{"type":"final","summary":"done with tool"}`}, nil
+}
+
 type protocolCorrectionModelClient struct {
 	calls int
 }
@@ -1622,6 +1682,26 @@ func (r *recordingWorkflowToolRunner) RunTool(_ context.Context, call outbound.T
 	return outbound.ToolResult{Content: "tool result"}, nil
 }
 
+type progressInspectingToolRunner struct {
+	repo                *fakeRunRepository
+	id                  run.RunID
+	sawToolCallProgress bool
+}
+
+func (r *progressInspectingToolRunner) ListTools(context.Context, outbound.ToolListRequest) ([]outbound.ToolDefinition, error) {
+	return []outbound.ToolDefinition{{Name: "echo", Description: "Returns text"}}, nil
+}
+
+func (r *progressInspectingToolRunner) RunTool(ctx context.Context, _ outbound.ToolCall) (outbound.ToolResult, error) {
+	stored, err := r.repo.FindByID(ctx, r.id)
+	if err != nil {
+		return outbound.ToolResult{}, err
+	}
+	r.sawToolCallProgress = hasAgentTurnStatus(stored.AgentTurns, run.AgentTurnStatusToolCall)
+
+	return outbound.ToolResult{Content: "tool result"}, nil
+}
+
 type recordingPublisher struct {
 	events []outbound.Event
 }
@@ -1704,6 +1784,16 @@ func assertAgentTurnStatuses(t *testing.T, got []run.AgentTurn, want []string) {
 			t.Fatalf("AgentTurns[%d].Status = %q, want %q", i, got[i].Status, status)
 		}
 	}
+}
+
+func hasAgentTurnStatus(turns []run.AgentTurn, status string) bool {
+	for _, turn := range turns {
+		if turn.Status == status {
+			return true
+		}
+	}
+
+	return false
 }
 
 func assertStoredArtifacts(t *testing.T, got []run.Artifact, wantPaths []string) {

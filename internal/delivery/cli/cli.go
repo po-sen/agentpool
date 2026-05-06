@@ -15,6 +15,7 @@ const (
 	commandDevName       = "dev"
 	commandVersionName   = "version"
 	commandRunName       = "run"
+	commandWatchName     = "watch"
 	commandGetName       = "get"
 	commandListName      = "list"
 	commandCancelName    = "cancel"
@@ -33,12 +34,15 @@ const (
 	flagPrompt       = "prompt"
 	flagTimeout      = "timeout"
 	flagWait         = "wait"
+	flagWatch        = "watch"
 
 	envCLIAddr = "AGENTPOOL_CLI_ADDR"
 
 	defaultCLIAddr      = "http://localhost:8080"
 	defaultPollInterval = 500 * time.Millisecond
 	defaultRunTimeout   = 2 * time.Minute
+
+	flagHelpAgentPoolHTTPAPIAddr = "AgentPool HTTP API address"
 )
 
 // CommandKind identifies a supported top-level CLI command.
@@ -55,6 +59,8 @@ const (
 	CommandVersion CommandKind = commandVersionName
 	// CommandRun submits a run through the HTTP API.
 	CommandRun CommandKind = commandRunName
+	// CommandWatch watches one run through the HTTP API.
+	CommandWatch CommandKind = commandWatchName
 	// CommandGet fetches one run through the HTTP API.
 	CommandGet CommandKind = commandGetName
 	// CommandList lists runs through the HTTP API.
@@ -84,6 +90,7 @@ type RunOptions struct {
 	Dirs         []string
 	Archives     []string
 	Wait         bool
+	Watch        bool
 	Timeout      time.Duration
 	PollInterval time.Duration
 }
@@ -115,6 +122,8 @@ func Parse(args []string) (Command, error) {
 		return parseNoArgCommand(CommandVersion, args[1:])
 	case commandRunName:
 		return parseRunCommand(args[1:])
+	case commandWatchName:
+		return parseWatchCommand(args[1:])
 	case commandGetName:
 		return parseRunIDCommand(CommandGet, args[1:])
 	case commandListName:
@@ -133,6 +142,7 @@ func Parse(args []string) (Command, error) {
 // UsesHTTPClient reports whether the command should execute as an HTTP client command.
 func (c Command) UsesHTTPClient() bool {
 	return c.Kind == CommandRun ||
+		c.Kind == CommandWatch ||
 		c.Kind == CommandGet ||
 		c.Kind == CommandList ||
 		c.Kind == CommandCancel ||
@@ -149,6 +159,8 @@ usage:
   agentpool dev
   agentpool version
   agentpool run --prompt "..." [--file PATH ...] [--dir PATH ...] [--archive PATH ...] [--addr URL] [--json|--pretty] [--debug]
+  agentpool run --prompt "..." [--file PATH ...] [--dir PATH ...] [--archive PATH ...] --watch [--addr URL] [--debug]
+  agentpool watch <run_id> [--addr URL] [--debug] [--timeout DURATION] [--poll-interval DURATION]
   agentpool get <run_id> [--addr URL] [--json|--pretty] [--debug]
   agentpool list [--addr URL] [--json|--pretty] [--debug]
   agentpool cancel <run_id> [--addr URL] [--json|--pretty] [--debug]
@@ -178,6 +190,7 @@ func parseRunCommand(args []string) (Command, error) {
 	flags.Var(&archives, flagArchive, "archive to expand and upload")
 	flags.BoolVar(&command.Run.Wait, flagWait, true, "wait for terminal run status")
 	flags.BoolVar(&noWait, flagNoWait, false, "submit and return without polling")
+	flags.BoolVar(&command.Run.Watch, flagWatch, false, "print a live run timeline while polling")
 	flags.DurationVar(&command.Run.Timeout, flagTimeout, defaultRunTimeout, "maximum wait duration")
 	flags.DurationVar(&command.Run.PollInterval, flagPollInterval, defaultPollInterval, "poll interval")
 	addClientFlags(flags, &command)
@@ -191,9 +204,33 @@ func parseRunCommand(args []string) (Command, error) {
 	if noWait {
 		command.Run.Wait = false
 	}
+	if command.Run.Watch && (!command.Run.Wait || command.Output.JSON) {
+		return Command{}, ErrUsage
+	}
 	command.Run.Files = append([]string(nil), files...)
 	command.Run.Dirs = append([]string(nil), dirs...)
 	command.Run.Archives = append([]string(nil), archives...)
+
+	return command, nil
+}
+
+func parseWatchCommand(args []string) (Command, error) {
+	command := newClientCommand(CommandWatch)
+	flags := newFlagSet(commandWatchName)
+	addWatchClientFlags(flags, &command)
+
+	flagArgs, runID, err := splitRunIDArgs(args)
+	if err != nil {
+		return Command{}, ErrUsage
+	}
+	if err := flags.Parse(flagArgs); err != nil {
+		return Command{}, ErrUsage
+	}
+	if flags.NArg() != 0 || strings.TrimSpace(runID) == "" {
+		return Command{}, ErrUsage
+	}
+	command.RunID = runID
+	command.Run.Watch = true
 
 	return command, nil
 }
@@ -284,14 +321,21 @@ func newFlagSet(name string) *flag.FlagSet {
 }
 
 func addClientFlags(flags *flag.FlagSet, command *Command) {
-	flags.StringVar(&command.Addr, flagAddr, command.Addr, "AgentPool HTTP API address")
+	flags.StringVar(&command.Addr, flagAddr, command.Addr, flagHelpAgentPoolHTTPAPIAddr)
 	flags.BoolVar(&command.Output.JSON, flagJSON, false, "print full JSON response")
 	flags.BoolVar(&command.Output.Pretty, flagPretty, false, "print human-readable response")
 	flags.BoolVar(&command.Output.Debug, flagDebug, false, "include debug diagnostics")
 }
 
+func addWatchClientFlags(flags *flag.FlagSet, command *Command) {
+	flags.StringVar(&command.Addr, flagAddr, command.Addr, flagHelpAgentPoolHTTPAPIAddr)
+	flags.BoolVar(&command.Output.Debug, flagDebug, false, "include debug diagnostics")
+	flags.DurationVar(&command.Run.Timeout, flagTimeout, command.Run.Timeout, "maximum watch duration")
+	flags.DurationVar(&command.Run.PollInterval, flagPollInterval, command.Run.PollInterval, "poll interval")
+}
+
 func addArtifactClientFlags(flags *flag.FlagSet, command *Command) {
-	flags.StringVar(&command.Addr, flagAddr, command.Addr, "AgentPool HTTP API address")
+	flags.StringVar(&command.Addr, flagAddr, command.Addr, flagHelpAgentPoolHTTPAPIAddr)
 }
 
 func splitRunIDArgs(args []string) ([]string, string, error) {
@@ -313,7 +357,7 @@ func splitPositionalArgs(args []string, maxPositionals int) ([]string, []string,
 		arg := args[index]
 		if isFlagArg(arg) {
 			flagArgs = append(flagArgs, arg)
-			if flagName(arg) == flagAddr && !strings.Contains(arg, "=") {
+			if flagRequiresValue(flagName(arg)) && !strings.Contains(arg, "=") {
 				index++
 				if index >= len(args) {
 					return nil, nil, ErrUsage
@@ -342,6 +386,10 @@ func flagName(arg string) string {
 	}
 
 	return name
+}
+
+func flagRequiresValue(name string) bool {
+	return name == flagAddr || name == flagPollInterval || name == flagTimeout
 }
 
 type fileListFlag []string

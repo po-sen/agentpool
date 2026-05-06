@@ -49,14 +49,25 @@ type RunnerOption func(*Runner)
 
 // RunRequest contains the application-level agent run input.
 type RunRequest struct {
-	RunID   run.RunID
-	Task    run.TaskSpec
-	Context outbound.ToolContext
+	RunID            run.RunID
+	Task             run.TaskSpec
+	Context          outbound.ToolContext
+	ProgressObserver ProgressObserver
 }
 
 // RunResult contains the application-level agent run output.
 type RunResult struct {
 	Summary       string
+	ToolCallCount int
+	ToolCalls     []ToolCallRecord
+	AgentTurns    []TurnRecord
+}
+
+// ProgressObserver observes bounded agent progress while the run is still active.
+type ProgressObserver func(context.Context, RunProgress) error
+
+// RunProgress contains partial agent state observed during the agent loop.
+type RunProgress struct {
 	ToolCallCount int
 	ToolCalls     []ToolCallRecord
 	AgentTurns    []TurnRecord
@@ -109,6 +120,10 @@ type runSession struct {
 	toolCallCount                    int
 	toolCalls                        []ToolCallRecord
 	turnRecords                      []TurnRecord
+	currentTurn                      *TurnRecord
+	progressObserver                 ProgressObserver
+	progressErr                      error
+	ctx                              context.Context
 	sandboxExecErrored               bool
 	lastErroredSandboxExecCommand    string
 	lastSuccessfulSandboxExecCommand string
@@ -180,6 +195,9 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (RunResult, error)
 
 	for range r.maxTurns {
 		result, done, err := r.runTurn(ctx, session)
+		if session.progressErr != nil {
+			return session.partialResult(), session.progressErr
+		}
 		if err != nil {
 			return result, err
 		}
@@ -197,6 +215,9 @@ func (r *Runner) Run(ctx context.Context, request RunRequest) (RunResult, error)
 		StartedAt: startedAt,
 		EndedAt:   endedAt,
 	})
+	if session.progressErr != nil {
+		return session.partialResult(), session.progressErr
+	}
 
 	return session.partialResult(), newAgentError(ErrorCodeAgentMaxTurns, "", nil)
 }
@@ -218,6 +239,8 @@ func (r *Runner) newRunSession(ctx context.Context, request RunRequest) (*runSes
 		toolDefinitions:    copyToolDefinitions(tools),
 		availableToolNames: availableToolNames(tools),
 		turns:              buildInitialTurns(request.Task),
+		progressObserver:   request.ProgressObserver,
+		ctx:                ctx,
 	}, nil
 }
 
@@ -225,6 +248,16 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 	turnIndex := session.nextTurnIndex()
 	startedAt := r.clock()
 	fallbackRequestMessages := copyModelRequestMessages(session.systemPrompt, session.turns)
+	session.startTurnProgress(TurnRecord{
+		Index:           turnIndex,
+		Status:          run.AgentTurnStatusModelResponse,
+		Message:         "waiting for model response",
+		RequestMessages: fallbackRequestMessages,
+		StartedAt:       startedAt,
+	})
+	if session.progressErr != nil {
+		return session.partialResult(), false, session.progressErr
+	}
 	response, err := r.model.Generate(ctx, outbound.ModelRequest{
 		RunID:        session.request.RunID,
 		Instructions: session.systemPrompt,
@@ -1644,6 +1677,7 @@ func (s *runSession) recordToolCall(
 		StartedAt: startedAt,
 		EndedAt:   endedAt,
 	})
+	s.notifyProgress()
 }
 
 func (s *runSession) nextTurnIndex() int {
@@ -1657,7 +1691,59 @@ func (s *runSession) recordTurn(record TurnRecord) {
 	record.RawResponse = previewRawResponse(record.RawResponse)
 	record.ResponsePreview = previewModelResponse(record.ResponsePreview)
 	record.CorrectionMessage = previewCorrectionMessage(record.CorrectionMessage)
+	if s.currentTurn != nil && s.currentTurn.Index == record.Index {
+		s.currentTurn = nil
+	}
 	s.turnRecords = append(s.turnRecords, record)
+	s.notifyProgress()
+}
+
+func (s *runSession) startTurnProgress(record TurnRecord) {
+	if s.progressObserver == nil {
+		return
+	}
+
+	record.RequestMessages = copyTurnMessageRecords(record.RequestMessages)
+	record.RawResponse = previewRawResponse(record.RawResponse)
+	record.ResponsePreview = previewModelResponse(record.ResponsePreview)
+	record.CorrectionMessage = previewCorrectionMessage(record.CorrectionMessage)
+	s.currentTurn = &record
+	s.notifyProgress()
+}
+
+func (s *runSession) notifyProgress() {
+	if s.progressObserver == nil || s.progressErr != nil {
+		return
+	}
+
+	s.progressErr = s.progressObserver(s.ctx, RunProgress{
+		ToolCallCount: s.toolCallCount,
+		ToolCalls:     copyToolCallRecords(s.toolCalls),
+		AgentTurns:    s.progressAgentTurns(),
+	})
+}
+
+func (s *runSession) progressAgentTurns() []TurnRecord {
+	records := copyTurnRecords(s.turnRecords)
+	if s.currentTurn == nil || turnRecordIndexExists(records, s.currentTurn.Index) {
+		return records
+	}
+
+	current := *s.currentTurn
+	current.RequestMessages = copyTurnMessageRecords(current.RequestMessages)
+	records = append(records, current)
+
+	return records
+}
+
+func turnRecordIndexExists(records []TurnRecord, index int) bool {
+	for _, record := range records {
+		if record.Index == index {
+			return true
+		}
+	}
+
+	return false
 }
 
 func copyToolCallRecords(records []ToolCallRecord) []ToolCallRecord {

@@ -84,6 +84,53 @@ func TestParseRunNoWait(t *testing.T) {
 	}
 }
 
+func TestParseRunWatch(t *testing.T) {
+	got, err := Parse([]string{commandRunName, "--prompt", "inspect", "--watch"})
+	if err != nil {
+		t.Fatalf("parse run command: %v", err)
+	}
+	if !got.Run.Watch {
+		t.Fatal("watch = false, want true")
+	}
+	if !got.Run.Wait {
+		t.Fatal("wait = false, want true")
+	}
+}
+
+func TestParseRunWatchRejectsNoWait(t *testing.T) {
+	_, err := Parse([]string{commandRunName, "--prompt", "inspect", "--watch", "--no-wait"})
+	if !errors.Is(err, ErrUsage) {
+		t.Fatalf("Parse() error = %v, want %v", err, ErrUsage)
+	}
+}
+
+func TestParseWatchCommand(t *testing.T) {
+	got, err := Parse([]string{
+		commandWatchName,
+		"run_123",
+		"--debug",
+		"--timeout",
+		"5s",
+		"--poll-interval",
+		"100ms",
+	})
+	if err != nil {
+		t.Fatalf("parse watch command: %v", err)
+	}
+	if got.Kind != CommandWatch || got.RunID != "run_123" {
+		t.Fatalf("parsed command = %#v", got)
+	}
+	if !got.Run.Watch || !got.Output.Debug {
+		t.Fatalf("watch/debug flags = %v/%v, want true/true", got.Run.Watch, got.Output.Debug)
+	}
+	if got.Run.Timeout != 5*time.Second {
+		t.Fatalf("timeout = %s, want 5s", got.Run.Timeout)
+	}
+	if got.Run.PollInterval != 100*time.Millisecond {
+		t.Fatalf("poll interval = %s, want 100ms", got.Run.PollInterval)
+	}
+}
+
 func TestParseGetCommand(t *testing.T) {
 	got, err := Parse([]string{commandGetName, "run_123", "--json"})
 	if err != nil {
@@ -167,6 +214,7 @@ func TestParseInvalidArgs(t *testing.T) {
 	}{
 		{name: "empty", args: nil},
 		{name: "run missing prompt", args: []string{commandRunName}},
+		{name: "watch missing id", args: []string{commandWatchName}},
 		{name: "get missing id", args: []string{commandGetName}},
 		{name: "list extra arg", args: []string{commandListName, "extra"}},
 		{name: "cancel missing id", args: []string{commandCancelName}},
@@ -187,7 +235,7 @@ func TestParseInvalidArgs(t *testing.T) {
 
 func TestUsage(t *testing.T) {
 	got := Usage()
-	for _, want := range []string{commandRunName, commandGetName, commandListName, commandCancelName} {
+	for _, want := range []string{commandRunName, commandWatchName, commandGetName, commandListName, commandCancelName} {
 		if !contains(got, want) {
 			t.Fatalf("usage = %q, want command %q", got, want)
 		}

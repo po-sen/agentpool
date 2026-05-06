@@ -200,7 +200,7 @@ Failed runs can include partial `agent_turns` and `tool_calls` when the agent in
 }
 ```
 
-Diagnostics are stored only in the current in-memory run state for now. There is no streaming, persistent database, or raw internal/provider error log in the HTTP API.
+Diagnostics are stored only in the current in-memory run state for now. There is no server-push streaming, persistent database, or raw internal/provider error log in the HTTP API.
 
 Cancel a run:
 
@@ -218,6 +218,8 @@ go run ./cmd/agentpool server
 go run ./cmd/agentpool worker
 go run ./cmd/agentpool version
 go run ./cmd/agentpool run --prompt "Use sandbox_exec to calculate 234 * 887123 with sh."
+go run ./cmd/agentpool run --prompt "Use sandbox_exec to calculate 234 * 887123 with sh." --watch
+go run ./cmd/agentpool watch run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
 go run ./cmd/agentpool get run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
 go run ./cmd/agentpool list
 go run ./cmd/agentpool cancel run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
@@ -230,6 +232,8 @@ go run ./cmd/agentpool artifact run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1 report.md
 - `agentpool worker`: starts only the worker process.
 - `agentpool version`: prints version info.
 - `agentpool run`: submits a run through the HTTP API and waits for a terminal result by default.
+- `agentpool run --watch`: submits a run and prints a polling timeline while waiting.
+- `agentpool watch`: polls an existing run and prints new timeline rows until it reaches a terminal state.
 - `agentpool get`: fetches one run.
 - `agentpool list`: lists known runs.
 - `agentpool cancel`: cancels one run before it reaches a terminal state.
@@ -252,6 +256,39 @@ Then submit and wait for a run from another terminal:
 go run ./cmd/agentpool run \
   --prompt "Use sandbox_exec to calculate 234 * 887123 with sh."
 ```
+
+Use `--watch` when you want a visible timeline while the CLI waits:
+
+```sh
+go run ./cmd/agentpool run \
+  --prompt "Use sandbox_exec to calculate 234 * 887123 with sh." \
+  --watch
+```
+
+The watch output is a log-style polling timeline:
+
+```text
+2026-05-06 10:00:00 agent [turn 1] turn_status=model_waiting action=model
+  message:
+    waiting for model response
+
+2026-05-06 10:00:01 agent [turn 1] turn_status=tool_call action=sandbox_exec
+  message:
+    model requested tool call
+  request:
+    command: wc -l /workspace/input/README.md
+  response:
+    type: tool_call
+    tool: sandbox_exec
+
+2026-05-06 10:00:02 tool [tool 1] tool_status=ok action=sandbox_exec
+  request:
+    command: wc -l /workspace/input/README.md
+  response:
+    12 /workspace/input/README.md
+```
+
+It uses the existing `GET /v1/runs/{id}` response, so it shows newly persisted run state rather than server-pushed events. Agent turn progress is persisted while the agent loop is running, including the current `model_response` turn before a model response arrives. Use `agentpool watch <run_id>` to follow a run submitted earlier.
 
 Upload files with repeated `--file` flags:
 

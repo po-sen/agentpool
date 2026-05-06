@@ -52,6 +52,99 @@ func TestExecuteRunSubmitsPollsAndPrintsResult(t *testing.T) {
 	}
 }
 
+func TestExecuteRunWatchPrintsTimeline(t *testing.T) {
+	getCount := 0
+	startedAt := time.Date(2026, 5, 6, 10, 0, 0, 0, time.UTC)
+	endedAt := startedAt.Add(time.Second)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodPost && request.URL.Path == apiRunsPath:
+			writeRunTestResponse(writer, http.StatusCreated, RunResponse{
+				ID:        "run_watch",
+				Status:    "queued",
+				CreatedAt: startedAt,
+				UpdatedAt: startedAt,
+			})
+		case request.Method == http.MethodGet && request.URL.Path == apiRunsPath+"/run_watch":
+			getCount++
+			response := RunResponse{
+				ID:        "run_watch",
+				Status:    "running",
+				UpdatedAt: startedAt.Add(500 * time.Millisecond),
+				Steps: []StepResponse{
+					{Name: "workspace", Status: "running", Message: "Preparing workspace", StartedAt: startedAt},
+				},
+			}
+			if getCount == 2 {
+				response = RunResponse{
+					ID:        "run_watch",
+					Status:    statusCompleted,
+					Result:    &RunResultResponse{Summary: "done"},
+					UpdatedAt: endedAt,
+					AgentTurns: []AgentTurnResponse{
+						{
+							Index:       2,
+							Status:      "tool_call",
+							ActionType:  "tool_call",
+							ToolName:    "sandbox_exec",
+							Message:     "model requested tool call",
+							RawResponse: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -l /workspace/input/README.md"}}`,
+							StartedAt:   startedAt,
+							EndedAt:     endedAt,
+						},
+					},
+					ToolCalls: []ToolCallResponse{
+						{
+							Name:      "sandbox_exec",
+							Arguments: map[string]string{"command": "wc -l /workspace/input/README.md"},
+							Result:    "12 /workspace/input/README.md",
+							StartedAt: startedAt,
+							EndedAt:   endedAt,
+						},
+					},
+				}
+			}
+			writeRunTestResponse(writer, http.StatusOK, response)
+		default:
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	var output bytes.Buffer
+	err := Execute(context.Background(), Command{
+		Kind: CommandRun,
+		Addr: server.URL,
+		Run: RunOptions{
+			Prompt:       "do work",
+			Wait:         true,
+			Watch:        true,
+			Timeout:      time.Second,
+			PollInterval: time.Millisecond,
+		},
+	}, &output)
+	if err != nil {
+		t.Fatalf("execute run watch: %v", err)
+	}
+	for _, want := range []string{
+		"agent [turn 2]",
+		"sandbox_exec",
+		"request:\n    command: wc -l /workspace/input/README.md",
+		"response:\n    type: tool_call\n    tool: sandbox_exec",
+		"message:\n    model requested tool call",
+		"tool [tool 1]",
+		"response:\n    12 /workspace/input/README.md",
+		"done",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("watch output missing %q:\n%s", want, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "TIME                SOURCE") {
+		t.Fatalf("watch output still uses table header:\n%s", output.String())
+	}
+}
+
 func TestExecuteRunNoWaitPrintsCreatedRun(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost || request.URL.Path != apiRunsPath {
@@ -75,6 +168,50 @@ func TestExecuteRunNoWaitPrintsCreatedRun(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Run: run_nowait") {
 		t.Fatalf("output missing created run: %s", output.String())
+	}
+}
+
+func TestExecuteWatchPollsExistingRun(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != apiRunsPath+"/run_existing" {
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+		requests++
+		status := "running"
+		if requests == 2 {
+			status = statusCompleted
+		}
+		writeRunTestResponse(writer, http.StatusOK, RunResponse{ID: "run_existing", Status: status})
+	}))
+	defer server.Close()
+
+	var output bytes.Buffer
+	err := Execute(context.Background(), Command{
+		Kind:  CommandWatch,
+		Addr:  server.URL,
+		RunID: "run_existing",
+		Run: RunOptions{
+			Timeout:      time.Second,
+			PollInterval: time.Millisecond,
+		},
+	}, &output)
+	if err != nil {
+		t.Fatalf("execute watch: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	for _, want := range []string{"Run: run_existing", statusCompleted} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("watch output missing %q:\n%s", want, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "status=running") {
+		t.Fatalf("watch output should hide non-debug running status:\n%s", output.String())
+	}
+	if strings.Contains(output.String(), " run run_existing ") {
+		t.Fatalf("watch output should not print run rows with run IDs:\n%s", output.String())
 	}
 }
 

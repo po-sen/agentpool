@@ -291,8 +291,9 @@ func (w *Worker) startRun(
 	}
 
 	result, err := w.agent.Run(ctx, agent.RunRequest{
-		RunID: item.ID,
-		Task:  item.Task,
+		RunID:            item.ID,
+		Task:             item.Task,
+		ProgressObserver: w.agentProgressObserver(item),
 		Context: outbound.ToolContext{
 			Workspace: workspace,
 			Sandbox:   sandbox,
@@ -313,6 +314,21 @@ func (w *Worker) startRun(
 	}
 
 	return result, nil
+}
+
+func (w *Worker) agentProgressObserver(item *run.Run) agent.ProgressObserver {
+	return func(ctx context.Context, progress agent.RunProgress) error {
+		return w.recordAgentProgress(ctx, item, progress)
+	}
+}
+
+func (w *Worker) recordAgentProgress(ctx context.Context, item *run.Run, progress agent.RunProgress) error {
+	now := w.clock()
+	expectedStatus := item.Status
+	item.RecordToolCalls(now, toDomainToolCalls(progress.ToolCalls))
+	item.RecordAgentTurns(now, toDomainAgentTurns(progress.AgentTurns))
+
+	return ignoreRunStateChanged(w.saveIfCurrentStatus(ctx, item, expectedStatus))
 }
 
 func (w *Worker) prepareWorkspace(ctx context.Context, item *run.Run) (outbound.Workspace, error) {
