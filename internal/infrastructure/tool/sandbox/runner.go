@@ -93,13 +93,13 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 	return []outbound.ToolDefinition{
 		{
 			Name:        toolNameSandboxExec,
-			Description: "Runs a command inside the sandbox from /workspace/work.",
+			Description: "Runs commands in a general-purpose sandbox from /workspace/work.",
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        argumentCommand,
-					Description: "Run sandbox command. For PDFs, use pdftotext with '-' or write outputs/scripts under /workspace/work; search first, then inspect nearby lines. Use python3/awk for decimals or roots; print residual.",
+					Description: "Command to run from /workspace/work using installed sandbox tools and scripts. Read inputs from /workspace/input and write generated files under /workspace/work.",
 					Required:    true,
-					Example:     `python3 -c 'print(123 * 321)'`,
+					Example:     "pwd",
 				},
 				{
 					Name:        argumentTimeoutSeconds,
@@ -158,7 +158,7 @@ func (r *Runner) RunTool(ctx context.Context, call outbound.ToolCall) (outbound.
 	}
 
 	return outbound.ToolResult{
-		Content: formatCommandResultForCommand(command, result, maxOutputBytes),
+		Content: formatCommandResult(result, maxOutputBytes),
 		IsError: result.TimedOut || result.ExitCode != 0,
 	}, nil
 }
@@ -223,61 +223,6 @@ func formatCommandResult(result outbound.SandboxCommandResult, maxOutputBytes in
 	}
 
 	return output.String()
-}
-
-func formatCommandResultForCommand(command string, result outbound.SandboxCommandResult, maxOutputBytes int) string {
-	if commandUsesPDFToText(command) {
-		result.Stderr = compactPDFToTextWarnings(result.Stderr)
-	}
-
-	return formatCommandResult(result, maxOutputBytes)
-}
-
-func commandUsesPDFToText(command string) bool {
-	fields := strings.Fields(strings.ToLower(command))
-	for _, field := range fields {
-		if strings.Trim(field, `'"`) == "pdftotext" {
-			return true
-		}
-		if strings.HasSuffix(strings.Trim(field, `'"`), "/pdftotext") {
-			return true
-		}
-	}
-
-	return false
-}
-
-func compactPDFToTextWarnings(stderr string) string {
-	if strings.TrimSpace(stderr) == "" {
-		return stderr
-	}
-
-	lines := strings.SplitAfter(stderr, "\n")
-	kept := make([]string, 0, len(lines))
-	omitted := 0
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if isPDFToTextWarningLine(trimmed) {
-			omitted++
-			continue
-		}
-		kept = append(kept, line)
-	}
-	if omitted == 0 {
-		return stderr
-	}
-
-	var output strings.Builder
-	_, _ = fmt.Fprintf(&output, "pdftotext warnings omitted: %d line(s)\n", omitted)
-	for _, line := range kept {
-		output.WriteString(line)
-	}
-
-	return output.String()
-}
-
-func isPDFToTextWarningLine(line string) bool {
-	return strings.HasPrefix(line, "Syntax Error")
 }
 
 func truncateStreams(stdout string, stderr string, maxBytes int) (string, string, bool) {
