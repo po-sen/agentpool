@@ -29,7 +29,7 @@ var ErrAttachmentsTooLarge = errors.New("attachments are too large")
 // ErrUnsupportedAttachmentType is returned when an attachment extension is not supported.
 var ErrUnsupportedAttachmentType = errors.New("attachment type is not supported")
 
-// ErrAttachmentNotText is returned when an attachment contains non-UTF-8 content.
+// ErrAttachmentNotText is returned when a text attachment contains non-UTF-8 content.
 var ErrAttachmentNotText = errors.New("attachment must be UTF-8 text")
 
 // ErrAttachmentSizeMismatch is returned when attachment metadata does not match content length.

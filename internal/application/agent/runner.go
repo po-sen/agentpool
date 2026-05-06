@@ -15,7 +15,7 @@ import (
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
-const defaultMaxTurns = 8
+const defaultMaxTurns = 16
 
 var errToolRunnerRequired = errors.New("tool runner is required")
 
@@ -99,20 +99,22 @@ type TurnMessageRecord struct {
 }
 
 type runSession struct {
-	request                    RunRequest
-	systemPrompt               string
-	availableTools             map[string]outbound.ToolDefinition
-	toolDefinitions            []outbound.ToolDefinition
-	availableToolNames         []string
-	turns                      []outbound.ModelTurn
-	turnIndex                  int
-	toolCallCount              int
-	toolCalls                  []ToolCallRecord
-	turnRecords                []TurnRecord
-	sandboxExecErrored         bool
-	sandboxExecRetryRequired   bool
-	sandboxExecRetryMessage    string
-	sandboxExecRetryCorrection string
+	request                          RunRequest
+	systemPrompt                     string
+	availableTools                   map[string]outbound.ToolDefinition
+	toolDefinitions                  []outbound.ToolDefinition
+	availableToolNames               []string
+	turns                            []outbound.ModelTurn
+	turnIndex                        int
+	toolCallCount                    int
+	toolCalls                        []ToolCallRecord
+	turnRecords                      []TurnRecord
+	sandboxExecErrored               bool
+	lastErroredSandboxExecCommand    string
+	lastSuccessfulSandboxExecCommand string
+	sandboxExecRetryRequired         bool
+	sandboxExecRetryMessage          string
+	sandboxExecRetryCorrection       string
 }
 
 type modelTurnContext struct {
@@ -401,6 +403,15 @@ func (r *Runner) handleAction(
 		if sandboxExecCommandUsesUnverifiedNumericalSolve(parsed.Tool, parsed.Arguments) {
 			return handleUnverifiedNumericalSandboxExecToolCall(session, turn, parsed.Tool, turn.content)
 		}
+		if sandboxExecCommandWritesReadOnlyPDFTextOutput(parsed.Tool, parsed.Arguments) {
+			return handleReadOnlyPDFTextOutputSandboxExecToolCall(session, turn, parsed.Tool, turn.content)
+		}
+		if sandboxExecCommandRepeatsFailedCommand(session, parsed.Tool, parsed.Arguments) {
+			return handleRepeatedFailedSandboxExecToolCall(session, turn, parsed.Tool, turn.content)
+		}
+		if sandboxExecCommandRepeatsSuccessfulCommand(session, parsed.Tool, parsed.Arguments) {
+			return handleRepeatedSuccessfulSandboxExecToolCall(session, turn, parsed.Tool, turn.content)
+		}
 
 		session.recordTurn(TurnRecord{
 			Index:           turn.index,
@@ -553,13 +564,21 @@ func (s *runSession) finalResult(summary string) RunResult {
 	}
 }
 
-func (s *runSession) recordSandboxExecResult(tool string, result outbound.ToolResult) {
+func (s *runSession) recordSandboxExecResult(tool string, arguments map[string]string, result outbound.ToolResult) {
 	if tool != toolNameSandboxExec {
 		return
 	}
 
 	s.sandboxExecErrored = result.IsError
+	if result.IsError {
+		s.lastErroredSandboxExecCommand = strings.TrimSpace(arguments[toolArgumentCommand])
+		s.lastSuccessfulSandboxExecCommand = ""
+
+		return
+	}
 	if !result.IsError {
+		s.lastErroredSandboxExecCommand = ""
+		s.lastSuccessfulSandboxExecCommand = strings.TrimSpace(arguments[toolArgumentCommand])
 		s.sandboxExecRetryRequired = false
 		s.sandboxExecRetryMessage = ""
 		s.sandboxExecRetryCorrection = ""
@@ -713,6 +732,99 @@ func handleUnverifiedNumericalSandboxExecToolCall(
 	return RunResult{}, false, nil
 }
 
+func handleReadOnlyPDFTextOutputSandboxExecToolCall(
+	session *runSession,
+	turn modelTurnContext,
+	toolName string,
+	content string,
+) (RunResult, bool, error) {
+	message := "sandbox_exec pdftotext command would write beside read-only input"
+	correctionMessage := buildSandboxExecReadOnlyPDFTextOutputCorrectionMessage()
+	session.recordTurn(TurnRecord{
+		Index:           turn.index,
+		Status:          run.AgentTurnStatusInvalidToolCall,
+		ActionType:      run.AgentTurnActionTypeToolCall,
+		ToolName:        toolName,
+		Message:         message,
+		RequestMessages: turn.requestMessages,
+		RawResponse:     turn.content,
+		ResponseFormat:  turn.responseFormat,
+		ResponsePreview: previewModelResponse(turn.content),
+		StartedAt:       turn.startedAt,
+		EndedAt:         turn.endedAt,
+	})
+	session.turns = append(session.turns,
+		assistantAttemptTurn(content),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
+	)
+	session.sandboxExecRetryRequired = true
+	session.sandboxExecRetryMessage = "final answer attempted after invalid sandbox_exec pdftotext command"
+	session.sandboxExecRetryCorrection = correctionMessage
+
+	return RunResult{}, false, nil
+}
+
+func handleRepeatedFailedSandboxExecToolCall(
+	session *runSession,
+	turn modelTurnContext,
+	toolName string,
+	content string,
+) (RunResult, bool, error) {
+	message := "sandbox_exec repeated a failed command unchanged"
+	correctionMessage := buildSandboxExecRepeatedFailedCommandCorrectionMessage()
+	session.recordTurn(TurnRecord{
+		Index:           turn.index,
+		Status:          run.AgentTurnStatusInvalidToolCall,
+		ActionType:      run.AgentTurnActionTypeToolCall,
+		ToolName:        toolName,
+		Message:         message,
+		RequestMessages: turn.requestMessages,
+		RawResponse:     turn.content,
+		ResponseFormat:  turn.responseFormat,
+		ResponsePreview: previewModelResponse(turn.content),
+		StartedAt:       turn.startedAt,
+		EndedAt:         turn.endedAt,
+	})
+	session.turns = append(session.turns,
+		assistantAttemptTurn(content),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
+	)
+	session.sandboxExecRetryRequired = true
+	session.sandboxExecRetryMessage = "final answer attempted after repeated failed sandbox_exec command"
+	session.sandboxExecRetryCorrection = correctionMessage
+
+	return RunResult{}, false, nil
+}
+
+func handleRepeatedSuccessfulSandboxExecToolCall(
+	session *runSession,
+	turn modelTurnContext,
+	toolName string,
+	content string,
+) (RunResult, bool, error) {
+	message := "sandbox_exec repeated a successful command unchanged"
+	correctionMessage := buildSandboxExecRepeatedSuccessfulCommandCorrectionMessage()
+	session.recordTurn(TurnRecord{
+		Index:           turn.index,
+		Status:          run.AgentTurnStatusInvalidToolCall,
+		ActionType:      run.AgentTurnActionTypeToolCall,
+		ToolName:        toolName,
+		Message:         message,
+		RequestMessages: turn.requestMessages,
+		RawResponse:     turn.content,
+		ResponseFormat:  turn.responseFormat,
+		ResponsePreview: previewModelResponse(turn.content),
+		StartedAt:       turn.startedAt,
+		EndedAt:         turn.endedAt,
+	})
+	session.turns = append(session.turns,
+		assistantAttemptTurn(content),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
+	)
+
+	return RunResult{}, false, nil
+}
+
 func uploadedFilePaths(task run.TaskSpec) []string {
 	if len(task.Attachments) == 0 {
 		return nil
@@ -763,6 +875,240 @@ func sandboxExecCommandUsesUnverifiedNumericalSolve(tool string, arguments map[s
 	}
 
 	return sandboxExecCommandUsesNumericalSolver(command) && !sandboxExecCommandPrintsResidual(command)
+}
+
+func sandboxExecCommandWritesReadOnlyPDFTextOutput(tool string, arguments map[string]string) bool {
+	if strings.TrimSpace(tool) != toolNameSandboxExec {
+		return false
+	}
+	command := strings.TrimSpace(arguments[toolArgumentCommand])
+	if command == "" || !strings.Contains(strings.ToLower(command), "pdftotext") {
+		return false
+	}
+
+	tokens := shellLikeTokens(command)
+	for index, token := range tokens {
+		if !sandboxExecIsPDFToTextToken(token) {
+			continue
+		}
+		if sandboxExecPDFToTextInvocationWritesReadOnlyInput(tokens[index+1:]) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func sandboxExecCommandRepeatsFailedCommand(
+	session *runSession,
+	tool string,
+	arguments map[string]string,
+) bool {
+	if !session.sandboxExecErrored || strings.TrimSpace(tool) != toolNameSandboxExec {
+		return false
+	}
+	command := strings.TrimSpace(arguments[toolArgumentCommand])
+	if command == "" {
+		return false
+	}
+
+	return command == session.lastErroredSandboxExecCommand
+}
+
+func sandboxExecCommandRepeatsSuccessfulCommand(
+	session *runSession,
+	tool string,
+	arguments map[string]string,
+) bool {
+	if session.sandboxExecErrored || strings.TrimSpace(tool) != toolNameSandboxExec {
+		return false
+	}
+	command := strings.TrimSpace(arguments[toolArgumentCommand])
+	if command == "" || session.lastSuccessfulSandboxExecCommand == "" {
+		return false
+	}
+
+	return command == session.lastSuccessfulSandboxExecCommand
+}
+
+func sandboxExecPDFToTextInvocationWritesReadOnlyInput(arguments []string) bool {
+	for index, argument := range arguments {
+		if shellCommandBoundaryToken(argument) {
+			return false
+		}
+		if workspaceInputPDFPath(argument) && pdftotextOutputWritesReadOnlyInput(arguments, index+1) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func pdftotextOutputWritesReadOnlyInput(arguments []string, outputIndex int) bool {
+	if outputIndex >= len(arguments) {
+		return true
+	}
+	output := arguments[outputIndex]
+	if shellCommandBoundaryToken(output) || shellRedirectionToken(output) {
+		return true
+	}
+	if allDigits(output) && nextTokenIsShellRedirection(arguments, outputIndex) {
+		return true
+	}
+	if output == "-" {
+		return false
+	}
+
+	return strings.HasPrefix(output, "/workspace/input/") || strings.HasPrefix(output, "-")
+}
+
+func nextTokenIsShellRedirection(arguments []string, index int) bool {
+	nextIndex := index + 1
+	if nextIndex >= len(arguments) {
+		return false
+	}
+
+	return shellRedirectionToken(arguments[nextIndex])
+}
+
+func sandboxExecIsPDFToTextToken(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false
+	}
+	if slash := strings.LastIndex(token, "/"); slash >= 0 {
+		token = token[slash+1:]
+	}
+
+	return token == "pdftotext"
+}
+
+func workspaceInputPDFPath(token string) bool {
+	return strings.Contains(token, "/workspace/input/") && strings.HasSuffix(strings.ToLower(token), ".pdf")
+}
+
+func shellCommandBoundaryToken(token string) bool {
+	switch token {
+	case "|", "&", ";":
+		return true
+	default:
+		return false
+	}
+}
+
+func shellRedirectionToken(token string) bool {
+	switch token {
+	case ">", ">>", "<", "<<":
+		return true
+	default:
+		return false
+	}
+}
+
+func allDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+
+	return true
+}
+
+func shellLikeTokens(command string) []string {
+	tokenizer := shellLikeTokenizer{}
+	for _, char := range command {
+		tokenizer.write(char)
+	}
+
+	return tokenizer.tokens()
+}
+
+type shellLikeTokenizer struct {
+	items   []string
+	current strings.Builder
+	quote   rune
+	escaped bool
+}
+
+func (t *shellLikeTokenizer) write(char rune) {
+	if t.writeEscaped(char) {
+		return
+	}
+	if t.startEscape(char) {
+		return
+	}
+	if t.writeQuoted(char) {
+		return
+	}
+	t.writeUnquoted(char)
+}
+
+func (t *shellLikeTokenizer) writeEscaped(char rune) bool {
+	if !t.escaped {
+		return false
+	}
+	t.current.WriteRune(char)
+	t.escaped = false
+
+	return true
+}
+
+func (t *shellLikeTokenizer) startEscape(char rune) bool {
+	if char != '\\' || t.quote == '\'' {
+		return false
+	}
+	t.escaped = true
+
+	return true
+}
+
+func (t *shellLikeTokenizer) writeQuoted(char rune) bool {
+	if t.quote == 0 {
+		return false
+	}
+	if char == t.quote {
+		t.quote = 0
+
+		return true
+	}
+	t.current.WriteRune(char)
+
+	return true
+}
+
+func (t *shellLikeTokenizer) writeUnquoted(char rune) {
+	switch char {
+	case '\'', '"':
+		t.quote = char
+	case ' ', '\t', '\n', '\r':
+		t.flush()
+	case '|', '&', ';', '>', '<':
+		t.flush()
+		t.items = append(t.items, string(char))
+	default:
+		t.current.WriteRune(char)
+	}
+}
+
+func (t *shellLikeTokenizer) tokens() []string {
+	if t.escaped {
+		t.current.WriteRune('\\')
+	}
+	t.flush()
+
+	return t.items
+}
+
+func (t *shellLikeTokenizer) flush() {
+	if t.current.Len() == 0 {
+		return
+	}
+	t.items = append(t.items, t.current.String())
+	t.current.Reset()
 }
 
 func sandboxExecCommandUsesNumericalSolver(command string) bool {
@@ -850,11 +1196,11 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 	}
 	session.toolCallCount++
 	session.recordToolCall(parsed.Tool, parsed.Arguments, result.Content, result.IsError, startedAt, endedAt)
-	session.recordSandboxExecResult(parsed.Tool, result)
+	session.recordSandboxExecResult(parsed.Tool, parsed.Arguments, result)
 
 	session.turns = append(session.turns, toolResultTurn([]outbound.ModelPart{{
 		Kind:       outbound.ModelPartKindToolResult,
-		Text:       buildToolObservation(parsed.Tool, result),
+		Text:       buildToolObservation(parsed.Tool, parsed.Arguments, result),
 		ToolName:   parsed.Tool,
 		IsError:    result.IsError,
 		ToolCallID: legacyToolCallID(parsed.Tool),
@@ -890,6 +1236,15 @@ func (r *Runner) handleNativeToolCalls(
 		if sandboxExecCommandUsesUnverifiedNumericalSolve(call.Name, call.Arguments) {
 			return handleUnverifiedNumericalSandboxExecToolCall(session, turn, call.Name, turn.content)
 		}
+		if sandboxExecCommandWritesReadOnlyPDFTextOutput(call.Name, call.Arguments) {
+			return handleReadOnlyPDFTextOutputSandboxExecToolCall(session, turn, call.Name, turn.content)
+		}
+		if sandboxExecCommandRepeatsFailedCommand(session, call.Name, call.Arguments) {
+			return handleRepeatedFailedSandboxExecToolCall(session, turn, call.Name, turn.content)
+		}
+		if sandboxExecCommandRepeatsSuccessfulCommand(session, call.Name, call.Arguments) {
+			return handleRepeatedSuccessfulSandboxExecToolCall(session, turn, call.Name, turn.content)
+		}
 	}
 
 	session.recordTurn(TurnRecord{
@@ -924,10 +1279,10 @@ func (r *Runner) handleNativeToolCalls(
 		}
 		session.toolCallCount++
 		session.recordToolCall(call.Name, call.Arguments, result.Content, result.IsError, startedAt, endedAt)
-		session.recordSandboxExecResult(call.Name, result)
+		session.recordSandboxExecResult(call.Name, call.Arguments, result)
 		resultParts = append(resultParts, outbound.ModelPart{
 			Kind:       outbound.ModelPartKindToolResult,
-			Text:       buildToolObservation(call.Name, result),
+			Text:       buildToolObservation(call.Name, call.Arguments, result),
 			ToolCallID: call.ID,
 			ToolName:   call.Name,
 			IsError:    result.IsError,

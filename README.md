@@ -454,7 +454,7 @@ Provider adapters map that request into each provider's strongest native shape:
 
 ## Workspace And Files
 
-The current MVP supports prompt-only JSON runs and multipart runs with already-authorized uploaded text files. The CLI can expand selected directories and common archives into multipart file uploads. `repository_url` and `branch` are metadata only.
+The current MVP supports prompt-only JSON runs and multipart runs with already-authorized uploaded files. The CLI can expand selected directories and common archives into multipart file uploads. `repository_url` and `branch` are metadata only.
 
 Product applications own file authorization, file selection, and product ACLs before submitting a run. AgentPool creates an ephemeral per-run temp workspace for every run. Prompt-only runs get an empty workspace; uploaded-file runs get a workspace populated with the selected files.
 
@@ -475,7 +475,7 @@ curl -sS -X POST http://localhost:8080/v1/runs \
   -F 'files=@internal/application/workflow/worker.go'
 ```
 
-Uploaded files are currently limited to UTF-8 text files with safe relative names, at most 500 files, 2 MiB per file, and 25 MiB total. The HTTP multipart body limit is 32 MiB. Supported names and extensions include `.txt`, `.md`, `.json`, `.yaml`, `.yml`, `.go`, `.py`, `.js`, `.ts`, `.tsx`, `.jsx`, `.html`, `.css`, `.sh`, `.toml`, `.mod`, `.sum`, `.env.example`, `.gitignore`, `.dockerignore`, `Makefile`, and `Dockerfile`.
+Uploaded files must use safe relative names and are currently limited to at most 500 files, 50 MiB per file, and 200 MiB total. The HTTP multipart body limit is 256 MiB. Text-like uploads must be UTF-8. Supported text names and extensions include `.txt`, `.md`, `.csv`, `.json`, `.yaml`, `.yml`, `.xml`, `.go`, `.py`, `.js`, `.ts`, `.tsx`, `.jsx`, `.html`, `.css`, `.sh`, `.toml`, `.mod`, `.sum`, `.env.example`, `.gitignore`, `.dockerignore`, `Makefile`, and `Dockerfile`. Supported document and image extensions include `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx`, `.odt`, `.ods`, `.odp`, `.rtf`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.tif`, `.tiff`, `.bmp`, and `.heic`.
 
 AgentPool does not mutate run inputs or product files. The writable `/workspace/work` area is ephemeral run-local storage during execution. Before cleanup, AgentPool captures up to 100 regular files from `/workspace/work` as in-memory artifacts, with a 1 MiB per-file limit and 10 MiB total limit. Directories and symlinks are not captured.
 

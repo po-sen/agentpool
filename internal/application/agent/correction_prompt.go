@@ -111,6 +111,36 @@ Do not use an arbitrary initial guess and print only the solver candidate.
 Return exactly one JSON object.`
 }
 
+func buildSandboxExecReadOnlyPDFTextOutputCorrectionMessage() string {
+	return `Tool call error:
+The previous pdftotext command would write its default .txt output next to a read-only /workspace/input PDF.
+Your next response must be a sandbox_exec tool_call, not final.
+Use pdftotext with "-" to write text to stdout, or write the text output under /workspace/work.
+Quote paths that contain spaces or non-ASCII characters.
+Example: pdftotext '/workspace/input/manual.pdf' - | grep -i 'keyword'
+Return exactly one JSON object.`
+}
+
+func buildSandboxExecRepeatedFailedCommandCorrectionMessage() string {
+	return `Tool call error:
+The previous sandbox_exec command failed, and the next tool call repeated the same command unchanged.
+Your next response must be a sandbox_exec tool_call, not final.
+Call sandbox_exec with a materially corrected command.
+For PDF searches, avoid exact-string-only grep loops; suppress noisy pdftotext warnings with 2>/dev/null and search broader relevant terms across all PDFs.
+Avoid broad one-character terms such as water/fire alone.
+Example shape: for f in /workspace/input/*.pdf; do printf 'FILE:%s\n' "$f"; pdftotext "$f" - 2>/dev/null | grep -nEi 'term1|term2|term3' | head -20; done
+Return exactly one JSON object.`
+}
+
+func buildSandboxExecRepeatedSuccessfulCommandCorrectionMessage() string {
+	return `Tool call error:
+The previous sandbox_exec command already succeeded, and the next tool call repeated the same command unchanged.
+Your next response must be a final answer, not a tool_call.
+Use the existing tool output as evidence; cite file names/locations if requested.
+Return {"type":"final","summary":"..."}.
+Return exactly one JSON object.`
+}
+
 func buildSandboxExecErrorFinalCorrectionMessage() string {
 	return `Tool call error:
 The previous sandbox_exec command failed, so the exact or verifiable answer is not verified yet.

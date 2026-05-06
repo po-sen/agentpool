@@ -38,7 +38,10 @@ const (
 	toolCallActionHint = `Return {"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}`
 )
 
-const actionFieldArguments = "arguments"
+const (
+	actionFieldArguments = "arguments"
+	actionFieldSummary   = "summary"
+)
 
 type action struct {
 	Type      actionType
@@ -229,6 +232,9 @@ func normalizeTextToolCallObject(raw map[string]any) map[string]any {
 		return raw
 	}
 
+	if providerStyleFinalObject(raw) {
+		return normalizedFinalRaw(raw)
+	}
 	if toolName := providerStyleToolCallName(raw); toolName != "" {
 		return normalizedToolCallRaw(raw, toolName)
 	}
@@ -237,6 +243,30 @@ func normalizeTextToolCallObject(raw map[string]any) map[string]any {
 	}
 
 	return raw
+}
+
+func providerStyleFinalObject(raw map[string]any) bool {
+	if !rawHasOnlyFields(raw, "name", actionFieldSummary) {
+		return false
+	}
+	name, ok := raw["name"].(string)
+	if !ok || !strings.EqualFold(strings.TrimSpace(name), string(actionTypeFinal)) {
+		return false
+	}
+	if _, ok := scalarToString(raw[actionFieldSummary]); !ok {
+		return false
+	}
+
+	return true
+}
+
+func normalizedFinalRaw(raw map[string]any) map[string]any {
+	normalized := map[string]any{
+		"type":             string(actionTypeFinal),
+		actionFieldSummary: raw[actionFieldSummary],
+	}
+
+	return normalized
 }
 
 func normalizedToolCallRaw(raw map[string]any, toolName string) map[string]any {
@@ -328,11 +358,11 @@ func rawHasOnlyFields(raw map[string]any, fields ...string) bool {
 }
 
 func parseFinalAction(raw map[string]any) (action, *actionParseError) {
-	if parseErr := rejectUnknownFields(raw, map[string]struct{}{"type": {}, "summary": {}}); parseErr != nil {
+	if parseErr := rejectUnknownFields(raw, map[string]struct{}{"type": {}, actionFieldSummary: {}}); parseErr != nil {
 		return action{}, parseErr
 	}
 
-	value, ok := raw["summary"]
+	value, ok := raw[actionFieldSummary]
 	if !ok {
 		return action{}, newActionParseError(
 			actionParseCodeMissingSummary,

@@ -180,6 +180,42 @@ func TestRunnerFormatsCommandResult(t *testing.T) {
 	}
 }
 
+func TestFormatCommandResultForCommandCompactsPDFToTextWarnings(t *testing.T) {
+	content := formatCommandResultForCommand("pdftotext /workspace/input/manual.pdf -", outbound.SandboxCommandResult{
+		Stderr: strings.Join([]string{
+			"Syntax Error: Missing language pack for 'Adobe-Japan1' mapping",
+			"Syntax Error: Unknown font tag 'C0_1'",
+			"real error",
+			"",
+		}, "\n"),
+		ExitCode: 1,
+	}, 1000)
+
+	for _, want := range []string{
+		"exit_code: 1",
+		"pdftotext warnings omitted: 2 line(s)",
+		"real error",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("content = %q, want %q", content, want)
+		}
+	}
+	if strings.Contains(content, "Missing language pack") {
+		t.Fatalf("content = %q, want language-pack warning omitted", content)
+	}
+}
+
+func TestFormatCommandResultForCommandKeepsNonPDFTextStderr(t *testing.T) {
+	content := formatCommandResultForCommand("python3 script.py", outbound.SandboxCommandResult{
+		Stderr:   "Syntax Error: bad script\n",
+		ExitCode: 1,
+	}, 1000)
+
+	if !strings.Contains(content, "Syntax Error: bad script") {
+		t.Fatalf("content = %q, want non-pdftotext stderr preserved", content)
+	}
+}
+
 func TestFormatCommandResultPreservesStderrWithLargeStdout(t *testing.T) {
 	content := formatCommandResult(outbound.SandboxCommandResult{
 		Stdout: strings.Repeat("o", 1000),

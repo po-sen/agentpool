@@ -99,6 +99,14 @@ func TestParseActionParsesProviderStyleToolCallText(t *testing.T) {
 	}
 }
 
+func TestParseActionParsesProviderStyleFinalText(t *testing.T) {
+	result := parseAction(`{"name":"final","summary":"done"}`)
+	assertValidAction(t, result, actionTypeFinal)
+	if result.action.Summary != "done" {
+		t.Fatalf("Summary = %q, want done", result.action.Summary)
+	}
+}
+
 func TestParseActionParsesToolCallWithoutTypeText(t *testing.T) {
 	result := parseAction(`{"tool":"workspace","arguments":{"operation":"list"}}`)
 	assertValidAction(t, result, actionTypeToolCall)
@@ -112,6 +120,11 @@ func TestParseActionParsesToolCallWithoutTypeText(t *testing.T) {
 
 func TestParseActionRejectsProviderStyleToolCallTextWithExtraFields(t *testing.T) {
 	result := parseAction(`{"name":"sandbox_exec","arguments":{"command":"pwd"},"extra":"ignored"}`)
+	assertProtocolErrorCode(t, result, actionParseCodeMissingType)
+}
+
+func TestParseActionRejectsProviderStyleFinalTextWithExtraFields(t *testing.T) {
+	result := parseAction(`{"name":"final","summary":"done","extra":"ignored"}`)
 	assertProtocolErrorCode(t, result, actionParseCodeMissingType)
 }
 

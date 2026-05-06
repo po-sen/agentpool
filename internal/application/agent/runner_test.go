@@ -109,10 +109,10 @@ func TestRunnerRecordsProviderRequestMessagesFromModelResponse(t *testing.T) {
 	assertMessage(t, messages[1], "user", "do work")
 }
 
-func TestNewRunnerUsesEightDefaultMaxTurns(t *testing.T) {
+func TestNewRunnerUsesSixteenDefaultMaxTurns(t *testing.T) {
 	runner := NewRunner(nil, newFakeToolRunner())
-	if runner.maxTurns != 8 {
-		t.Fatalf("maxTurns = %d, want 8", runner.maxTurns)
+	if runner.maxTurns != 16 {
+		t.Fatalf("maxTurns = %d, want 16", runner.maxTurns)
 	}
 }
 
@@ -140,10 +140,11 @@ func TestRunnerExposesSandboxVerificationPolicyToModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "exact or verifiable answer")
-	assertInstruction(t, model.requests[0], "call sandbox_exec before final")
-	assertInstruction(t, model.requests[0], "Do not guess exact answers when sandbox_exec can verify them.")
-	assertInstruction(t, model.requests[0], "arithmetic, counts, searches, file content inspection")
+	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "exact/verifiable tasks")
+	assertInstruction(t, model.requests[0], "call it before final")
+	assertInstruction(t, model.requests[0], "do not guess answers it can verify.")
+	assertInstruction(t, model.requests[0], "arithmetic, counts, searches, file inspection")
+	assertInstruction(t, model.requests[0], "PDF/Office/images")
 }
 
 func TestRunnerReturnsJSONFinalActionSummary(t *testing.T) {
@@ -598,6 +599,158 @@ func TestSandboxExecCommandUsesUnverifiedNumericalSolve(t *testing.T) {
 	}
 }
 
+func TestRunnerRejectsPDFToTextDefaultOutputInReadOnlyInputAndContinues(t *testing.T) {
+	badCommand := `pdftotext /workspace/input/manual.pdf | grep -i 'keyword'`
+	correctedCommand := `pdftotext '/workspace/input/manual.pdf' - | grep -i 'keyword'`
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(badCommand, `"`, `\"`) + `","max_output_bytes":65536}}`},
+			{Content: `{"type":"final","summary":"Use the steamer setting."}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(correctedCommand, `"`, `\"`) + `","max_output_bytes":65536}}`},
+			{Content: `{"type":"final","summary":"Use the steamer setting, based on manual page 12."}`},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
+	})
+	tools.results = map[string]outbound.ToolResult{
+		"sandbox_exec": {Content: "exit_code: 0\nstdout:\npage 12 steamer setting\n"},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "find cooking instructions in the manuals"},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspaceWithFiles(),
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "Use the steamer setting, based on manual page 12." {
+		t.Fatalf("summary = %q, want corrected final", result.Summary)
+	}
+	if result.ToolCallCount != 1 {
+		t.Fatalf("ToolCallCount = %d, want only corrected command", result.ToolCallCount)
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want only corrected command", len(tools.calls))
+	}
+	if tools.calls[0].Arguments["command"] != correctedCommand {
+		t.Fatalf("sandbox_exec command = %q, want corrected command", tools.calls[0].Arguments["command"])
+	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusInvalidToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+		message:    "sandbox_exec pdftotext command would write beside read-only input",
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:              2,
+		status:             run.AgentTurnStatusProtocolError,
+		actionType:         run.AgentTurnActionTypeFinal,
+		message:            "final answer attempted after invalid sandbox_exec pdftotext command",
+		correctionContains: "pdftotext",
+		responsePreview:    "Use the steamer setting.",
+	})
+	assertTurn(t, result.AgentTurns, 2, wantTurn{
+		index:      3,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+	})
+	correction := requestMessages(model.requests[1])
+	assertMessage(t, correction[len(correction)-1], "runtime", "read-only /workspace/input PDF")
+	assertMessage(t, correction[len(correction)-1], "runtime", `pdftotext '/workspace/input/manual.pdf' -`)
+	finalCorrection := requestMessages(model.requests[2])
+	assertMessage(t, finalCorrection[len(finalCorrection)-1], "runtime", "read-only /workspace/input PDF")
+}
+
+func TestSandboxExecCommandWritesReadOnlyPDFTextOutput(t *testing.T) {
+	tests := []struct {
+		name    string
+		tool    string
+		command string
+		want    bool
+	}{
+		{
+			name:    "pdftotext default output next to input",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext /workspace/input/manual.pdf | grep -i keyword`,
+			want:    true,
+		},
+		{
+			name:    "quoted input path default output",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext '/workspace/input/manual with spaces.pdf'`,
+			want:    true,
+		},
+		{
+			name:    "option then default output",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext -layout /workspace/input/manual.pdf | grep -i keyword`,
+			want:    true,
+		},
+		{
+			name:    "stdout output",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext '/workspace/input/manual.pdf' - | grep -i keyword`,
+			want:    false,
+		},
+		{
+			name:    "workspace work output",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext '/workspace/input/manual.pdf' /workspace/work/manual.txt`,
+			want:    false,
+		},
+		{
+			name:    "relative output in workdir",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext '/workspace/input/manual.pdf' manual.txt`,
+			want:    false,
+		},
+		{
+			name:    "explicit output under read only input",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext '/workspace/input/manual.pdf' /workspace/input/manual.txt`,
+			want:    true,
+		},
+		{
+			name:    "redirection does not change pdftotext default output",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext /workspace/input/manual.pdf > manual.txt`,
+			want:    true,
+		},
+		{
+			name:    "non input pdf",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext /workspace/work/manual.pdf | grep -i keyword`,
+			want:    false,
+		},
+		{
+			name:    "different tool",
+			tool:    "workspace",
+			command: `pdftotext /workspace/input/manual.pdf | grep -i keyword`,
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sandboxExecCommandWritesReadOnlyPDFTextOutput(tt.tool, map[string]string{"command": tt.command})
+			if got != tt.want {
+				t.Fatalf("sandboxExecCommandWritesReadOnlyPDFTextOutput() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunnerRequiresSuccessfulSandboxExecAfterSandboxErrorBeforeFinal(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
@@ -678,6 +831,127 @@ func TestRunnerRequiresSuccessfulSandboxExecAfterSandboxErrorBeforeFinal(t *test
 	}
 	correction := requestMessages(model.requests[2])[len(requestMessages(model.requests[2]))-1]
 	assertMessage(t, correction, "runtime", "previous sandbox_exec command failed")
+}
+
+func TestRunnerRejectsRepeatedFailedSandboxExecCommandAndContinues(t *testing.T) {
+	failedCommand := `pdftotext /workspace/input/manual.pdf - | grep 'exact phrase'`
+	correctedCommand := `pdftotext /workspace/input/manual.pdf - 2>/dev/null | grep -Ei 'steam|dumpling|cook'`
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(failedCommand, `"`, `\"`) + `"}}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(failedCommand, `"`, `\"`) + `"}}`},
+			{Content: `{"type":"final","summary":"Use the steamer setting."}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(correctedCommand, `"`, `\"`) + `"}}`},
+			{Content: `{"type":"final","summary":"Use the steamer setting, based on manual page 12."}`},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
+	})
+	tools.resultQueue = []outbound.ToolResult{
+		{Content: "exit_code: 1\nstdout:\n\nstderr:\npdftotext warnings omitted: 120 line(s)\n", IsError: true},
+		{Content: "exit_code: 0\nstdout:\npage 12 steamer setting\n"},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "find cooking instructions in the manuals"},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspaceWithFiles(),
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "Use the steamer setting, based on manual page 12." {
+		t.Fatalf("summary = %q, want corrected final", result.Summary)
+	}
+	if len(tools.calls) != 2 {
+		t.Fatalf("len(tool calls) = %d, want failed and corrected commands only", len(tools.calls))
+	}
+	if tools.calls[0].Arguments["command"] != failedCommand {
+		t.Fatalf("first command = %q, want failed command", tools.calls[0].Arguments["command"])
+	}
+	if tools.calls[1].Arguments["command"] != correctedCommand {
+		t.Fatalf("second command = %q, want corrected command", tools.calls[1].Arguments["command"])
+	}
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusInvalidToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+		message:    "sandbox_exec repeated a failed command unchanged",
+	})
+	assertTurn(t, result.AgentTurns, 2, wantTurn{
+		index:              3,
+		status:             run.AgentTurnStatusProtocolError,
+		actionType:         run.AgentTurnActionTypeFinal,
+		message:            "final answer attempted after repeated failed sandbox_exec command",
+		correctionContains: "materially corrected command",
+		responsePreview:    "Use the steamer setting.",
+	})
+	correction := requestMessages(model.requests[2])
+	assertMessage(t, correction[len(correction)-1], "runtime", "exact-string-only grep loops")
+	assertMessage(t, correction[len(correction)-1], "runtime", "2>/dev/null")
+}
+
+func TestRunnerRejectsRepeatedSuccessfulSandboxExecCommandAndAllowsFinal(t *testing.T) {
+	command := `pdftotext /workspace/input/manual.pdf - 2>/dev/null | grep -Ei 'steam|dumpling|cook'`
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(command, `"`, `\"`) + `"}}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(command, `"`, `\"`) + `"}}`},
+			{Content: `{"type":"final","summary":"Steam it, based on manual page 12."}`},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
+	})
+	tools.resultQueue = []outbound.ToolResult{
+		{Content: "exit_code: 0\nstdout:\npage 12 steam frozen dumplings\n"},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "find cooking instructions in the manuals"},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspaceWithFiles(),
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "Steam it, based on manual page 12." {
+		t.Fatalf("summary = %q, want final based on first tool result", result.Summary)
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want repeated successful command to be blocked", len(tools.calls))
+	}
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusInvalidToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+		message:    "sandbox_exec repeated a successful command unchanged",
+	})
+	assertTurn(t, result.AgentTurns, 2, wantTurn{
+		index:      3,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+	})
+	correction := requestMessages(model.requests[2])
+	assertMessage(t, correction[len(correction)-1], "runtime", "already succeeded")
+	assertMessage(t, correction[len(correction)-1], "runtime", "final answer, not a tool_call")
 }
 
 func TestRunnerCallsNativeToolAndReturnsFinalSummary(t *testing.T) {

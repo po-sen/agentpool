@@ -20,6 +20,22 @@ func TestTaskSpecValidateAcceptsTextAttachments(t *testing.T) {
 		Attachments: []TaskAttachment{
 			textAttachment("README.md", "# Demo\n"),
 			textAttachment("internal/main.go", "package main\n"),
+			textAttachment("data/table.csv", "a,b\n1,2\n"),
+		},
+	}
+
+	if err := task.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestTaskSpecValidateAcceptsDocumentAndImageAttachments(t *testing.T) {
+	task := TaskSpec{
+		Prompt: "inspect files",
+		Attachments: []TaskAttachment{
+			binaryAttachment("document.pdf", "application/pdf", []byte{0x25, 0x50, 0x44, 0x46, 0x00, 0xff}),
+			binaryAttachment("slides.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", []byte{0x50, 0x4b, 0x03, 0x04, 0x00}),
+			binaryAttachment("photo.png", "image/png", []byte{0x89, 0x50, 0x4e, 0x47, 0x00}),
 		},
 	}
 
@@ -72,7 +88,7 @@ func TestTaskSpecValidateRejectsUnsafeAttachmentFilenames(t *testing.T) {
 func TestTaskSpecValidateRejectsUnsupportedAttachmentExtension(t *testing.T) {
 	err := TaskSpec{
 		Prompt:      "do work",
-		Attachments: []TaskAttachment{textAttachment("document.pdf", "%PDF")},
+		Attachments: []TaskAttachment{textAttachment("program.exe", "MZ")},
 	}.Validate()
 	if !errors.Is(err, ErrUnsupportedAttachmentType) {
 		t.Fatalf("Validate() error = %v, want %v", err, ErrUnsupportedAttachmentType)
@@ -162,6 +178,15 @@ func textAttachment(filename string, content string) TaskAttachment {
 		Filename:  filename,
 		MediaType: "text/plain",
 		Content:   []byte(content),
+		SizeBytes: int64(len(content)),
+	}
+}
+
+func binaryAttachment(filename string, mediaType string, content []byte) TaskAttachment {
+	return TaskAttachment{
+		Filename:  filename,
+		MediaType: mediaType,
+		Content:   append([]byte(nil), content...),
 		SizeBytes: int64(len(content)),
 	}
 }

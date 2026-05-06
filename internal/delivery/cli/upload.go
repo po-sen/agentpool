@@ -16,14 +16,15 @@ import (
 
 const (
 	maxUploadFiles          = 500
-	maxUploadFileSizeBytes  = 2 << 20
-	maxTotalUploadSizeBytes = 25 << 20
+	maxUploadFileSizeBytes  = 50 << 20
+	maxTotalUploadSizeBytes = 200 << 20
 
 	formatUnsafeFilePath     = "unsafe file path: %s"
 	formatUploadFileTooLarge = "upload file exceeds %d bytes: %s"
 )
 
-var supportedUploadExtensions = map[string]struct{}{
+var textUploadExtensions = map[string]struct{}{
+	".csv":  {},
 	".css":  {},
 	".go":   {},
 	".html": {},
@@ -39,11 +40,35 @@ var supportedUploadExtensions = map[string]struct{}{
 	".ts":   {},
 	".tsx":  {},
 	".txt":  {},
+	".xml":  {},
 	".yaml": {},
 	".yml":  {},
 }
 
-var supportedUploadBasenames = map[string]struct{}{
+var binaryUploadExtensions = map[string]struct{}{
+	".bmp":  {},
+	".doc":  {},
+	".docx": {},
+	".gif":  {},
+	".heic": {},
+	".jpeg": {},
+	".jpg":  {},
+	".odp":  {},
+	".ods":  {},
+	".odt":  {},
+	".pdf":  {},
+	".png":  {},
+	".ppt":  {},
+	".pptx": {},
+	".rtf":  {},
+	".tif":  {},
+	".tiff": {},
+	".webp": {},
+	".xls":  {},
+	".xlsx": {},
+}
+
+var textUploadBasenames = map[string]struct{}{
 	".dockerignore": {},
 	".env.example":  {},
 	".gitignore":    {},
@@ -346,7 +371,7 @@ func (c *uploadCollector) addUpload(filename string, content []byte) error {
 	if len(content) > maxUploadFileSizeBytes {
 		return fmt.Errorf(formatUploadFileTooLarge, maxUploadFileSizeBytes, filename)
 	}
-	if !utf8.Valid(content) {
+	if uploadRequiresUTF8(filename) && !utf8.Valid(content) {
 		return fmt.Errorf("upload file must be UTF-8 text: %s", filename)
 	}
 	if _, ok := c.seen[filename]; ok {
@@ -480,10 +505,24 @@ func safeRelativeFilename(name string) bool {
 
 func supportedUploadName(filename string) bool {
 	base := strings.ToLower(path.Base(filename))
-	if _, ok := supportedUploadBasenames[base]; ok {
+	if _, ok := textUploadBasenames[base]; ok {
 		return true
 	}
-	_, ok := supportedUploadExtensions[strings.ToLower(path.Ext(filename))]
+	extension := strings.ToLower(path.Ext(filename))
+	if _, ok := textUploadExtensions[extension]; ok {
+		return true
+	}
+	_, ok := binaryUploadExtensions[extension]
+
+	return ok
+}
+
+func uploadRequiresUTF8(filename string) bool {
+	base := strings.ToLower(path.Base(filename))
+	if _, ok := textUploadBasenames[base]; ok {
+		return true
+	}
+	_, ok := textUploadExtensions[strings.ToLower(path.Ext(filename))]
 
 	return ok
 }

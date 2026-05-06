@@ -13,13 +13,14 @@ const MaxPromptLength = 8000
 const (
 	// MaxAttachmentCount is the maximum number of files accepted for one task.
 	MaxAttachmentCount = 500
-	// MaxAttachmentSizeBytes is the maximum size accepted for one uploaded text file.
-	MaxAttachmentSizeBytes int64 = 2 << 20
-	// MaxTotalAttachmentSizeBytes is the maximum total size accepted for all uploaded text files.
-	MaxTotalAttachmentSizeBytes int64 = 25 << 20
+	// MaxAttachmentSizeBytes is the maximum size accepted for one uploaded file.
+	MaxAttachmentSizeBytes int64 = 50 << 20
+	// MaxTotalAttachmentSizeBytes is the maximum total size accepted for all uploaded files.
+	MaxTotalAttachmentSizeBytes int64 = 200 << 20
 )
 
-var supportedAttachmentExtensions = map[string]struct{}{
+var textAttachmentExtensions = map[string]struct{}{
+	".csv":  {},
 	".css":  {},
 	".go":   {},
 	".html": {},
@@ -35,11 +36,35 @@ var supportedAttachmentExtensions = map[string]struct{}{
 	".ts":   {},
 	".tsx":  {},
 	".txt":  {},
+	".xml":  {},
 	".yaml": {},
 	".yml":  {},
 }
 
-var supportedAttachmentBasenames = map[string]struct{}{
+var binaryAttachmentExtensions = map[string]struct{}{
+	".bmp":  {},
+	".doc":  {},
+	".docx": {},
+	".gif":  {},
+	".heic": {},
+	".jpeg": {},
+	".jpg":  {},
+	".odp":  {},
+	".ods":  {},
+	".odt":  {},
+	".pdf":  {},
+	".png":  {},
+	".ppt":  {},
+	".pptx": {},
+	".rtf":  {},
+	".tif":  {},
+	".tiff": {},
+	".webp": {},
+	".xls":  {},
+	".xlsx": {},
+}
+
+var textAttachmentBasenames = map[string]struct{}{
 	".dockerignore": {},
 	".env.example":  {},
 	".gitignore":    {},
@@ -114,7 +139,7 @@ func (s TaskSpec) validateAttachments() error {
 	return nil
 }
 
-// Validate checks whether the attachment is safe for the current text-only runtime workspace.
+// Validate checks whether the attachment is safe for the runtime workspace.
 func (a TaskAttachment) Validate() error {
 	if err := validateAttachmentFilename(a.Filename); err != nil {
 		return err
@@ -131,7 +156,7 @@ func (a TaskAttachment) Validate() error {
 	if a.effectiveSize() > MaxAttachmentSizeBytes {
 		return ErrAttachmentTooLarge
 	}
-	if !utf8.Valid(a.Content) {
+	if attachmentRequiresUTF8(a.Filename) && !utf8.Valid(a.Content) {
 		return ErrAttachmentNotText
 	}
 
@@ -140,10 +165,24 @@ func (a TaskAttachment) Validate() error {
 
 func supportedAttachmentName(filename string) bool {
 	base := strings.ToLower(path.Base(filename))
-	if _, ok := supportedAttachmentBasenames[base]; ok {
+	if _, ok := textAttachmentBasenames[base]; ok {
 		return true
 	}
-	_, ok := supportedAttachmentExtensions[strings.ToLower(path.Ext(filename))]
+	extension := strings.ToLower(path.Ext(filename))
+	if _, ok := textAttachmentExtensions[extension]; ok {
+		return true
+	}
+	_, ok := binaryAttachmentExtensions[extension]
+
+	return ok
+}
+
+func attachmentRequiresUTF8(filename string) bool {
+	base := strings.ToLower(path.Base(filename))
+	if _, ok := textAttachmentBasenames[base]; ok {
+		return true
+	}
+	_, ok := textAttachmentExtensions[strings.ToLower(path.Ext(filename))]
 
 	return ok
 }

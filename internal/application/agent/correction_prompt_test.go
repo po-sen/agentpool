@@ -135,6 +135,64 @@ func TestBuildSandboxExecUnverifiedNumericalSolveCorrectionMessageRequiresResidu
 	}
 }
 
+func TestBuildSandboxExecReadOnlyPDFTextOutputCorrectionMessageRequiresStdoutOrWork(t *testing.T) {
+	message := buildSandboxExecReadOnlyPDFTextOutputCorrectionMessage()
+
+	for _, want := range []string{
+		"pdftotext command would write its default .txt output",
+		"read-only /workspace/input PDF",
+		"next response must be a sandbox_exec tool_call, not final",
+		`with "-" to write text to stdout`,
+		"write the text output under /workspace/work",
+		"Quote paths",
+		`pdftotext '/workspace/input/manual.pdf' -`,
+		"Return exactly one JSON object.",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
+func TestBuildSandboxExecRepeatedFailedCommandCorrectionMessageRequiresChangedCommand(t *testing.T) {
+	message := buildSandboxExecRepeatedFailedCommandCorrectionMessage()
+
+	for _, want := range []string{
+		"repeated the same command unchanged",
+		"next response must be a sandbox_exec tool_call, not final",
+		"materially corrected command",
+		"avoid exact-string-only grep loops",
+		"2>/dev/null",
+		"Avoid broad one-character terms",
+		"for f in /workspace/input/*.pdf",
+		"term1|term2|term3",
+		"head -20",
+		"broader relevant terms",
+		"Return exactly one JSON object.",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
+func TestBuildSandboxExecRepeatedSuccessfulCommandCorrectionMessageAllowsFinal(t *testing.T) {
+	message := buildSandboxExecRepeatedSuccessfulCommandCorrectionMessage()
+
+	for _, want := range []string{
+		"already succeeded",
+		"repeated the same command unchanged",
+		"next response must be a final answer, not a tool_call",
+		"Use the existing tool output as evidence",
+		`{"type":"final","summary":"..."}`,
+		"Return exactly one JSON object.",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
 func TestBuildPlaceholderToolArgumentCorrectionMessageUsesUploadedFiles(t *testing.T) {
 	message := buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
 		Placeholders:    []string{"command=<file_path>"},

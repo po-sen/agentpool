@@ -14,7 +14,7 @@ import (
 
 const (
 	maxJSONRequestBodyBytes      = 1 << 20
-	maxMultipartRequestBodyBytes = 32 << 20
+	maxMultipartRequestBodyBytes = 256 << 20
 
 	headerContentType    = "Content-Type"
 	messageRunIDRequired = "run id is required"
