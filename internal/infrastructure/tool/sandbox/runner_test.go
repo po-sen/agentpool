@@ -34,6 +34,12 @@ func TestRunnerAdvertisesOnlySandboxExec(t *testing.T) {
 	if len(tools[0].Arguments) != 3 {
 		t.Fatalf("arguments = %#v, want command, timeout_seconds, max_output_bytes", tools[0].Arguments)
 	}
+	if !strings.Contains(tools[0].Arguments[0].Description, "/workspace/work") {
+		t.Fatalf("command description = %q, want writable output guidance", tools[0].Arguments[0].Description)
+	}
+	if !strings.Contains(tools[0].Arguments[0].Description, "search first, then inspect nearby lines") {
+		t.Fatalf("command description = %q, want PDF search/context guidance", tools[0].Arguments[0].Description)
+	}
 }
 
 func TestRunnerDoesNotAdvertiseWithoutSandbox(t *testing.T) {

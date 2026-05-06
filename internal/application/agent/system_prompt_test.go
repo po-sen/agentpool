@@ -32,7 +32,7 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		"workspace: Lists or stats workspace paths without reading file contents.",
 		`operation (required): Operation to run. Supported values: "list" or "stat". Example: list`,
 		"sandbox_exec: Runs a command inside the sandbox from /workspace/work.",
-		`command (required): Run sandbox command. For PDFs, use pdftotext input.pdf - or /workspace/work output. Use python3/awk for decimals or roots; print residual. Example: python3 -c 'print(123 * 321)'`,
+		`command (required): Run sandbox command. For PDFs, use pdftotext with '-' or write outputs/scripts under /workspace/work; search first, then inspect nearby lines. Use python3/awk for decimals or roots; print residual. Example: python3 -c 'print(123 * 321)'`,
 		"timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10",
 	} {
 		assertPromptContains(t, prompt, want)
@@ -49,8 +49,7 @@ func TestBuildSystemPromptListsPriorityToolPolicy(t *testing.T) {
 		"If sandbox_exec is available for exact/verifiable tasks, call it before final;",
 		"do not guess answers it can verify.",
 		"Use sandbox_exec for arithmetic, counts, searches, file inspection, data transforms, tests, builds, linters, and code checks.",
-		"For PDF/Office/images, extract/convert/OCR; pdftotext uses \"-\" or /workspace/work.",
-		"For file answers, inspect nearby context, answer first, and cite file names/locations; do not only list hits.",
+		"For PDF/Office/images, extract/convert/OCR. For PDF QA, search first, inspect nearby context, write small scripts under /workspace/work if useful, never dump whole PDFs, then answer/cite or say missing.",
 		"Commands must compute or inspect the answer; do not echo an unverified guess.",
 		"Use shell arithmetic only for integer-only expressions; use python3/awk for decimals or numerical methods.",
 		"For equations or roots, use bisection/brentq and base final on output with a root candidate and residual.",
@@ -138,7 +137,7 @@ func testPromptTools() []outbound.ToolDefinition {
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        "command",
-					Description: "Run sandbox command. For PDFs, use pdftotext input.pdf - or /workspace/work output. Use python3/awk for decimals or roots; print residual.",
+					Description: "Run sandbox command. For PDFs, use pdftotext with '-' or write outputs/scripts under /workspace/work; search first, then inspect nearby lines. Use python3/awk for decimals or roots; print residual.",
 					Required:    true,
 					Example:     `python3 -c 'print(123 * 321)'`,
 				},

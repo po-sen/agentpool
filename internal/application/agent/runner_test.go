@@ -601,7 +601,7 @@ func TestSandboxExecCommandUsesUnverifiedNumericalSolve(t *testing.T) {
 
 func TestRunnerRejectsPDFToTextDefaultOutputInReadOnlyInputAndContinues(t *testing.T) {
 	badCommand := `pdftotext /workspace/input/manual.pdf | grep -i 'keyword'`
-	correctedCommand := `pdftotext '/workspace/input/manual.pdf' - | grep -i 'keyword'`
+	correctedCommand := `pdftotext '/workspace/input/manual.pdf' - | sed -n '1,40p'`
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
 			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(badCommand, `"`, `\"`) + `","max_output_bytes":65536}}`},
@@ -667,7 +667,7 @@ func TestRunnerRejectsPDFToTextDefaultOutputInReadOnlyInputAndContinues(t *testi
 	})
 	correction := requestMessages(model.requests[1])
 	assertMessage(t, correction[len(correction)-1], "runtime", "read-only /workspace/input PDF")
-	assertMessage(t, correction[len(correction)-1], "runtime", `pdftotext '/workspace/input/manual.pdf' -`)
+	assertMessage(t, correction[len(correction)-1], "runtime", "create your own small script under /workspace/work")
 	finalCorrection := requestMessages(model.requests[2])
 	assertMessage(t, finalCorrection[len(finalCorrection)-1], "runtime", "read-only /workspace/input PDF")
 }
@@ -746,6 +746,61 @@ func TestSandboxExecCommandWritesReadOnlyPDFTextOutput(t *testing.T) {
 			got := sandboxExecCommandWritesReadOnlyPDFTextOutput(tt.tool, map[string]string{"command": tt.command})
 			if got != tt.want {
 				t.Fatalf("sandboxExecCommandWritesReadOnlyPDFTextOutput() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSandboxExecCommandDumpsPDFTextToStdout(t *testing.T) {
+	tests := []struct {
+		name    string
+		tool    string
+		command string
+		want    bool
+	}{
+		{
+			name:    "full pdf stdout",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext /workspace/input/manual.pdf -`,
+			want:    true,
+		},
+		{
+			name:    "full pdf stdout with stderr redirection",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext /workspace/input/manual.pdf - 2>/dev/null`,
+			want:    true,
+		},
+		{
+			name:    "grep narrows stdout",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext /workspace/input/manual.pdf - 2>/dev/null | grep -nEi 'steam|cook' | head -20`,
+			want:    false,
+		},
+		{
+			name:    "sed narrows stdout",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext /workspace/input/manual.pdf - 2>/dev/null | sed -n '10,20p'`,
+			want:    false,
+		},
+		{
+			name:    "output file under work",
+			tool:    toolNameSandboxExec,
+			command: `pdftotext /workspace/input/manual.pdf /workspace/work/manual.txt`,
+			want:    false,
+		},
+		{
+			name:    "non sandbox tool",
+			tool:    "workspace",
+			command: `pdftotext /workspace/input/manual.pdf -`,
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sandboxExecCommandDumpsPDFTextToStdout(tt.tool, map[string]string{"command": tt.command})
+			if got != tt.want {
+				t.Fatalf("sandboxExecCommandDumpsPDFTextToStdout() = %t, want %t", got, tt.want)
 			}
 		})
 	}
@@ -835,7 +890,7 @@ func TestRunnerRequiresSuccessfulSandboxExecAfterSandboxErrorBeforeFinal(t *test
 
 func TestRunnerRejectsRepeatedFailedSandboxExecCommandAndContinues(t *testing.T) {
 	failedCommand := `pdftotext /workspace/input/manual.pdf - | grep 'exact phrase'`
-	correctedCommand := `pdftotext /workspace/input/manual.pdf - 2>/dev/null | grep -Ei 'steam|dumpling|cook'`
+	correctedCommand := `pdftotext /workspace/input/manual.pdf - 2>/dev/null | sed -n '1,80p'`
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
 			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(failedCommand, `"`, `\"`) + `"}}`},
@@ -896,24 +951,24 @@ func TestRunnerRejectsRepeatedFailedSandboxExecCommandAndContinues(t *testing.T)
 		responsePreview:    "Use the steamer setting.",
 	})
 	correction := requestMessages(model.requests[2])
-	assertMessage(t, correction[len(correction)-1], "runtime", "exact-string-only grep loops")
-	assertMessage(t, correction[len(correction)-1], "runtime", "2>/dev/null")
+	assertMessage(t, correction[len(correction)-1], "runtime", "exact-string-only loops")
+	assertMessage(t, correction[len(correction)-1], "runtime", "small /workspace/work script")
 }
 
 func TestRunnerRejectsRepeatedSuccessfulSandboxExecCommandAndAllowsFinal(t *testing.T) {
-	command := `pdftotext /workspace/input/manual.pdf - 2>/dev/null | grep -Ei 'steam|dumpling|cook'`
+	command := `python3 -c 'print(6 * 7)'`
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
 			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(command, `"`, `\"`) + `"}}`},
 			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(command, `"`, `\"`) + `"}}`},
-			{Content: `{"type":"final","summary":"Steam it, based on manual page 12."}`},
+			{Content: `{"type":"final","summary":"42"}`},
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
 		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
 	})
 	tools.resultQueue = []outbound.ToolResult{
-		{Content: "exit_code: 0\nstdout:\npage 12 steam frozen dumplings\n"},
+		{Content: "exit_code: 0\nstdout:\n42\n"},
 	}
 	runner := NewRunner(model, tools)
 
@@ -931,7 +986,7 @@ func TestRunnerRejectsRepeatedSuccessfulSandboxExecCommandAndAllowsFinal(t *test
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	if result.Summary != "Steam it, based on manual page 12." {
+	if result.Summary != "42" {
 		t.Fatalf("summary = %q, want final based on first tool result", result.Summary)
 	}
 	if len(tools.calls) != 1 {
@@ -952,6 +1007,115 @@ func TestRunnerRejectsRepeatedSuccessfulSandboxExecCommandAndAllowsFinal(t *test
 	correction := requestMessages(model.requests[2])
 	assertMessage(t, correction[len(correction)-1], "runtime", "already succeeded")
 	assertMessage(t, correction[len(correction)-1], "runtime", "final answer, not a tool_call")
+}
+
+func TestRunnerRequiresNearbyContextAfterPDFSearchHitsBeforeFinal(t *testing.T) {
+	searchCommand := `pdftotext /workspace/input/manual.pdf - 2>/dev/null | grep -nEi 'steam|dumpling|cook' | head -20`
+	contextCommand := `pdftotext /workspace/input/manual.pdf - 2>/dev/null | sed -n '500,540p'`
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(searchCommand, `"`, `\"`) + `"}}`},
+			{Content: `{"type":"final","summary":"The cooking method can be found in manual.pdf line 520."}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(contextCommand, `"`, `\"`) + `"}}`},
+			{Content: `{"type":"final","summary":"Steam the dumplings, based on manual.pdf near line 520."}`},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
+	})
+	tools.resultQueue = []outbound.ToolResult{
+		{Content: "exit_code: 0\nstdout:\n520:steam frozen dumplings\nstderr:\n"},
+		{Content: "exit_code: 0\nstdout:\nUse steam mode for frozen dumplings.\n"},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "find cooking instructions in the manuals"},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspaceWithFiles(),
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "Steam the dumplings, based on manual.pdf near line 520." {
+		t.Fatalf("summary = %q, want context-based final", result.Summary)
+	}
+	if len(tools.calls) != 2 {
+		t.Fatalf("len(tool calls) = %d, want search and context commands", len(tools.calls))
+	}
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:              2,
+		status:             run.AgentTurnStatusProtocolError,
+		actionType:         run.AgentTurnActionTypeFinal,
+		message:            "final answer attempted after PDF search hits without nearby context",
+		correctionContains: "nearby context",
+		responsePreview:    "The cooking method can be found in manual.pdf line 520.",
+	})
+	assertTurn(t, result.AgentTurns, 3, wantTurn{
+		index:      4,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+	})
+	correction := requestMessages(model.requests[2])
+	assertMessage(t, correction[len(correction)-1], "runtime", "search hit lines only")
+}
+
+func TestRunnerRejectsFinalThatIgnoresRequestedCJKLanguage(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"type":"final","summary":"The answer is in English."}`},
+			{Content: `{"type":"final","summary":"這是中文回答。"}`},
+		},
+	}
+	runner := NewRunner(model, newFakeToolRunnerWithTools(nil))
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "請用中文回答"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "這是中文回答。" {
+		t.Fatalf("summary = %q, want corrected Chinese final", result.Summary)
+	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:              1,
+		status:             run.AgentTurnStatusProtocolError,
+		actionType:         run.AgentTurnActionTypeFinal,
+		message:            "final answer did not preserve requested language",
+		correctionContains: "requested language",
+		responsePreview:    "The answer is in English.",
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+	})
+}
+
+func TestBuildInitialTurnsAddsChineseResponseLanguageForCJKPrompt(t *testing.T) {
+	turns := buildInitialTurns(run.TaskSpec{Prompt: "請讀文件"})
+	if len(turns) != 1 || len(turns[0].Parts) == 0 {
+		t.Fatalf("turns = %#v, want initial user turn", turns)
+	}
+	got := turns[0].Parts[0].Text
+	if !strings.Contains(got, "Response language: 請用中文回答 final.summary") {
+		t.Fatalf("prompt = %q, want Chinese response language guidance", got)
+	}
+}
+
+func TestBuildInitialTurnsDoesNotAddChineseResponseLanguageForNonCJKPrompt(t *testing.T) {
+	turns := buildInitialTurns(run.TaskSpec{Prompt: "Read the file"})
+	if got := turns[0].Parts[0].Text; strings.Contains(got, "Response language:") {
+		t.Fatalf("prompt = %q, want no extra response language guidance", got)
+	}
 }
 
 func TestRunnerCallsNativeToolAndReturnsFinalSummary(t *testing.T) {

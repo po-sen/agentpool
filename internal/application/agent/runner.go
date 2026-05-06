@@ -112,6 +112,7 @@ type runSession struct {
 	sandboxExecErrored               bool
 	lastErroredSandboxExecCommand    string
 	lastSuccessfulSandboxExecCommand string
+	pdfSearchContextRequired         bool
 	sandboxExecRetryRequired         bool
 	sandboxExecRetryMessage          string
 	sandboxExecRetryCorrection       string
@@ -343,6 +344,32 @@ func (r *Runner) handleAction(
 
 			return session.partialResult(), false, newAgentError(ErrorCodeFinalSummaryInvalid, "", err)
 		}
+		if session.pdfSearchContextRequired {
+			message := "final answer attempted after PDF search hits without nearby context"
+			correctionMessage := buildPDFSearchContextRequiredCorrectionMessage()
+			session.recordTurn(TurnRecord{
+				Index:             turn.index,
+				Status:            run.AgentTurnStatusProtocolError,
+				ActionType:        run.AgentTurnActionTypeFinal,
+				Message:           message,
+				RequestMessages:   turn.requestMessages,
+				RawResponse:       turn.content,
+				ResponseFormat:    turn.responseFormat,
+				CorrectionMessage: correctionMessage,
+				ResponsePreview:   previewModelResponse(parsed.Summary),
+				StartedAt:         turn.startedAt,
+				EndedAt:           turn.endedAt,
+			})
+			session.turns = append(session.turns,
+				assistantAttemptTurn(turn.content),
+				runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
+			)
+			session.sandboxExecRetryRequired = true
+			session.sandboxExecRetryMessage = message
+			session.sandboxExecRetryCorrection = correctionMessage
+
+			return RunResult{}, false, nil
+		}
 		if session.sandboxExecErrored || session.sandboxExecRetryRequired {
 			message := "final answer attempted after failed sandbox_exec"
 			correctionMessage := buildSandboxExecErrorFinalCorrectionMessage()
@@ -356,6 +383,29 @@ func (r *Runner) handleAction(
 					correctionMessage = buildSandboxExecStaticOutputCorrectionMessage()
 				}
 			}
+			session.recordTurn(TurnRecord{
+				Index:             turn.index,
+				Status:            run.AgentTurnStatusProtocolError,
+				ActionType:        run.AgentTurnActionTypeFinal,
+				Message:           message,
+				RequestMessages:   turn.requestMessages,
+				RawResponse:       turn.content,
+				ResponseFormat:    turn.responseFormat,
+				CorrectionMessage: correctionMessage,
+				ResponsePreview:   previewModelResponse(parsed.Summary),
+				StartedAt:         turn.startedAt,
+				EndedAt:           turn.endedAt,
+			})
+			session.turns = append(session.turns,
+				assistantAttemptTurn(turn.content),
+				runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
+			)
+
+			return RunResult{}, false, nil
+		}
+		if finalSummaryIgnoresRequestedLanguage(session.request.Task.Prompt, parsed.Summary) {
+			message := "final answer did not preserve requested language"
+			correctionMessage := buildFinalUserLanguageCorrectionMessage()
 			session.recordTurn(TurnRecord{
 				Index:             turn.index,
 				Status:            run.AgentTurnStatusProtocolError,
@@ -406,10 +456,16 @@ func (r *Runner) handleAction(
 		if sandboxExecCommandWritesReadOnlyPDFTextOutput(parsed.Tool, parsed.Arguments) {
 			return handleReadOnlyPDFTextOutputSandboxExecToolCall(session, turn, parsed.Tool, turn.content)
 		}
+		if sandboxExecCommandDumpsPDFTextToStdout(parsed.Tool, parsed.Arguments) {
+			return handlePDFDumpSandboxExecToolCall(session, turn, parsed.Tool, turn.content)
+		}
 		if sandboxExecCommandRepeatsFailedCommand(session, parsed.Tool, parsed.Arguments) {
 			return handleRepeatedFailedSandboxExecToolCall(session, turn, parsed.Tool, turn.content)
 		}
 		if sandboxExecCommandRepeatsSuccessfulCommand(session, parsed.Tool, parsed.Arguments) {
+			if session.pdfSearchContextRequired {
+				return handlePDFSearchContextRequiredSandboxExecToolCall(session, turn, parsed.Tool, turn.content)
+			}
 			return handleRepeatedSuccessfulSandboxExecToolCall(session, turn, parsed.Tool, turn.content)
 		}
 
@@ -451,7 +507,7 @@ func (r *Runner) handleAction(
 
 func buildInitialTurns(task run.TaskSpec) []outbound.ModelTurn {
 	parts := []outbound.ModelPart{
-		{Kind: outbound.ModelPartKindTaskPrompt, Text: task.Prompt},
+		{Kind: outbound.ModelPartKindTaskPrompt, Text: taskPromptWithResponseLanguage(task.Prompt)},
 	}
 	if workspaceContext := buildWorkspaceContextPart(task); workspaceContext != "" {
 		parts = append(parts, outbound.ModelPart{
@@ -461,6 +517,14 @@ func buildInitialTurns(task run.TaskSpec) []outbound.ModelTurn {
 	}
 
 	return []outbound.ModelTurn{{Role: outbound.ModelRoleUser, Parts: parts}}
+}
+
+func taskPromptWithResponseLanguage(prompt string) string {
+	if !containsCJK(prompt) {
+		return prompt
+	}
+
+	return strings.TrimRight(prompt, "\n") + "\n\nResponse language: 請用中文回答 final.summary，並保留使用者原詞。"
 }
 
 func assistantTurn(content string) outbound.ModelTurn {
@@ -579,6 +643,12 @@ func (s *runSession) recordSandboxExecResult(tool string, arguments map[string]s
 	if !result.IsError {
 		s.lastErroredSandboxExecCommand = ""
 		s.lastSuccessfulSandboxExecCommand = strings.TrimSpace(arguments[toolArgumentCommand])
+		if sandboxExecPDFSearchSucceeded(tool, arguments, result) {
+			s.pdfSearchContextRequired = true
+
+			return
+		}
+		s.pdfSearchContextRequired = false
 		s.sandboxExecRetryRequired = false
 		s.sandboxExecRetryMessage = ""
 		s.sandboxExecRetryCorrection = ""
@@ -599,6 +669,38 @@ func validateFinalSummary(summary string) error {
 	}
 
 	return nil
+}
+
+func finalSummaryIgnoresRequestedLanguage(prompt string, summary string) bool {
+	return containsCJK(prompt) && !containsCJK(summary) && containsLatinWord(summary)
+}
+
+func containsCJK(value string) bool {
+	for _, char := range value {
+		if (char >= '\u3400' && char <= '\u9fff') ||
+			(char >= '\uf900' && char <= '\ufaff') {
+			return true
+		}
+	}
+
+	return false
+}
+
+func containsLatinWord(value string) bool {
+	length := 0
+	for _, char := range value {
+		if (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z') {
+			length++
+			if length >= 3 {
+				return true
+			}
+
+			continue
+		}
+		length = 0
+	}
+
+	return false
 }
 
 func handleUnavailableToolCall(
@@ -764,6 +866,38 @@ func handleReadOnlyPDFTextOutputSandboxExecToolCall(
 	return RunResult{}, false, nil
 }
 
+func handlePDFDumpSandboxExecToolCall(
+	session *runSession,
+	turn modelTurnContext,
+	toolName string,
+	content string,
+) (RunResult, bool, error) {
+	message := "sandbox_exec pdftotext command would dump full PDF text"
+	correctionMessage := buildSandboxExecPDFDumpCorrectionMessage()
+	session.recordTurn(TurnRecord{
+		Index:           turn.index,
+		Status:          run.AgentTurnStatusInvalidToolCall,
+		ActionType:      run.AgentTurnActionTypeToolCall,
+		ToolName:        toolName,
+		Message:         message,
+		RequestMessages: turn.requestMessages,
+		RawResponse:     turn.content,
+		ResponseFormat:  turn.responseFormat,
+		ResponsePreview: previewModelResponse(turn.content),
+		StartedAt:       turn.startedAt,
+		EndedAt:         turn.endedAt,
+	})
+	session.turns = append(session.turns,
+		assistantAttemptTurn(content),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
+	)
+	session.sandboxExecRetryRequired = true
+	session.sandboxExecRetryMessage = "final answer attempted after invalid sandbox_exec pdftotext dump command"
+	session.sandboxExecRetryCorrection = correctionMessage
+
+	return RunResult{}, false, nil
+}
+
 func handleRepeatedFailedSandboxExecToolCall(
 	session *runSession,
 	turn modelTurnContext,
@@ -825,6 +959,39 @@ func handleRepeatedSuccessfulSandboxExecToolCall(
 	return RunResult{}, false, nil
 }
 
+func handlePDFSearchContextRequiredSandboxExecToolCall(
+	session *runSession,
+	turn modelTurnContext,
+	toolName string,
+	content string,
+) (RunResult, bool, error) {
+	message := "sandbox_exec repeated PDF search hits without nearby context"
+	correctionMessage := buildPDFSearchContextRequiredCorrectionMessage()
+	session.recordTurn(TurnRecord{
+		Index:             turn.index,
+		Status:            run.AgentTurnStatusInvalidToolCall,
+		ActionType:        run.AgentTurnActionTypeToolCall,
+		ToolName:          toolName,
+		Message:           message,
+		RequestMessages:   turn.requestMessages,
+		RawResponse:       turn.content,
+		ResponseFormat:    turn.responseFormat,
+		CorrectionMessage: correctionMessage,
+		ResponsePreview:   previewModelResponse(turn.content),
+		StartedAt:         turn.startedAt,
+		EndedAt:           turn.endedAt,
+	})
+	session.turns = append(session.turns,
+		assistantAttemptTurn(content),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
+	)
+	session.sandboxExecRetryRequired = true
+	session.sandboxExecRetryMessage = message
+	session.sandboxExecRetryCorrection = correctionMessage
+
+	return RunResult{}, false, nil
+}
+
 func uploadedFilePaths(task run.TaskSpec) []string {
 	if len(task.Attachments) == 0 {
 		return nil
@@ -882,7 +1049,7 @@ func sandboxExecCommandWritesReadOnlyPDFTextOutput(tool string, arguments map[st
 		return false
 	}
 	command := strings.TrimSpace(arguments[toolArgumentCommand])
-	if command == "" || !strings.Contains(strings.ToLower(command), "pdftotext") {
+	if command == "" || !strings.Contains(strings.ToLower(command), pdfToTextCommandName) {
 		return false
 	}
 
@@ -892,6 +1059,28 @@ func sandboxExecCommandWritesReadOnlyPDFTextOutput(tool string, arguments map[st
 			continue
 		}
 		if sandboxExecPDFToTextInvocationWritesReadOnlyInput(tokens[index+1:]) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func sandboxExecCommandDumpsPDFTextToStdout(tool string, arguments map[string]string) bool {
+	if strings.TrimSpace(tool) != toolNameSandboxExec {
+		return false
+	}
+	command := strings.TrimSpace(arguments[toolArgumentCommand])
+	if command == "" || !strings.Contains(strings.ToLower(command), pdfToTextCommandName) {
+		return false
+	}
+
+	tokens := shellLikeTokens(command)
+	for index, token := range tokens {
+		if !sandboxExecIsPDFToTextToken(token) {
+			continue
+		}
+		if sandboxExecPDFToTextInvocationDumpsStdout(tokens[index+1:]) {
 			return true
 		}
 	}
@@ -944,6 +1133,19 @@ func sandboxExecPDFToTextInvocationWritesReadOnlyInput(arguments []string) bool 
 	return false
 }
 
+func sandboxExecPDFToTextInvocationDumpsStdout(arguments []string) bool {
+	for index, argument := range arguments {
+		if shellCommandBoundaryToken(argument) {
+			return false
+		}
+		if workspaceInputPDFPath(argument) && pdftotextOutputIsStdout(arguments, index+1) {
+			return !pdftotextStdoutHasNarrowPipe(arguments[index+2:])
+		}
+	}
+
+	return false
+}
+
 func pdftotextOutputWritesReadOnlyInput(arguments []string, outputIndex int) bool {
 	if outputIndex >= len(arguments) {
 		return true
@@ -960,6 +1162,55 @@ func pdftotextOutputWritesReadOnlyInput(arguments []string, outputIndex int) boo
 	}
 
 	return strings.HasPrefix(output, "/workspace/input/") || strings.HasPrefix(output, "-")
+}
+
+func pdftotextOutputIsStdout(arguments []string, outputIndex int) bool {
+	if outputIndex >= len(arguments) {
+		return false
+	}
+
+	return arguments[outputIndex] == "-"
+}
+
+func pdftotextStdoutHasNarrowPipe(arguments []string) bool {
+	for index, argument := range arguments {
+		if argument == "|" {
+			return nextTokenIsNarrowPDFTextConsumer(arguments, index+1)
+		}
+		if shellCommandBoundaryToken(argument) {
+			return false
+		}
+	}
+
+	return false
+}
+
+func nextTokenIsNarrowPDFTextConsumer(arguments []string, index int) bool {
+	for ; index < len(arguments); index++ {
+		token := arguments[index]
+		if token == "" || shellRedirectionToken(token) || allDigits(token) {
+			continue
+		}
+		if shellCommandBoundaryToken(token) {
+			return false
+		}
+
+		return narrowPDFTextConsumerToken(token)
+	}
+
+	return false
+}
+
+func narrowPDFTextConsumerToken(token string) bool {
+	if slash := strings.LastIndex(token, "/"); slash >= 0 {
+		token = token[slash+1:]
+	}
+	switch token {
+	case "grep", "egrep", "fgrep", "rg", "sed", "awk", "head", "tail", "nl":
+		return true
+	default:
+		return false
+	}
 }
 
 func nextTokenIsShellRedirection(arguments []string, index int) bool {
@@ -980,7 +1231,7 @@ func sandboxExecIsPDFToTextToken(token string) bool {
 		token = token[slash+1:]
 	}
 
-	return token == "pdftotext"
+	return token == pdfToTextCommandName
 }
 
 func workspaceInputPDFPath(token string) bool {
@@ -1239,10 +1490,16 @@ func (r *Runner) handleNativeToolCalls(
 		if sandboxExecCommandWritesReadOnlyPDFTextOutput(call.Name, call.Arguments) {
 			return handleReadOnlyPDFTextOutputSandboxExecToolCall(session, turn, call.Name, turn.content)
 		}
+		if sandboxExecCommandDumpsPDFTextToStdout(call.Name, call.Arguments) {
+			return handlePDFDumpSandboxExecToolCall(session, turn, call.Name, turn.content)
+		}
 		if sandboxExecCommandRepeatsFailedCommand(session, call.Name, call.Arguments) {
 			return handleRepeatedFailedSandboxExecToolCall(session, turn, call.Name, turn.content)
 		}
 		if sandboxExecCommandRepeatsSuccessfulCommand(session, call.Name, call.Arguments) {
+			if session.pdfSearchContextRequired {
+				return handlePDFSearchContextRequiredSandboxExecToolCall(session, turn, call.Name, turn.content)
+			}
 			return handleRepeatedSuccessfulSandboxExecToolCall(session, turn, call.Name, turn.content)
 		}
 	}

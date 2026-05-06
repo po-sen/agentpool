@@ -142,10 +142,31 @@ func TestBuildSandboxExecReadOnlyPDFTextOutputCorrectionMessageRequiresStdoutOrW
 		"pdftotext command would write its default .txt output",
 		"read-only /workspace/input PDF",
 		"next response must be a sandbox_exec tool_call, not final",
-		`with "-" to write text to stdout`,
-		"write the text output under /workspace/work",
+		`Use pdftotext with "-" for stdout`,
+		"write text outputs/scripts under /workspace/work",
+		"create your own small script under /workspace/work",
 		"Quote paths",
-		`pdftotext '/workspace/input/manual.pdf' -`,
+		`pdftotext "$f" - 2>/dev/null`,
+		`grep -nEi 'keyword'`,
+		"Return exactly one JSON object.",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
+func TestBuildSandboxExecPDFDumpCorrectionMessageRequiresNarrowCommand(t *testing.T) {
+	message := buildSandboxExecPDFDumpCorrectionMessage()
+
+	for _, want := range []string{
+		"print the whole PDF to stdout",
+		"too much context",
+		"next response must be a sandbox_exec tool_call, not final",
+		"grep/head/sed/nl",
+		"create your own small script under /workspace/work",
+		`grep -nEi 'term1|term2|term3'`,
+		`nl -ba | sed -n '512,528p'`,
 		"Return exactly one JSON object.",
 	} {
 		if !strings.Contains(message, want) {
@@ -161,12 +182,10 @@ func TestBuildSandboxExecRepeatedFailedCommandCorrectionMessageRequiresChangedCo
 		"repeated the same command unchanged",
 		"next response must be a sandbox_exec tool_call, not final",
 		"materially corrected command",
-		"avoid exact-string-only grep loops",
-		"2>/dev/null",
+		"avoid exact-string-only loops",
+		"small /workspace/work script",
 		"Avoid broad one-character terms",
-		"for f in /workspace/input/*.pdf",
 		"term1|term2|term3",
-		"head -20",
 		"broader relevant terms",
 		"Return exactly one JSON object.",
 	} {
@@ -184,6 +203,44 @@ func TestBuildSandboxExecRepeatedSuccessfulCommandCorrectionMessageAllowsFinal(t
 		"repeated the same command unchanged",
 		"next response must be a final answer, not a tool_call",
 		"Use the existing tool output as evidence",
+		`{"type":"final","summary":"..."}`,
+		"Return exactly one JSON object.",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
+func TestBuildPDFSearchContextRequiredCorrectionMessageRequiresContextCommand(t *testing.T) {
+	message := buildPDFSearchContextRequiredCorrectionMessage()
+
+	for _, want := range []string{
+		"search hit lines only",
+		"next response must be a sandbox_exec tool_call, not final",
+		"title/TOC-only or irrelevant",
+		"nearby context around substantive line numbers",
+		`pdftotext '/workspace/input/manual.pdf' -`,
+		`nl -ba | sed -n '512,528p'`,
+		"answer in the user's language first",
+		"cite file names/locations",
+		"Return exactly one JSON object.",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
+func TestBuildFinalUserLanguageCorrectionMessageRequiresUserLanguage(t *testing.T) {
+	message := buildFinalUserLanguageCorrectionMessage()
+
+	for _, want := range []string{
+		"did not preserve the user's requested language",
+		"next response must be a final JSON object, not a tool_call",
+		"preserve user-provided terms exactly",
+		"final.summary 必須使用中文",
+		"cite the file name and inspected location",
 		`{"type":"final","summary":"..."}`,
 		"Return exactly one JSON object.",
 	} {

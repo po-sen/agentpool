@@ -24,8 +24,7 @@ func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 	if toolIsDefined(tools, "sandbox_exec") {
 		builder.WriteString("- If sandbox_exec is available for exact/verifiable tasks, call it before final; do not guess answers it can verify.\n")
 		builder.WriteString("- Use sandbox_exec for arithmetic, counts, searches, file inspection, data transforms, tests, builds, linters, and code checks.\n")
-		builder.WriteString("- For PDF/Office/images, extract/convert/OCR; pdftotext uses \"-\" or /workspace/work.\n")
-		builder.WriteString("- For file answers, inspect nearby context, answer first, and cite file names/locations; do not only list hits.\n")
+		builder.WriteString("- For PDF/Office/images, extract/convert/OCR. For PDF QA, search first, inspect nearby context, write small scripts under /workspace/work if useful, never dump whole PDFs, then answer/cite or say missing.\n")
 		builder.WriteString("- Commands must compute or inspect the answer; do not echo an unverified guess.\n")
 		builder.WriteString("- Use shell arithmetic only for integer-only expressions; use python3/awk for decimals or numerical methods.\n")
 		builder.WriteString("- For equations or roots, use bisection/brentq and base final on output with a root candidate and residual.\n")

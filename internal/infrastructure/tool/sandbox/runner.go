@@ -97,7 +97,7 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        argumentCommand,
-					Description: "Run sandbox command. For PDFs, use pdftotext input.pdf - or /workspace/work output. Use python3/awk for decimals or roots; print residual.",
+					Description: "Run sandbox command. For PDFs, use pdftotext with '-' or write outputs/scripts under /workspace/work; search first, then inspect nearby lines. Use python3/awk for decimals or roots; print residual.",
 					Required:    true,
 					Example:     `python3 -c 'print(123 * 321)'`,
 				},
