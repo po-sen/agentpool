@@ -58,8 +58,6 @@ type RunResult struct {
 	ToolCallCount int
 	ToolCalls     []ToolCallRecord
 	AgentTurns    []TurnRecord
-	SystemPrompt  string
-	PromptVersion string
 }
 
 // ToolCallRecord captures one tool execution observed by the agent loop.
@@ -530,8 +528,6 @@ func (s *runSession) finalResult(summary string) RunResult {
 		ToolCallCount: s.toolCallCount,
 		ToolCalls:     copyToolCallRecords(s.toolCalls),
 		AgentTurns:    copyTurnRecords(s.turnRecords),
-		SystemPrompt:  s.systemPrompt,
-		PromptVersion: agentPromptVersion,
 	}
 }
 
@@ -548,8 +544,6 @@ func (s *runSession) partialResult() RunResult {
 		ToolCallCount: s.toolCallCount,
 		ToolCalls:     copyToolCallRecords(s.toolCalls),
 		AgentTurns:    copyTurnRecords(s.turnRecords),
-		SystemPrompt:  s.systemPrompt,
-		PromptVersion: agentPromptVersion,
 	}
 }
 
@@ -1055,7 +1049,7 @@ func copyModelRequestMessages(instructions string, turns []outbound.ModelTurn) [
 		copied = append(copied, TurnMessageRecord{
 			Role:    string(outbound.ModelRoleRuntime),
 			Kind:    "instructions",
-			Content: "[REDACTED]",
+			Content: instructions,
 		})
 	}
 	for _, turn := range turns {

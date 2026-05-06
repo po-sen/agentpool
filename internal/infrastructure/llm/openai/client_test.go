@@ -71,8 +71,8 @@ func TestClientGenerateSendsAuthorizationAndParsesContent(t *testing.T) {
 	if len(response.RequestMessages) != 3 {
 		t.Fatalf("len(RequestMessages) = %d, want 3", len(response.RequestMessages))
 	}
-	if response.RequestMessages[0].Role != "developer" || response.RequestMessages[0].Content != "[REDACTED]" {
-		t.Fatalf("RequestMessages[0] = %#v, want redacted developer instructions", response.RequestMessages[0])
+	if response.RequestMessages[0].Role != "developer" || response.RequestMessages[0].Content != "follow protocol" {
+		t.Fatalf("RequestMessages[0] = %#v, want developer instructions", response.RequestMessages[0])
 	}
 	if response.RequestMessages[2].Role != "developer" || response.RequestMessages[2].Content != "return JSON" {
 		t.Fatalf("RequestMessages[2] = %#v, want developer correction", response.RequestMessages[2])

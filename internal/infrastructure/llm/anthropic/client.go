@@ -220,8 +220,8 @@ func toModelRequestMessages(request outbound.ModelRequest) []outbound.ModelReque
 
 func toAnthropicSystemDiagnostics(request outbound.ModelRequest) string {
 	parts := []string{}
-	if strings.TrimSpace(request.Instructions) != "" {
-		parts = append(parts, "[REDACTED]")
+	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
+		parts = append(parts, instructions)
 	}
 	for _, turn := range request.Turns {
 		switch {

@@ -76,18 +76,15 @@ func toRunView(item *run.Run) inbound.RunView {
 		Result: inbound.RunResultView{
 			Summary: item.ResultSummary,
 		},
-		FailureReason:      item.FailureReason,
-		FailureCode:        item.FailureCode,
-		FailureMessage:     item.FailureMessage,
-		Steps:              steps,
-		ToolCalls:          toolCalls,
-		AgentTurns:         agentTurns,
-		Artifacts:          artifacts,
-		AgentSystemPrompt:  item.AgentSystemPrompt,
-		AgentPromptVersion: item.AgentPromptVersion,
-		AgentPromptSHA256:  item.AgentPromptSHA256,
-		CreatedAt:          item.CreatedAt,
-		UpdatedAt:          item.UpdatedAt,
+		FailureReason:  item.FailureReason,
+		FailureCode:    item.FailureCode,
+		FailureMessage: item.FailureMessage,
+		Steps:          steps,
+		ToolCalls:      toolCalls,
+		AgentTurns:     agentTurns,
+		Artifacts:      artifacts,
+		CreatedAt:      item.CreatedAt,
+		UpdatedAt:      item.UpdatedAt,
 	}
 }
 

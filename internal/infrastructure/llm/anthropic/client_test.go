@@ -91,10 +91,10 @@ func TestClientGenerateSendsHeadersAndParsesText(t *testing.T) {
 	if response.RequestMessages[0].Role != "system" {
 		t.Fatalf("RequestMessages[0].Role = %q, want system", response.RequestMessages[0].Role)
 	}
-	if !strings.Contains(response.RequestMessages[0].Content, "[REDACTED]") ||
+	if !strings.Contains(response.RequestMessages[0].Content, "follow protocol") ||
 		!strings.Contains(response.RequestMessages[0].Content, "Previous assistant attempt that failed validation:") ||
 		!strings.Contains(response.RequestMessages[0].Content, "return JSON") {
-		t.Fatalf("RequestMessages[0].Content = %q, want redacted system diagnostics", response.RequestMessages[0].Content)
+		t.Fatalf("RequestMessages[0].Content = %q, want system diagnostics", response.RequestMessages[0].Content)
 	}
 	if apiKey != "test-key" {
 		t.Fatalf("x-api-key = %q, want test-key", apiKey)

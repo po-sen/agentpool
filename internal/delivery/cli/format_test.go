@@ -47,13 +47,10 @@ func TestFormatRunFailedIncludesFailureDiagnostics(t *testing.T) {
 	}
 }
 
-func TestFormatRunDebugIncludesPromptMetadataAndDetails(t *testing.T) {
+func TestFormatRunDebugIncludesDetails(t *testing.T) {
 	output := FormatRun(RunResponse{
-		ID:                 "run_debug",
-		Status:             statusCompleted,
-		AgentSystemPrompt:  "AgentPool is running a task.",
-		AgentPromptVersion: "agentpool-runtime-v1",
-		AgentPromptSHA256:  "abc123",
+		ID:     "run_debug",
+		Status: statusCompleted,
 		AgentTurns: []AgentTurnResponse{
 			{
 				Index:             1,
@@ -71,22 +68,15 @@ func TestFormatRunDebugIncludesPromptMetadataAndDetails(t *testing.T) {
 		},
 	}, OutputOptions{Debug: true})
 
-	for _, want := range []string{"Agent prompt:", "version: agentpool-runtime-v1", "sha256: abc123", "system_prompt:", "AgentPool is running a task.", "response_format: plain_text", "protocol_error_code: invalid_json", "correction_message: Protocol error:", "request_messages:", "1. user: do work", "raw_response: done", "response_preview:", "operation: list", "path: .", "result: /workspace/input/README.md"} {
+	for _, want := range []string{"response_format: plain_text", "protocol_error_code: invalid_json", "correction_message: Protocol error:", "request_messages:", "1. user: do work", "raw_response: done", "response_preview:", "operation: list", "path: .", "result: /workspace/input/README.md"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}
 	}
-}
-
-func TestFormatRunDefaultOmitsSystemPrompt(t *testing.T) {
-	output := FormatRun(RunResponse{
-		ID:                "run_default",
-		Status:            statusCompleted,
-		AgentSystemPrompt: "hidden prompt",
-	}, OutputOptions{})
-
-	if strings.Contains(output, "hidden prompt") {
-		t.Fatalf("default output exposed system prompt:\n%s", output)
+	for _, unwanted := range []string{"Agent prompt:", "version:", "sha256:", "system_prompt:"} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("output contains %q:\n%s", unwanted, output)
+		}
 	}
 }
 

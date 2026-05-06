@@ -29,7 +29,7 @@ func toModelRequestMessages(request outbound.ModelRequest) []outbound.ModelReque
 	if request.Instructions != "" {
 		messages = append(messages, outbound.ModelRequestMessage{
 			Role:    "runtime",
-			Content: "[REDACTED]",
+			Content: request.Instructions,
 		})
 	}
 	for _, turn := range request.Turns {

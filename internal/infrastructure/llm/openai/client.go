@@ -186,7 +186,7 @@ func toModelRequestMessages(request outbound.ModelRequest) []outbound.ModelReque
 	if strings.TrimSpace(request.Instructions) != "" {
 		items = append(items, outbound.ModelRequestMessage{
 			Role:    chatRoleDeveloper,
-			Content: "[REDACTED]",
+			Content: request.Instructions,
 		})
 	}
 	for _, message := range toChatMessages(outbound.ModelRequest{Turns: request.Turns}) {

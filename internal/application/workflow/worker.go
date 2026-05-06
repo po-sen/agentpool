@@ -400,9 +400,6 @@ func (w *Worker) completeRun(
 	item.RecordToolCalls(now, toDomainToolCalls(result.ToolCalls))
 	item.RecordAgentTurns(now, toDomainAgentTurns(result.AgentTurns))
 	item.RecordArtifacts(now, artifacts)
-	if result.SystemPrompt != "" {
-		item.RecordAgentSystemPrompt(now, result.SystemPrompt, result.PromptVersion)
-	}
 	if err := item.CompleteWithResult(now, result.Summary); err != nil {
 		return err
 	}
@@ -425,9 +422,6 @@ func (w *Worker) failRun(
 	item.RecordToolCalls(now, toDomainToolCalls(result.ToolCalls))
 	item.RecordAgentTurns(now, toDomainAgentTurns(result.AgentTurns))
 	item.RecordArtifacts(now, artifacts)
-	if result.SystemPrompt != "" {
-		item.RecordAgentSystemPrompt(now, result.SystemPrompt, result.PromptVersion)
-	}
 	code, message := failureDiagnosticsFor(item, cause)
 	if name, ok := latestRunningStepName(item); ok {
 		if err := item.FailStep(name, failedStepMessage(name), now); err != nil {

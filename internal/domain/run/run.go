@@ -1,16 +1,6 @@
 package run
 
-import (
-	"crypto/sha256"
-	"encoding/hex"
-	"strings"
-	"time"
-)
-
-const (
-	// MaxAgentSystemPromptLength bounds the stored agent system prompt kept for diagnostics.
-	MaxAgentSystemPromptLength = 16 << 10
-)
+import "time"
 
 // RunID identifies an AgentPool run.
 //
@@ -24,22 +14,19 @@ func (id RunID) String() string {
 
 // Run is the aggregate root for a submitted agent task.
 type Run struct {
-	ID                 RunID
-	Task               TaskSpec
-	Status             Status
-	ResultSummary      string
-	FailureReason      string
-	FailureCode        string
-	FailureMessage     string
-	Steps              []Step
-	ToolCalls          []ToolCall
-	AgentTurns         []AgentTurn
-	Artifacts          []Artifact
-	AgentSystemPrompt  string
-	AgentPromptVersion string
-	AgentPromptSHA256  string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID             RunID
+	Task           TaskSpec
+	Status         Status
+	ResultSummary  string
+	FailureReason  string
+	FailureCode    string
+	FailureMessage string
+	Steps          []Step
+	ToolCalls      []ToolCall
+	AgentTurns     []AgentTurn
+	Artifacts      []Artifact
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // New creates a queued run.
@@ -156,19 +143,6 @@ func (r *Run) RecordToolCalls(now time.Time, calls []ToolCall) {
 // RecordAgentTurns replaces the stored model-loop diagnostics with detached bounded records.
 func (r *Run) RecordAgentTurns(now time.Time, turns []AgentTurn) {
 	r.AgentTurns = copyAgentTurns(turns)
-	r.UpdatedAt = now
-}
-
-// RecordAgentSystemPrompt stores prompt diagnostics for the agent prompt used by the run.
-func (r *Run) RecordAgentSystemPrompt(now time.Time, prompt string, version string) {
-	r.AgentSystemPrompt = truncateUTF8Text(prompt, MaxAgentSystemPromptLength)
-	r.AgentPromptVersion = strings.TrimSpace(version)
-	if prompt != "" {
-		sum := sha256.Sum256([]byte(prompt))
-		r.AgentPromptSHA256 = hex.EncodeToString(sum[:])
-	} else {
-		r.AgentPromptSHA256 = ""
-	}
 	r.UpdatedAt = now
 }
 

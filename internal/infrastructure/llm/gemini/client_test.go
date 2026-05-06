@@ -97,10 +97,10 @@ func TestClientGenerateSendsAPIKeyAndParsesText(t *testing.T) {
 	if response.RequestMessages[0].Role != "system_instruction" {
 		t.Fatalf("RequestMessages[0].Role = %q, want system_instruction", response.RequestMessages[0].Role)
 	}
-	if !strings.Contains(response.RequestMessages[0].Content, "[REDACTED]") ||
+	if !strings.Contains(response.RequestMessages[0].Content, "follow protocol") ||
 		!strings.Contains(response.RequestMessages[0].Content, "Previous assistant attempt that failed validation:") ||
 		!strings.Contains(response.RequestMessages[0].Content, "return JSON") {
-		t.Fatalf("RequestMessages[0].Content = %q, want redacted system diagnostics", response.RequestMessages[0].Content)
+		t.Fatalf("RequestMessages[0].Content = %q, want system diagnostics", response.RequestMessages[0].Content)
 	}
 	if key != "test-key" {
 		t.Fatalf("x-goog-api-key = %q, want test-key", key)

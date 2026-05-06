@@ -59,7 +59,7 @@ func TestRunnerRejectsNaturalLanguageResponseAndContinues(t *testing.T) {
 	if model.requests[0].RunID != "run_test" {
 		t.Fatalf("model RunID = %s, want run_test", model.requests[0].RunID)
 	}
-	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "[REDACTED]")
+	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "Available tools")
 	assertInstruction(t, model.requests[0], "Available tools")
 	assertInstruction(t, model.requests[0], "workspace: Lists or stats workspace paths without reading file contents.")
 	assertInstruction(t, model.requests[0], "sandbox_exec: Runs a command inside the sandbox from /workspace/work.")
@@ -67,9 +67,6 @@ func TestRunnerRejectsNaturalLanguageResponseAndContinues(t *testing.T) {
 		t.Fatalf("len(model Tools) = %d, want advertised tools", len(model.requests[0].Tools))
 	}
 	assertMessage(t, requestMessages(model.requests[0])[1], "user", "do work")
-	if !strings.Contains(result.SystemPrompt, "Available tools") {
-		t.Fatalf("SystemPrompt = %q, want available tools", result.SystemPrompt)
-	}
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
 	}
@@ -83,7 +80,7 @@ func TestRunnerRecordsProviderRequestMessagesFromModelResponse(t *testing.T) {
 			{
 				Content: `{"type":"final","summary":"done"}`,
 				RequestMessages: []outbound.ModelRequestMessage{
-					{Role: "developer", Content: "[REDACTED]"},
+					{Role: "developer", Content: "system prompt"},
 					{Role: "user", Content: "do work"},
 				},
 			},
@@ -105,7 +102,7 @@ func TestRunnerRecordsProviderRequestMessagesFromModelResponse(t *testing.T) {
 	if len(messages) != 2 {
 		t.Fatalf("len(RequestMessages) = %d, want 2", len(messages))
 	}
-	assertMessage(t, messages[0], "developer", "[REDACTED]")
+	assertMessage(t, messages[0], "developer", "system prompt")
 	if messages[0].Kind != "" {
 		t.Fatalf("provider request message kind = %q, want empty", messages[0].Kind)
 	}
@@ -129,7 +126,7 @@ func TestRunnerExposesSandboxVerificationPolicyToModel(t *testing.T) {
 	})
 	runner := NewRunner(model, tools)
 
-	result, err := runner.Run(context.Background(), RunRequest{
+	_, err := runner.Run(context.Background(), RunRequest{
 		RunID: "run_test",
 		Task:  run.TaskSpec{Prompt: "count the words exactly"},
 		Context: outbound.ToolContext{
@@ -143,13 +140,10 @@ func TestRunnerExposesSandboxVerificationPolicyToModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "[REDACTED]")
+	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "exact or verifiable answer")
 	assertInstruction(t, model.requests[0], "call sandbox_exec before final")
 	assertInstruction(t, model.requests[0], "Do not guess exact answers when sandbox_exec can verify them.")
 	assertInstruction(t, model.requests[0], "arithmetic, counts, searches, file content inspection")
-	if !strings.Contains(result.SystemPrompt, "exact or verifiable answer") {
-		t.Fatalf("SystemPrompt = %q, want sandbox verification policy", result.SystemPrompt)
-	}
 }
 
 func TestRunnerReturnsJSONFinalActionSummary(t *testing.T) {
@@ -539,9 +533,6 @@ func TestRunnerRejectsUnavailableToolBeforeToolRunner(t *testing.T) {
 	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", `The tool "sh_script" is not available.`)
 	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Available tools: none")
 	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Do not invent tool names.")
-	if !strings.Contains(result.SystemPrompt, "Available tools:\n- none") {
-		t.Fatalf("SystemPrompt = %q, want no available tools", result.SystemPrompt)
-	}
 }
 
 func TestRunnerRecordsExistingToolResultError(t *testing.T) {
@@ -1070,9 +1061,6 @@ func TestRunnerReturnsMaxTurnsForRepeatedUnavailableToolCalls(t *testing.T) {
 		index:  3,
 		status: run.AgentTurnStatusMaxTurns,
 	})
-	if !strings.Contains(result.SystemPrompt, "Available tools:\n- none") {
-		t.Fatalf("SystemPrompt = %q, want no available tools", result.SystemPrompt)
-	}
 }
 
 func TestRunnerPropagatesModelErrors(t *testing.T) {

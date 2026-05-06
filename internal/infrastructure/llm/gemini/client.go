@@ -240,8 +240,8 @@ func toModelRequestMessages(modelRequest outbound.ModelRequest) []outbound.Model
 
 func joinGeminiSystemDiagnostics(modelRequest outbound.ModelRequest) string {
 	parts := []string{}
-	if strings.TrimSpace(modelRequest.Instructions) != "" {
-		parts = append(parts, "[REDACTED]")
+	if instructions := strings.TrimSpace(modelRequest.Instructions); instructions != "" {
+		parts = append(parts, instructions)
 	}
 	for _, turn := range modelRequest.Turns {
 		switch {

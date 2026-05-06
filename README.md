@@ -165,7 +165,7 @@ Failed runs can include partial `agent_turns` and `tool_calls` when the agent in
       "status": "protocol_error",
       "message": "model response did not match AgentPool action protocol",
       "request_messages": [
-        {"role": "developer", "content": "[REDACTED]"},
+        {"role": "developer", "content": "AgentPool is running one task..."},
         {"role": "user", "content": "do work"}
       ],
       "raw_response": "{\"type\":\"tool_result\",\"result\":\"hello\"}",
@@ -282,7 +282,7 @@ go run ./cmd/agentpool artifacts run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
 go run ./cmd/agentpool artifact run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1 report.md
 ```
 
-Debug output includes prompt metadata, the bounded system/developer prompt, full `agent_turns`, and full `tool_calls`:
+Debug output includes full `agent_turns` with provider-facing `request_messages`, and full `tool_calls`:
 
 ```sh
 go run ./cmd/agentpool run \
@@ -450,7 +450,7 @@ Provider adapters map that request into each provider's strongest native shape:
 - Gemini: `system_instruction` for instructions/runtime corrections and invalid assistant attempts, `functionDeclarations`, model `functionCall` parts, and user `functionResponse` parts with the original function call id when available. Gemini does not consistently use a literal `tool` role across APIs.
 - Noop: diagnostic-only provider; it echoes provider-neutral request messages and does not call real tools natively.
 
-`request_messages` in run diagnostics are provider-facing request messages returned by the model adapter, not the provider-neutral canonical request. Hidden instruction content is redacted, but roles and ordering match the adapted provider request. For providers without a chat-message array, top-level instruction fields are represented as messages such as `system` or `system_instruction` for debugging.
+`request_messages` in run diagnostics are provider-facing request messages returned by the model adapter, not the provider-neutral canonical request. During the POC, instruction content is exposed directly in these diagnostics, and roles and ordering match the adapted provider request. For providers without a chat-message array, top-level instruction fields are represented as messages such as `system` or `system_instruction` for debugging.
 
 ## Workspace And Files
 
@@ -562,15 +562,7 @@ Final answers use:
 
 Tools are dynamically advertised. Runs without the required context do not expose unavailable tools to the model. The model may only call tools listed under `Available tools`; unknown or unadvertised tool names are rejected by the agent runtime before `ToolRunner` dispatch. Those requests appear in `agent_turns` as invalid tool-call diagnostics, not in `tool_calls`.
 
-The run response includes prompt debug metadata after an agent session starts. During the POC, user-facing API and debug CLI output expose the bounded system/developer prompt along with the prompt version and SHA-256:
-
-```json
-{
-  "agent_system_prompt": "AgentPool is running a task...",
-  "agent_prompt_version": "agentpool-runtime-v1",
-  "agent_prompt_sha256": "abc123..."
-}
-```
+The run response does not include separate prompt metadata fields. During the POC, system/developer prompt diagnostics are exposed through `agent_turns[].request_messages`.
 
 Workspace path is separate from sandbox state, and sandbox execution is reserved for future side-effectful tools.
 
@@ -582,7 +574,7 @@ Run diagnostics are intentionally split:
 - `agent_turns`: per-model-turn diagnostics from the agent loop.
 - `tool_calls`: concrete tool execution history and tool results.
 
-`agent_turns` records bounded model-loop diagnostics for each model turn: index, status, parsed action type, tool name for tool calls, safe message, the provider-facing request messages returned by the model adapter, the raw model response content returned through the model port, response format classification, optional protocol error code, optional correction message sent back to the model, optional short response preview, and timestamps. Provider-facing request messages may include `tool_call_id` and `tool_name` when the provider format carries them. Hidden instruction content is redacted in user-facing diagnostics. `response_format` can be `json_object`, `json_array`, `json_scalar`, `multiple_json_values`, `invalid_json`, `plain_text`, `markdown_fence`, or `empty`. Protocol repair keeps a bounded invalid assistant attempt in provider history and sends the repair instruction separately as a runtime instruction mapped by the provider adapter.
+`agent_turns` records bounded model-loop diagnostics for each model turn: index, status, parsed action type, tool name for tool calls, safe message, the provider-facing request messages returned by the model adapter, the raw model response content returned through the model port, response format classification, optional protocol error code, optional correction message sent back to the model, optional short response preview, and timestamps. Provider-facing request messages may include `tool_call_id` and `tool_name` when the provider format carries them. During the POC, instruction content is exposed in user-facing diagnostics. `response_format` can be `json_object`, `json_array`, `json_scalar`, `multiple_json_values`, `invalid_json`, `plain_text`, `markdown_fence`, or `empty`. Protocol repair keeps a bounded invalid assistant attempt in provider history and sends the repair instruction separately as a runtime instruction mapped by the provider adapter.
 
 Example snippet:
 
@@ -598,7 +590,7 @@ Example snippet:
       "status": "protocol_error",
       "message": "model response did not match AgentPool action protocol",
       "request_messages": [
-        {"role": "developer", "content": "[REDACTED]"},
+        {"role": "developer", "content": "AgentPool is running one task..."},
         {"role": "user", "content": "do work"}
       ],
       "raw_response": "{\"type\":\"tool_result\",\"result\":\"hello\"}",
@@ -623,7 +615,7 @@ Example snippet:
 }
 ```
 
-`agent_turns` are in-memory only for now. `request_messages`, `raw_response`, `response_preview`, and `correction_message` are UTF-8 safe and truncated. `raw_response` is the provider-neutral model content or provider-neutral native tool-call summary, not a provider-specific SDK or HTTP payload. Raw system/developer prompts, raw provider errors, secrets resolved by AgentPool, stack traces, hidden provider internals, and product ACL decisions are intentionally not exposed through user-facing diagnostics.
+`agent_turns` are in-memory only for now. `request_messages`, `raw_response`, `response_preview`, and `correction_message` are UTF-8 safe and truncated. `raw_response` is the provider-neutral model content or provider-neutral native tool-call summary, not a provider-specific SDK or HTTP payload. During the POC, raw system/developer prompts are exposed through `request_messages`; raw provider errors, secrets resolved by AgentPool, stack traces, hidden provider internals, and product ACL decisions are intentionally not exposed through user-facing diagnostics.
 
 ## Tool Call History
 
@@ -684,7 +676,7 @@ curl -sS -X POST http://localhost:8080/v1/runs \
   -d '{"prompt":"Use sandbox_exec to calculate 234 * 887123 with sh."}'
 ```
 
-When Docker sandboxing is enabled, `sandbox_exec` is advertised to the model under `Available tools`, and the command runs inside Docker with `/workspace/work` as the current writable directory. User-facing debug output exposes only prompt metadata, not the raw prompt text.
+When Docker sandboxing is enabled, `sandbox_exec` is advertised to the model under `Available tools`, and the command runs inside Docker with `/workspace/work` as the current writable directory. During the POC, user-facing debug output exposes provider-facing request messages, including instructions.
 
 Submit an uploaded-file run that asks the agent to inspect metadata and read contents through sandbox execution:
 

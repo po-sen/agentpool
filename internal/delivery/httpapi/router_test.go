@@ -339,17 +339,14 @@ func TestGetRunIncludesAgentTurns(t *testing.T) {
 	}
 }
 
-func TestGetRunIncludesAgentPromptMetadata(t *testing.T) {
+func TestGetRunOmitsAgentPromptMetadata(t *testing.T) {
 	get := &getRunStub{
 		view: inbound.RunView{
-			ID:                 "run_test",
-			Status:             "failed",
-			AgentSystemPrompt:  "system prompt",
-			AgentPromptVersion: "agentpool-runtime-v1",
-			AgentPromptSHA256:  "abc123",
-			Steps:              []inbound.StepView{},
-			CreatedAt:          time.Unix(100, 0).UTC(),
-			UpdatedAt:          time.Unix(101, 0).UTC(),
+			ID:        "run_test",
+			Status:    "failed",
+			Steps:     []inbound.StepView{},
+			CreatedAt: time.Unix(100, 0).UTC(),
+			UpdatedAt: time.Unix(101, 0).UTC(),
 		},
 	}
 	router := NewRouter(Dependencies{
@@ -366,13 +363,13 @@ func TestGetRunIncludesAgentPromptMetadata(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
 	}
-	for _, want := range []string{
-		`"agent_system_prompt":"system prompt"`,
-		`"agent_prompt_version":"agentpool-runtime-v1"`,
-		`"agent_prompt_sha256":"abc123"`,
+	for _, unwanted := range []string{
+		`"agent_system_prompt"`,
+		`"agent_prompt_version"`,
+		`"agent_prompt_sha256"`,
 	} {
-		if !strings.Contains(response.Body.String(), want) {
-			t.Fatalf("response missing %s: %s", want, response.Body.String())
+		if strings.Contains(response.Body.String(), unwanted) {
+			t.Fatalf("response contains %s: %s", unwanted, response.Body.String())
 		}
 	}
 }

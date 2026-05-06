@@ -36,12 +36,6 @@ func TestWorkerProcessOneCompletesQueuedRun(t *testing.T) {
 	if stored.FailureReason != "" {
 		t.Fatalf("stored failure reason = %q, want empty", stored.FailureReason)
 	}
-	if stored.AgentSystemPrompt == "" {
-		t.Fatal("stored agent system prompt is empty")
-	}
-	if !strings.Contains(stored.AgentSystemPrompt, "Available tools:") {
-		t.Fatalf("stored agent system prompt = %q, want available tools", stored.AgentSystemPrompt)
-	}
 	assertAgentTurnStatuses(t, stored.AgentTurns, []string{run.AgentTurnStatusFinal})
 	assertSteps(t, stored.Steps, []wantStep{
 		{
@@ -177,12 +171,6 @@ func TestWorkerStoresWorkspaceAndSandboxExecToolCallHistory(t *testing.T) {
 	}
 	if stored.ToolCalls[1].Result != "exit_code: 0\nstdout:\n/workspace/work\n" {
 		t.Fatalf("sandbox_exec result = %q, want command output", stored.ToolCalls[1].Result)
-	}
-	if !strings.Contains(stored.AgentSystemPrompt, "workspace: Lists or stats workspace paths without reading file contents.") {
-		t.Fatalf("AgentSystemPrompt = %q, want workspace", stored.AgentSystemPrompt)
-	}
-	if !strings.Contains(stored.AgentSystemPrompt, "sandbox_exec: Runs a command inside the sandbox from /workspace/work.") {
-		t.Fatalf("AgentSystemPrompt = %q, want sandbox_exec", stored.AgentSystemPrompt)
 	}
 	assertAgentTurnStatuses(t, stored.AgentTurns, []string{
 		run.AgentTurnStatusToolCall,
@@ -714,9 +702,6 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 	if stored.FailureMessage == errModelGenerationFailed.Error() {
 		t.Fatalf("stored failure message exposes raw error: %q", stored.FailureMessage)
 	}
-	if stored.AgentSystemPrompt == "" {
-		t.Fatal("stored failed-run agent system prompt is empty")
-	}
 	if stored.ResultSummary != "" {
 		t.Fatalf("stored result summary = %q, want empty", stored.ResultSummary)
 	}
@@ -853,9 +838,6 @@ func TestWorkerProcessOneStoresMaxTurnsFailureCode(t *testing.T) {
 	}
 	if stored.FailureMessage != "agent reached max turns" {
 		t.Fatalf("stored failure message = %q, want agent reached max turns", stored.FailureMessage)
-	}
-	if stored.AgentSystemPrompt == "" {
-		t.Fatal("stored max-turns agent system prompt is empty")
 	}
 	if len(stored.ToolCalls) != 1 {
 		t.Fatalf("len(ToolCalls) = %d, want 1", len(stored.ToolCalls))

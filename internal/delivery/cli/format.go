@@ -10,7 +10,6 @@ import (
 )
 
 const (
-	sectionAgentPrompt  = "Agent prompt:"
 	sectionAgentTurns   = "Agent turns:"
 	sectionArtifacts    = "Artifacts:"
 	sectionFailure      = "Failure:"
@@ -62,26 +61,8 @@ func FormatRun(response RunResponse, options OutputOptions) string {
 	writeSteps(&buffer, response.Steps)
 	writeAgentTurns(&buffer, response.AgentTurns, options.Debug)
 	writeToolCalls(&buffer, response.ToolCalls, options.Debug)
-	if options.Debug && hasAgentPromptMetadata(response) {
-		writeSectionHeader(&buffer, sectionAgentPrompt)
-		if response.AgentPromptVersion != "" {
-			fmt.Fprintf(&buffer, "version: %s\n", response.AgentPromptVersion)
-		}
-		if response.AgentPromptSHA256 != "" {
-			fmt.Fprintf(&buffer, "sha256: %s\n", response.AgentPromptSHA256)
-		}
-		if response.AgentSystemPrompt != "" {
-			fmt.Fprintf(&buffer, "system_prompt:\n%s\n", response.AgentSystemPrompt)
-		}
-	}
 
 	return buffer.String()
-}
-
-func hasAgentPromptMetadata(response RunResponse) bool {
-	return response.AgentPromptVersion != "" ||
-		response.AgentPromptSHA256 != "" ||
-		response.AgentSystemPrompt != ""
 }
 
 // FormatArtifacts returns a human-readable artifact list.

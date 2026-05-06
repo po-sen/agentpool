@@ -26,12 +26,9 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 		Result: inbound.RunResultView{
 			Summary: "model output",
 		},
-		FailureReason:      "model failed",
-		FailureCode:        "model_generate_failed",
-		FailureMessage:     "model generation failed",
-		AgentSystemPrompt:  "system prompt",
-		AgentPromptVersion: "agentpool-runtime-v1",
-		AgentPromptSHA256:  "abc123",
+		FailureReason:  "model failed",
+		FailureCode:    "model_generate_failed",
+		FailureMessage: "model generation failed",
 		Steps: []inbound.StepView{
 			{
 				Name:      "execute",
@@ -97,15 +94,6 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	}
 	if response.FailureMessage != view.FailureMessage {
 		t.Fatalf("FailureMessage = %q, want %q", response.FailureMessage, view.FailureMessage)
-	}
-	if response.AgentSystemPrompt != view.AgentSystemPrompt {
-		t.Fatalf("AgentSystemPrompt = %q, want %q", response.AgentSystemPrompt, view.AgentSystemPrompt)
-	}
-	if response.AgentPromptVersion != view.AgentPromptVersion {
-		t.Fatalf("AgentPromptVersion = %q, want %q", response.AgentPromptVersion, view.AgentPromptVersion)
-	}
-	if response.AgentPromptSHA256 != view.AgentPromptSHA256 {
-		t.Fatalf("AgentPromptSHA256 = %q, want %q", response.AgentPromptSHA256, view.AgentPromptSHA256)
 	}
 	if len(response.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(response.Steps))
@@ -467,37 +455,10 @@ func TestRunResponseJSONIncludesAgentTurns(t *testing.T) {
 	}
 }
 
-func TestRunResponseJSONIncludesAgentPromptMetadata(t *testing.T) {
-	payload, err := json.Marshal(toRunResponse(inbound.RunView{
-		ID:                 "run_test",
-		Status:             "completed",
-		AgentSystemPrompt:  "system prompt",
-		AgentPromptVersion: "agentpool-runtime-v1",
-		AgentPromptSHA256:  "abc123",
-		Steps:              []inbound.StepView{},
-		CreatedAt:          time.Unix(100, 0).UTC(),
-		UpdatedAt:          time.Unix(101, 0).UTC(),
-	}))
-	if err != nil {
-		t.Fatalf("marshal response: %v", err)
-	}
-
-	got := string(payload)
-	for _, want := range []string{
-		`"agent_system_prompt":"system prompt"`,
-		`"agent_prompt_version":"agentpool-runtime-v1"`,
-		`"agent_prompt_sha256":"abc123"`,
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("response does not contain %s: %s", want, got)
-		}
-	}
-}
-
-func TestRunResponseJSONOmitsAgentSystemPromptWhenEmpty(t *testing.T) {
+func TestRunResponseJSONOmitsAgentPromptMetadata(t *testing.T) {
 	payload, err := json.Marshal(toRunResponse(inbound.RunView{
 		ID:        "run_test",
-		Status:    "queued",
+		Status:    "completed",
 		Steps:     []inbound.StepView{},
 		CreatedAt: time.Unix(100, 0).UTC(),
 		UpdatedAt: time.Unix(101, 0).UTC(),
@@ -507,8 +468,14 @@ func TestRunResponseJSONOmitsAgentSystemPromptWhenEmpty(t *testing.T) {
 	}
 
 	got := string(payload)
-	if strings.Contains(got, `"agent_system_prompt"`) {
-		t.Fatalf("response contains empty agent_system_prompt: %s", got)
+	for _, unwanted := range []string{
+		`"agent_system_prompt"`,
+		`"agent_prompt_version"`,
+		`"agent_prompt_sha256"`,
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("response contains %s: %s", unwanted, got)
+		}
 	}
 }
 

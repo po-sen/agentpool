@@ -6,8 +6,6 @@ import (
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 )
 
-const agentPromptVersion = "agentpool-runtime-v1"
-
 func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 	var builder strings.Builder
 	builder.WriteString("AgentPool is running one task.\n\n")
