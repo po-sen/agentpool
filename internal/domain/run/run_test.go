@@ -188,13 +188,22 @@ func TestRunRecordAgentSystemPromptStoresBoundedPrompt(t *testing.T) {
 	item := newRun(t, now)
 	prompt := strings.Repeat("a", MaxAgentSystemPromptLength+10)
 
-	item.RecordAgentSystemPrompt(now.Add(time.Second), prompt)
+	item.RecordAgentSystemPrompt(now.Add(time.Second), prompt, "agentpool-runtime-v1")
 
 	if len(item.AgentSystemPrompt) != MaxAgentSystemPromptLength {
 		t.Fatalf("len(AgentSystemPrompt) = %d, want %d", len(item.AgentSystemPrompt), MaxAgentSystemPromptLength)
 	}
 	if !strings.HasSuffix(item.AgentSystemPrompt, toolCallResultTruncatedMarker) {
 		t.Fatalf("AgentSystemPrompt does not contain truncation marker: %q", item.AgentSystemPrompt)
+	}
+	if item.AgentPromptVersion != "agentpool-runtime-v1" {
+		t.Fatalf("AgentPromptVersion = %q, want agentpool-runtime-v1", item.AgentPromptVersion)
+	}
+	if len(item.AgentPromptSHA256) != 64 {
+		t.Fatalf("len(AgentPromptSHA256) = %d, want 64", len(item.AgentPromptSHA256))
+	}
+	if !item.AgentSystemPromptRedacted {
+		t.Fatal("AgentSystemPromptRedacted = false, want true")
 	}
 	if !item.UpdatedAt.Equal(now.Add(time.Second)) {
 		t.Fatalf("UpdatedAt = %v, want %v", item.UpdatedAt, now.Add(time.Second))
@@ -204,7 +213,7 @@ func TestRunRecordAgentSystemPromptStoresBoundedPrompt(t *testing.T) {
 func TestRunRecordAgentSystemPromptTruncatesWithoutBreakingUTF8(t *testing.T) {
 	item := newRun(t, time.Unix(100, 0).UTC())
 
-	item.RecordAgentSystemPrompt(time.Unix(101, 0).UTC(), strings.Repeat("界", MaxAgentSystemPromptLength))
+	item.RecordAgentSystemPrompt(time.Unix(101, 0).UTC(), strings.Repeat("界", MaxAgentSystemPromptLength), "agentpool-runtime-v1")
 
 	if len(item.AgentSystemPrompt) > MaxAgentSystemPromptLength {
 		t.Fatalf("len(AgentSystemPrompt) = %d, want <= %d", len(item.AgentSystemPrompt), MaxAgentSystemPromptLength)
@@ -219,13 +228,25 @@ func TestRunRecordAgentSystemPromptTruncatesWithoutBreakingUTF8(t *testing.T) {
 
 func TestRunCloneCopiesAgentSystemPrompt(t *testing.T) {
 	item := newRun(t, time.Unix(100, 0).UTC())
-	item.RecordAgentSystemPrompt(time.Unix(101, 0).UTC(), "system prompt")
+	item.RecordAgentSystemPrompt(time.Unix(101, 0).UTC(), "system prompt", "agentpool-runtime-v1")
 
 	clone := item.Clone()
 	clone.AgentSystemPrompt = "changed"
+	clone.AgentPromptVersion = "changed"
+	clone.AgentPromptSHA256 = "changed"
+	clone.AgentSystemPromptRedacted = false
 
 	if item.AgentSystemPrompt != "system prompt" {
 		t.Fatalf("original AgentSystemPrompt = %q, want system prompt", item.AgentSystemPrompt)
+	}
+	if item.AgentPromptVersion != "agentpool-runtime-v1" {
+		t.Fatalf("original AgentPromptVersion = %q, want agentpool-runtime-v1", item.AgentPromptVersion)
+	}
+	if item.AgentPromptSHA256 == "" {
+		t.Fatal("original AgentPromptSHA256 is empty")
+	}
+	if !item.AgentSystemPromptRedacted {
+		t.Fatal("original AgentSystemPromptRedacted = false, want true")
 	}
 }
 

@@ -55,10 +55,13 @@ type AgentTurn struct {
 	EndedAt           time.Time
 }
 
-// AgentTurnMessage records one provider-neutral model request message for debugging.
+// AgentTurnMessage records one provider-facing model request message for debugging.
 type AgentTurnMessage struct {
-	Role    string
-	Content string
+	Role       string
+	Kind       string
+	Content    string
+	ToolCallID string
+	ToolName   string
 }
 
 func copyAgentTurns(turns []AgentTurn) []AgentTurn {
@@ -102,8 +105,11 @@ func copyAgentTurnMessages(messages []AgentTurnMessage) []AgentTurnMessage {
 		}
 
 		copied = append(copied, AgentTurnMessage{
-			Role:    role,
-			Content: truncateUTF8Text(message.Content, MaxAgentTurnMessageContentLength),
+			Role:       role,
+			Kind:       strings.TrimSpace(message.Kind),
+			Content:    truncateUTF8Text(message.Content, MaxAgentTurnMessageContentLength),
+			ToolCallID: strings.TrimSpace(message.ToolCallID),
+			ToolName:   strings.TrimSpace(message.ToolName),
 		})
 	}
 

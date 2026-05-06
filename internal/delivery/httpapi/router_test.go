@@ -339,15 +339,17 @@ func TestGetRunIncludesAgentTurns(t *testing.T) {
 	}
 }
 
-func TestGetRunIncludesAgentSystemPrompt(t *testing.T) {
+func TestGetRunIncludesAgentPromptMetadata(t *testing.T) {
 	get := &getRunStub{
 		view: inbound.RunView{
-			ID:                "run_test",
-			Status:            "failed",
-			AgentSystemPrompt: "AgentPool is running a task.\nAvailable tools:\n- none\n",
-			Steps:             []inbound.StepView{},
-			CreatedAt:         time.Unix(100, 0).UTC(),
-			UpdatedAt:         time.Unix(101, 0).UTC(),
+			ID:                        "run_test",
+			Status:                    "failed",
+			AgentPromptVersion:        "agentpool-runtime-v1",
+			AgentPromptSHA256:         "abc123",
+			AgentSystemPromptRedacted: true,
+			Steps:                     []inbound.StepView{},
+			CreatedAt:                 time.Unix(100, 0).UTC(),
+			UpdatedAt:                 time.Unix(101, 0).UTC(),
 		},
 	}
 	router := NewRouter(Dependencies{
@@ -364,8 +366,17 @@ func TestGetRunIncludesAgentSystemPrompt(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"agent_system_prompt":"AgentPool is running a task.\nAvailable tools:\n- none\n"`) {
-		t.Fatalf("response missing agent_system_prompt: %s", response.Body.String())
+	for _, want := range []string{
+		`"agent_prompt_version":"agentpool-runtime-v1"`,
+		`"agent_prompt_sha256":"abc123"`,
+		`"agent_system_prompt_redacted":true`,
+	} {
+		if !strings.Contains(response.Body.String(), want) {
+			t.Fatalf("response missing %s: %s", want, response.Body.String())
+		}
+	}
+	if strings.Contains(response.Body.String(), `"agent_system_prompt":"`) {
+		t.Fatalf("response exposed raw agent_system_prompt: %s", response.Body.String())
 	}
 }
 

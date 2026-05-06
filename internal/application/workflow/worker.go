@@ -401,7 +401,7 @@ func (w *Worker) completeRun(
 	item.RecordAgentTurns(now, toDomainAgentTurns(result.AgentTurns))
 	item.RecordArtifacts(now, artifacts)
 	if result.SystemPrompt != "" {
-		item.RecordAgentSystemPrompt(now, result.SystemPrompt)
+		item.RecordAgentSystemPrompt(now, result.SystemPrompt, result.PromptVersion)
 	}
 	if err := item.CompleteWithResult(now, result.Summary); err != nil {
 		return err
@@ -426,7 +426,7 @@ func (w *Worker) failRun(
 	item.RecordAgentTurns(now, toDomainAgentTurns(result.AgentTurns))
 	item.RecordArtifacts(now, artifacts)
 	if result.SystemPrompt != "" {
-		item.RecordAgentSystemPrompt(now, result.SystemPrompt)
+		item.RecordAgentSystemPrompt(now, result.SystemPrompt, result.PromptVersion)
 	}
 	code, message := failureDiagnosticsFor(item, cause)
 	if name, ok := latestRunningStepName(item); ok {
@@ -607,8 +607,11 @@ func toDomainAgentTurnMessages(records []agent.TurnMessageRecord) []run.AgentTur
 	messages := make([]run.AgentTurnMessage, 0, len(records))
 	for _, record := range records {
 		messages = append(messages, run.AgentTurnMessage{
-			Role:    record.Role,
-			Content: record.Content,
+			Role:       record.Role,
+			Kind:       record.Kind,
+			Content:    record.Content,
+			ToolCallID: record.ToolCallID,
+			ToolName:   record.ToolName,
 		})
 	}
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
@@ -56,10 +57,32 @@ func TestClientGenerateSendsAPIKeyAndParsesText(t *testing.T) {
 	}
 
 	response, err := client.Generate(context.Background(), outbound.ModelRequest{
-		Messages: []outbound.ModelMessage{
-			{Role: "system", Content: "follow protocol"},
-			{Role: "user", Content: "do work"},
-			{Role: "assistant", Content: "thinking"},
+		Instructions: "follow protocol",
+		Turns: []outbound.ModelTurn{
+			{
+				Role: outbound.ModelRoleUser,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindTaskPrompt, Text: "do work"},
+				},
+			},
+			{
+				Role: outbound.ModelRoleAssistant,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindAssistantResponse, Text: "thinking"},
+				},
+			},
+			{
+				Role: outbound.ModelRoleAssistant,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindAssistantAttempt, Text: "plain text"},
+				},
+			},
+			{
+				Role: outbound.ModelRoleRuntime,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindProtocolCorrection, Text: "return JSON"},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -67,6 +90,17 @@ func TestClientGenerateSendsAPIKeyAndParsesText(t *testing.T) {
 	}
 	if response.Content != "done" {
 		t.Fatalf("content = %q, want done", response.Content)
+	}
+	if len(response.RequestMessages) != 3 {
+		t.Fatalf("len(RequestMessages) = %d, want 3", len(response.RequestMessages))
+	}
+	if response.RequestMessages[0].Role != "system_instruction" {
+		t.Fatalf("RequestMessages[0].Role = %q, want system_instruction", response.RequestMessages[0].Role)
+	}
+	if !strings.Contains(response.RequestMessages[0].Content, "[REDACTED]") ||
+		!strings.Contains(response.RequestMessages[0].Content, "Previous assistant attempt that failed validation:") ||
+		!strings.Contains(response.RequestMessages[0].Content, "return JSON") {
+		t.Fatalf("RequestMessages[0].Content = %q, want redacted system diagnostics", response.RequestMessages[0].Content)
 	}
 	if key != "test-key" {
 		t.Fatalf("x-goog-api-key = %q, want test-key", key)
@@ -77,11 +111,17 @@ func TestClientGenerateSendsAPIKeyAndParsesText(t *testing.T) {
 	if rawQuery != "" {
 		t.Fatalf("raw query = %q, want empty query", rawQuery)
 	}
-	if len(requestBody.SystemInstruction.Parts) != 1 {
-		t.Fatalf("len(system parts) = %d, want 1", len(requestBody.SystemInstruction.Parts))
+	if len(requestBody.SystemInstruction.Parts) != 3 {
+		t.Fatalf("len(system parts) = %d, want 3", len(requestBody.SystemInstruction.Parts))
 	}
 	if requestBody.SystemInstruction.Parts[0].Text != "follow protocol" {
 		t.Fatalf("system text = %q, want follow protocol", requestBody.SystemInstruction.Parts[0].Text)
+	}
+	if requestBody.SystemInstruction.Parts[1].Text != "Previous assistant attempt that failed validation:\nplain text" {
+		t.Fatalf("system attempt = %q, want assistant attempt", requestBody.SystemInstruction.Parts[1].Text)
+	}
+	if requestBody.SystemInstruction.Parts[2].Text != "return JSON" {
+		t.Fatalf("system correction = %q, want return JSON", requestBody.SystemInstruction.Parts[2].Text)
 	}
 	if len(requestBody.Contents) != 2 {
 		t.Fatalf("len(contents) = %d, want 2", len(requestBody.Contents))
@@ -91,6 +131,75 @@ func TestClientGenerateSendsAPIKeyAndParsesText(t *testing.T) {
 	}
 	if requestBody.Contents[1].Role != "model" {
 		t.Fatalf("contents[1].Role = %q, want model", requestBody.Contents[1].Role)
+	}
+}
+
+func TestToGeminiContentsMapsFunctionCallAndResponse(t *testing.T) {
+	contents := toGeminiContents([]outbound.ModelTurn{
+		{
+			Role: outbound.ModelRoleAssistant,
+			Parts: []outbound.ModelPart{
+				{
+					Kind:          outbound.ModelPartKindToolCall,
+					ToolCallID:    "call_1",
+					ToolName:      "sandbox_exec",
+					ToolArguments: map[string]string{"command": "echo hi"},
+				},
+			},
+		},
+		{
+			Role: outbound.ModelRoleTool,
+			Parts: []outbound.ModelPart{
+				{
+					Kind:       outbound.ModelPartKindToolResult,
+					ToolCallID: "call_1",
+					ToolName:   "sandbox_exec",
+					Text:       "exit_code: 0\nstdout:\nhi",
+				},
+			},
+		},
+	})
+
+	if len(contents) != 2 {
+		t.Fatalf("len(contents) = %d, want model functionCall and user functionResponse", len(contents))
+	}
+	if contents[0].Role != "model" || len(contents[0].Parts) != 1 || contents[0].Parts[0].FunctionCall == nil {
+		t.Fatalf("contents[0] = %#v, want model functionCall", contents[0])
+	}
+	if contents[0].Parts[0].FunctionCall.ID != "call_1" ||
+		contents[0].Parts[0].FunctionCall.Name != "sandbox_exec" ||
+		contents[0].Parts[0].FunctionCall.Args["command"] != "echo hi" {
+		t.Fatalf("functionCall = %#v, want sandbox_exec", contents[0].Parts[0].FunctionCall)
+	}
+	if contents[1].Role != "user" || len(contents[1].Parts) != 1 || contents[1].Parts[0].FunctionResponse == nil {
+		t.Fatalf("contents[1] = %#v, want user functionResponse", contents[1])
+	}
+	if contents[1].Parts[0].FunctionResponse.ID != "call_1" ||
+		contents[1].Parts[0].FunctionResponse.Name != "sandbox_exec" {
+		t.Fatalf("functionResponse = %#v, want call_1 sandbox_exec", contents[1].Parts[0].FunctionResponse)
+	}
+}
+
+func TestToGeminiToolsBuildsFunctionDeclarations(t *testing.T) {
+	tools := toGeminiTools([]outbound.ToolDefinition{
+		{
+			Name:        "workspace",
+			Description: "Lists workspace metadata.",
+			Arguments: []outbound.ToolArgumentDefinition{
+				{Name: "operation", Description: "Operation to run.", Required: true, Example: "list"},
+			},
+		},
+	})
+
+	if len(tools) != 1 || len(tools[0].FunctionDeclarations) != 1 {
+		t.Fatalf("tools = %#v, want one function declaration", tools)
+	}
+	declaration := tools[0].FunctionDeclarations[0]
+	if declaration.Name != "workspace" {
+		t.Fatalf("declaration name = %q, want workspace", declaration.Name)
+	}
+	if declaration.Parameters.Properties["operation"].Type != "string" {
+		t.Fatalf("operation parameter = %#v, want string", declaration.Parameters.Properties["operation"])
 	}
 }
 

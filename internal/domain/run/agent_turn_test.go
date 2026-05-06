@@ -19,7 +19,7 @@ func TestRunRecordAgentTurnsCopiesAndTruncatesRecords(t *testing.T) {
 			Message:    "model requested tool call",
 			RequestMessages: []AgentTurnMessage{
 				{Role: "system", Content: "system prompt"},
-				{Role: "user", Content: "do work"},
+				{Role: "tool", Content: "tool output", ToolCallID: "call_1", ToolName: "workspace"},
 			},
 			RawResponse:     `{"type":"tool_call"}`,
 			ResponseFormat:  "json_object",
@@ -45,7 +45,9 @@ func TestRunRecordAgentTurnsCopiesAndTruncatesRecords(t *testing.T) {
 	if item.AgentTurns[0].RawResponse != `{"type":"tool_call"}` {
 		t.Fatalf("RawResponse = %q, want raw tool call", item.AgentTurns[0].RawResponse)
 	}
-	if len(item.AgentTurns[0].RequestMessages) != 2 || item.AgentTurns[0].RequestMessages[1].Content != "do work" {
+	if len(item.AgentTurns[0].RequestMessages) != 2 ||
+		item.AgentTurns[0].RequestMessages[1].ToolCallID != "call_1" ||
+		item.AgentTurns[0].RequestMessages[1].ToolName != "workspace" {
 		t.Fatalf("RequestMessages = %#v, want copied model request messages", item.AgentTurns[0].RequestMessages)
 	}
 	if len(item.AgentTurns[0].ResponsePreview) != MaxAgentTurnPreviewLength {

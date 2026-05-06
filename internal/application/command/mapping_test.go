@@ -1,6 +1,7 @@
 package command
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +34,9 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	item.FailureCode = run.FailureCodeModelGenerateFailed
 	item.FailureMessage = "model generation failed"
 	item.AgentSystemPrompt = "system prompt"
+	item.AgentPromptVersion = "agentpool-runtime-v1"
+	item.AgentPromptSHA256 = strings.Repeat("a", 64)
+	item.AgentSystemPromptRedacted = true
 	item.ToolCalls = []run.ToolCall{
 		{
 			Name:      "sandbox_exec",
@@ -96,7 +100,7 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	if view.FailureMessage != item.FailureMessage {
 		t.Fatalf("FailureMessage = %q, want %q", view.FailureMessage, item.FailureMessage)
 	}
-	assertMappedAgentSystemPrompt(t, view, item)
+	assertMappedAgentPromptMetadata(t, view, item)
 	if len(view.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(view.Steps))
 	}
@@ -145,11 +149,20 @@ func assertMappedAgentTurn(t *testing.T, turns []inbound.AgentTurnView) {
 	}
 }
 
-func assertMappedAgentSystemPrompt(t *testing.T, view inbound.RunView, item *run.Run) {
+func assertMappedAgentPromptMetadata(t *testing.T, view inbound.RunView, item *run.Run) {
 	t.Helper()
 
-	if view.AgentSystemPrompt != item.AgentSystemPrompt {
-		t.Fatalf("AgentSystemPrompt = %q, want %q", view.AgentSystemPrompt, item.AgentSystemPrompt)
+	if view.AgentSystemPrompt != "" {
+		t.Fatalf("AgentSystemPrompt = %q, want redacted empty prompt", view.AgentSystemPrompt)
+	}
+	if view.AgentPromptVersion != item.AgentPromptVersion {
+		t.Fatalf("AgentPromptVersion = %q, want %q", view.AgentPromptVersion, item.AgentPromptVersion)
+	}
+	if view.AgentPromptSHA256 != item.AgentPromptSHA256 {
+		t.Fatalf("AgentPromptSHA256 = %q, want %q", view.AgentPromptSHA256, item.AgentPromptSHA256)
+	}
+	if view.AgentSystemPromptRedacted != item.AgentSystemPromptRedacted {
+		t.Fatalf("AgentSystemPromptRedacted = %t, want %t", view.AgentSystemPromptRedacted, item.AgentSystemPromptRedacted)
 	}
 }
 

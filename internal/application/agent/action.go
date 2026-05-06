@@ -38,6 +38,8 @@ const (
 	toolCallActionHint = `Return {"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}`
 )
 
+const actionFieldArguments = "arguments"
+
 type action struct {
 	Type      actionType
 	Summary   string
@@ -75,7 +77,7 @@ type actionParseResult struct {
 }
 
 func parseAction(content string) actionParseResult {
-	trimmed := strings.TrimSpace(content)
+	trimmed := normalizeWholeResponseFencedJSON(strings.TrimSpace(content))
 	raw, parseErr := decodeActionObject(trimmed)
 	if parseErr != nil {
 		return protocolError(*parseErr)
@@ -87,6 +89,34 @@ func parseAction(content string) actionParseResult {
 	}
 
 	return actionParseResult{action: parsed, status: actionParseValid}
+}
+
+func normalizeWholeResponseFencedJSON(content string) string {
+	if !strings.HasPrefix(content, "```") {
+		return content
+	}
+
+	withoutOpening := strings.TrimPrefix(content, "```")
+	lineEnd := strings.IndexByte(withoutOpening, '\n')
+	if lineEnd < 0 {
+		return content
+	}
+
+	infoString := strings.TrimSpace(withoutOpening[:lineEnd])
+	if infoString != "" && !strings.EqualFold(infoString, "json") {
+		return content
+	}
+
+	bodyWithClosing := withoutOpening[lineEnd+1:]
+	closingStart := strings.LastIndex(bodyWithClosing, "```")
+	if closingStart < 0 {
+		return content
+	}
+	if trailing := strings.TrimSpace(bodyWithClosing[closingStart+3:]); trailing != "" {
+		return content
+	}
+
+	return strings.TrimSpace(bodyWithClosing[:closingStart])
 }
 
 func protocolError(parseErr actionParseError) actionParseResult {
@@ -181,12 +211,7 @@ func parseActionObject(raw map[string]any) (action, *actionParseError) {
 func parseActionType(raw map[string]any) (actionType, *actionParseError) {
 	value, ok := raw["type"]
 	if !ok {
-		return "", newActionParseError(
-			actionParseCodeMissingType,
-			"action.type is required",
-			protocolActionHint,
-			nil,
-		)
+		return "", missingTypeActionParseError(raw)
 	}
 
 	typeValue, ok := value.(string)
@@ -200,6 +225,66 @@ func parseActionType(raw map[string]any) (actionType, *actionParseError) {
 	}
 
 	return actionType(typeValue), nil
+}
+
+func missingTypeActionParseError(raw map[string]any) *actionParseError {
+	if toolName := providerStyleToolCallName(raw); toolName != "" {
+		return newActionParseError(
+			actionParseCodeMissingType,
+			`action.type is required; {"name":...,"arguments":...} is a provider-style tool call object, but it was returned as assistant text so AgentPool could not execute it`,
+			`If you intended to call a tool through the JSON fallback protocol, return exactly `+toolCallRetryExample(toolName)+` using the same arguments. Do not return a final answer until the tool has actually executed and you have received the tool result.`,
+			nil,
+		)
+	}
+	if toolName := fallbackToolCallNameWithoutType(raw); toolName != "" {
+		return newActionParseError(
+			actionParseCodeMissingType,
+			`action.type is required; the response looked like a tool call but omitted "type":"tool_call"`,
+			`If you intended to call a tool, return exactly `+toolCallRetryExample(toolName)+` using the same arguments. Do not return a final answer until the tool has actually executed and you have received the tool result.`,
+			nil,
+		)
+	}
+
+	return newActionParseError(
+		actionParseCodeMissingType,
+		"action.type is required",
+		protocolActionHint,
+		nil,
+	)
+}
+
+func providerStyleToolCallName(raw map[string]any) string {
+	toolName, ok := raw["name"].(string)
+	if !ok || strings.TrimSpace(toolName) == "" {
+		return ""
+	}
+	if _, ok := raw[actionFieldArguments].(map[string]any); !ok {
+		return ""
+	}
+	if _, hasType := raw["type"]; hasType {
+		return ""
+	}
+	if _, hasTool := raw["tool"]; hasTool {
+		return ""
+	}
+
+	return strings.TrimSpace(toolName)
+}
+
+func toolCallRetryExample(toolName string) string {
+	return `{"type":"tool_call","tool":` + strconv.Quote(toolName) + `,"arguments":{...}}`
+}
+
+func fallbackToolCallNameWithoutType(raw map[string]any) string {
+	toolName, ok := raw["tool"].(string)
+	if !ok || strings.TrimSpace(toolName) == "" {
+		return ""
+	}
+	if _, ok := raw[actionFieldArguments].(map[string]any); !ok {
+		return ""
+	}
+
+	return strings.TrimSpace(toolName)
 }
 
 func parseFinalAction(raw map[string]any) (action, *actionParseError) {
@@ -239,7 +324,7 @@ func parseFinalAction(raw map[string]any) (action, *actionParseError) {
 }
 
 func parseToolCallAction(raw map[string]any) (action, *actionParseError) {
-	if parseErr := rejectUnknownFields(raw, map[string]struct{}{"type": {}, "tool": {}, "arguments": {}}); parseErr != nil {
+	if parseErr := rejectUnknownFields(raw, map[string]struct{}{"type": {}, "tool": {}, actionFieldArguments: {}}); parseErr != nil {
 		return action{}, parseErr
 	}
 
@@ -279,7 +364,7 @@ func parseToolCallAction(raw map[string]any) (action, *actionParseError) {
 }
 
 func parseToolArguments(raw map[string]any) (map[string]string, *actionParseError) {
-	value, ok := raw["arguments"]
+	value, ok := raw[actionFieldArguments]
 	if !ok {
 		return map[string]string{}, nil
 	}

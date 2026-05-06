@@ -10,15 +10,15 @@ import (
 )
 
 const (
-	sectionAgentSystemPrompt = "Agent system prompt:"
-	sectionAgentTurns        = "Agent turns:"
-	sectionArtifacts         = "Artifacts:"
-	sectionFailure           = "Failure:"
-	sectionResult            = "Result:"
-	sectionSteps             = "Steps:"
-	sectionToolCalls         = "Tool calls:"
-	formatTwoValuesLine      = "%s %s\n"
-	statusLabel              = "Status:"
+	sectionAgentPrompt  = "Agent prompt:"
+	sectionAgentTurns   = "Agent turns:"
+	sectionArtifacts    = "Artifacts:"
+	sectionFailure      = "Failure:"
+	sectionResult       = "Result:"
+	sectionSteps        = "Steps:"
+	sectionToolCalls    = "Tool calls:"
+	formatTwoValuesLine = "%s %s\n"
+	statusLabel         = "Status:"
 )
 
 // WriteRunOutput writes one run in JSON or human-readable form.
@@ -62,12 +62,26 @@ func FormatRun(response RunResponse, options OutputOptions) string {
 	writeSteps(&buffer, response.Steps)
 	writeAgentTurns(&buffer, response.AgentTurns, options.Debug)
 	writeToolCalls(&buffer, response.ToolCalls, options.Debug)
-	if options.Debug && response.AgentSystemPrompt != "" {
-		writeSectionHeader(&buffer, sectionAgentSystemPrompt)
-		fmt.Fprintf(&buffer, "%s\n", response.AgentSystemPrompt)
+	if options.Debug && hasAgentPromptMetadata(response) {
+		writeSectionHeader(&buffer, sectionAgentPrompt)
+		if response.AgentPromptVersion != "" {
+			fmt.Fprintf(&buffer, "version: %s\n", response.AgentPromptVersion)
+		}
+		if response.AgentPromptSHA256 != "" {
+			fmt.Fprintf(&buffer, "sha256: %s\n", response.AgentPromptSHA256)
+		}
+		if response.AgentSystemPromptRedacted {
+			fmt.Fprintf(&buffer, "redacted: true\n")
+		}
 	}
 
 	return buffer.String()
+}
+
+func hasAgentPromptMetadata(response RunResponse) bool {
+	return response.AgentPromptVersion != "" ||
+		response.AgentPromptSHA256 != "" ||
+		response.AgentSystemPromptRedacted
 }
 
 // FormatArtifacts returns a human-readable artifact list.
@@ -241,7 +255,11 @@ func agentTurnDebugLine(turn AgentTurnResponse) string {
 	if len(turn.RequestMessages) > 0 {
 		line += "\n  request_messages:"
 		for index, message := range turn.RequestMessages {
-			line += fmt.Sprintf("\n    %d. %s: %s", index+1, message.Role, message.Content)
+			label := message.Role
+			if message.Kind != "" {
+				label += "/" + message.Kind
+			}
+			line += fmt.Sprintf("\n    %d. %s: %s", index+1, label, message.Content)
 		}
 	}
 	if turn.RawResponse != "" {

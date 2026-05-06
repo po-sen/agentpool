@@ -41,9 +41,21 @@ func TestClientGenerateSendsChatCompletionRequest(t *testing.T) {
 	}
 
 	response, err := client.Generate(context.Background(), outbound.ModelRequest{
-		RunID: "run_test",
-		Messages: []outbound.ModelMessage{
-			{Role: "user", Content: "do work"},
+		RunID:        "run_test",
+		Instructions: "follow protocol",
+		Turns: []outbound.ModelTurn{
+			{
+				Role: outbound.ModelRoleUser,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindTaskPrompt, Text: "do work"},
+				},
+			},
+			{
+				Role: outbound.ModelRoleRuntime,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindProtocolCorrection, Text: "return JSON"},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -51,6 +63,15 @@ func TestClientGenerateSendsChatCompletionRequest(t *testing.T) {
 	}
 	if response.Content != "done" {
 		t.Fatalf("content = %q, want done", response.Content)
+	}
+	if len(response.RequestMessages) != 3 {
+		t.Fatalf("len(RequestMessages) = %d, want 3", len(response.RequestMessages))
+	}
+	if response.RequestMessages[0].Role != "system" || response.RequestMessages[0].Content != "[REDACTED]" {
+		t.Fatalf("RequestMessages[0] = %#v, want redacted system instructions", response.RequestMessages[0])
+	}
+	if response.RequestMessages[2].Role != "system" || response.RequestMessages[2].Content != "return JSON" {
+		t.Fatalf("RequestMessages[2] = %#v, want system correction", response.RequestMessages[2])
 	}
 	if auth != "Bearer test-key" {
 		t.Fatalf("authorization = %q, want bearer token", auth)
@@ -60,6 +81,84 @@ func TestClientGenerateSendsChatCompletionRequest(t *testing.T) {
 	}
 	if received["stream"] != false {
 		t.Fatalf("stream = %v, want false", received["stream"])
+	}
+	messages, ok := received["messages"].([]any)
+	if !ok || len(messages) != 3 {
+		t.Fatalf("messages = %#v, want system, user, and system correction messages", received["messages"])
+	}
+	system, ok := messages[0].(map[string]any)
+	if !ok || system["role"] != "system" || system["content"] != "follow protocol" {
+		t.Fatalf("messages[0] = %#v, want system instructions", messages[0])
+	}
+	correction, ok := messages[2].(map[string]any)
+	if !ok || correction["role"] != "system" || correction["content"] != "return JSON" {
+		t.Fatalf("messages[2] = %#v, want system correction", messages[2])
+	}
+}
+
+func TestToChatMessagesMapsNativeToolCallsAndResults(t *testing.T) {
+	messages := toChatMessages(outbound.ModelRequest{
+		Turns: []outbound.ModelTurn{
+			{
+				Role: outbound.ModelRoleAssistant,
+				Parts: []outbound.ModelPart{
+					{
+						Kind:          outbound.ModelPartKindToolCall,
+						ToolCallID:    "call_1",
+						ToolName:      "sandbox_exec",
+						ToolArguments: map[string]string{"command": "echo hi"},
+					},
+				},
+			},
+			{
+				Role: outbound.ModelRoleTool,
+				Parts: []outbound.ModelPart{
+					{
+						Kind:       outbound.ModelPartKindToolResult,
+						ToolCallID: "call_1",
+						ToolName:   "sandbox_exec",
+						Text:       "exit_code: 0\nstdout:\nhi",
+					},
+				},
+			},
+		},
+	})
+
+	if len(messages) != 2 {
+		t.Fatalf("len(messages) = %d, want assistant tool call and tool result", len(messages))
+	}
+	if messages[0].Role != "assistant" || len(messages[0].ToolCalls) != 1 {
+		t.Fatalf("messages[0] = %#v, want assistant tool_calls", messages[0])
+	}
+	if messages[0].ToolCalls[0].ID != "call_1" ||
+		messages[0].ToolCalls[0].Function.Name != "sandbox_exec" ||
+		messages[0].ToolCalls[0].Function.Arguments != `{"command":"echo hi"}` {
+		t.Fatalf("tool_calls[0] = %#v, want function arguments", messages[0].ToolCalls[0])
+	}
+	if messages[1].Role != "tool" || messages[1].ToolCallID != "call_1" {
+		t.Fatalf("messages[1] = %#v, want tool role with tool_call_id", messages[1])
+	}
+}
+
+func TestToChatToolsBuildsCompatibleFunctionSchemas(t *testing.T) {
+	tools := toChatTools([]outbound.ToolDefinition{
+		{
+			Name:        "workspace",
+			Description: "Lists workspace metadata.",
+			Arguments: []outbound.ToolArgumentDefinition{
+				{Name: "operation", Description: "Operation to run.", Required: true, Example: "list"},
+			},
+		},
+	})
+
+	if len(tools) != 1 {
+		t.Fatalf("len(tools) = %d, want 1", len(tools))
+	}
+	if tools[0].Type != "function" || tools[0].Function.Name != "workspace" {
+		t.Fatalf("tool = %#v, want workspace function", tools[0])
+	}
+	if tools[0].Function.Parameters.Properties["operation"].Type != "string" {
+		t.Fatalf("operation parameter = %#v, want string", tools[0].Function.Parameters.Properties["operation"])
 	}
 }
 

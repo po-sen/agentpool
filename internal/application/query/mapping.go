@@ -76,16 +76,18 @@ func toRunView(item *run.Run) inbound.RunView {
 		Result: inbound.RunResultView{
 			Summary: item.ResultSummary,
 		},
-		FailureReason:     item.FailureReason,
-		FailureCode:       item.FailureCode,
-		FailureMessage:    item.FailureMessage,
-		Steps:             steps,
-		ToolCalls:         toolCalls,
-		AgentTurns:        agentTurns,
-		Artifacts:         artifacts,
-		AgentSystemPrompt: item.AgentSystemPrompt,
-		CreatedAt:         item.CreatedAt,
-		UpdatedAt:         item.UpdatedAt,
+		FailureReason:             item.FailureReason,
+		FailureCode:               item.FailureCode,
+		FailureMessage:            item.FailureMessage,
+		Steps:                     steps,
+		ToolCalls:                 toolCalls,
+		AgentTurns:                agentTurns,
+		Artifacts:                 artifacts,
+		AgentPromptVersion:        item.AgentPromptVersion,
+		AgentPromptSHA256:         item.AgentPromptSHA256,
+		AgentSystemPromptRedacted: item.AgentSystemPromptRedacted,
+		CreatedAt:                 item.CreatedAt,
+		UpdatedAt:                 item.UpdatedAt,
 	}
 }
 
@@ -97,8 +99,11 @@ func agentTurnMessageViews(messages []run.AgentTurnMessage) []inbound.AgentTurnM
 	views := make([]inbound.AgentTurnMessageView, 0, len(messages))
 	for _, message := range messages {
 		views = append(views, inbound.AgentTurnMessageView{
-			Role:    message.Role,
-			Content: message.Content,
+			Role:       message.Role,
+			Kind:       message.Kind,
+			Content:    message.Content,
+			ToolCallID: message.ToolCallID,
+			ToolName:   message.ToolName,
 		})
 	}
 

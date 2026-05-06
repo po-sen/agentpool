@@ -42,20 +42,23 @@ type CreateRunRequest struct {
 
 // RunResponse mirrors the public run JSON response.
 type RunResponse struct {
-	ID                string              `json:"id"`
-	Status            string              `json:"status"`
-	Task              TaskResponse        `json:"task"`
-	Result            *RunResultResponse  `json:"result,omitempty"`
-	FailureReason     string              `json:"failure_reason,omitempty"`
-	FailureCode       string              `json:"failure_code,omitempty"`
-	FailureMessage    string              `json:"failure_message,omitempty"`
-	Steps             []StepResponse      `json:"steps"`
-	ToolCalls         []ToolCallResponse  `json:"tool_calls,omitempty"`
-	AgentTurns        []AgentTurnResponse `json:"agent_turns,omitempty"`
-	Artifacts         []ArtifactResponse  `json:"artifacts,omitempty"`
-	AgentSystemPrompt string              `json:"agent_system_prompt,omitempty"`
-	CreatedAt         time.Time           `json:"created_at"`
-	UpdatedAt         time.Time           `json:"updated_at"`
+	ID                        string              `json:"id"`
+	Status                    string              `json:"status"`
+	Task                      TaskResponse        `json:"task"`
+	Result                    *RunResultResponse  `json:"result,omitempty"`
+	FailureReason             string              `json:"failure_reason,omitempty"`
+	FailureCode               string              `json:"failure_code,omitempty"`
+	FailureMessage            string              `json:"failure_message,omitempty"`
+	Steps                     []StepResponse      `json:"steps"`
+	ToolCalls                 []ToolCallResponse  `json:"tool_calls,omitempty"`
+	AgentTurns                []AgentTurnResponse `json:"agent_turns,omitempty"`
+	Artifacts                 []ArtifactResponse  `json:"artifacts,omitempty"`
+	AgentSystemPrompt         string              `json:"agent_system_prompt,omitempty"`
+	AgentPromptVersion        string              `json:"agent_prompt_version,omitempty"`
+	AgentPromptSHA256         string              `json:"agent_prompt_sha256,omitempty"`
+	AgentSystemPromptRedacted bool                `json:"agent_system_prompt_redacted,omitempty"`
+	CreatedAt                 time.Time           `json:"created_at"`
+	UpdatedAt                 time.Time           `json:"updated_at"`
 }
 
 // TaskResponse mirrors task metadata in the public run JSON response.
@@ -134,10 +137,13 @@ type AgentTurnResponse struct {
 	EndedAt           time.Time         `json:"ended_at"`
 }
 
-// MessageResponse mirrors one provider-neutral model request message in run diagnostics.
+// MessageResponse mirrors one provider-facing model request message in run diagnostics.
 type MessageResponse struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string `json:"role"`
+	Kind       string `json:"kind,omitempty"`
+	Content    string `json:"content"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
 }
 
 type createRunJSONRequest struct {

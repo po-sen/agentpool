@@ -59,18 +59,57 @@ func TestRunnerRejectsNaturalLanguageResponseAndContinues(t *testing.T) {
 	if model.requests[0].RunID != "run_test" {
 		t.Fatalf("model RunID = %s, want run_test", model.requests[0].RunID)
 	}
-	assertMessage(t, model.requests[0].Messages[0], "system", "Available tools")
-	assertMessage(t, model.requests[0].Messages[0], "system", "workspace: Lists or stats workspace paths without reading file contents.")
-	assertMessage(t, model.requests[0].Messages[0], "system", "sandbox_exec: Runs a command inside the sandbox from /workspace/work.")
-	assertMessage(t, model.requests[0].Messages[1], "user", "do work")
+	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "[REDACTED]")
+	assertInstruction(t, model.requests[0], "Available tools")
+	assertInstruction(t, model.requests[0], "workspace: Lists or stats workspace paths without reading file contents.")
+	assertInstruction(t, model.requests[0], "sandbox_exec: Runs a command inside the sandbox from /workspace/work.")
+	if len(model.requests[0].Tools) != 3 {
+		t.Fatalf("len(model Tools) = %d, want advertised tools", len(model.requests[0].Tools))
+	}
+	assertMessage(t, requestMessages(model.requests[0])[1], "user", "do work")
 	if !strings.Contains(result.SystemPrompt, "Available tools") {
 		t.Fatalf("SystemPrompt = %q, want available tools", result.SystemPrompt)
 	}
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
 	}
-	lastMessages := model.requests[1].Messages
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Return exactly one JSON object")
+	lastMessages := requestMessages(model.requests[1])
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Return exactly one JSON object")
+}
+
+func TestRunnerRecordsProviderRequestMessagesFromModelResponse(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{
+				Content: `{"type":"final","summary":"done"}`,
+				RequestMessages: []outbound.ModelRequestMessage{
+					{Role: "developer", Content: "[REDACTED]"},
+					{Role: "user", Content: "do work"},
+				},
+			},
+		},
+	}
+	runner := NewRunner(model, newFakeToolRunner())
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "do work"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if len(result.AgentTurns) != 1 {
+		t.Fatalf("len(AgentTurns) = %d, want 1", len(result.AgentTurns))
+	}
+	messages := result.AgentTurns[0].RequestMessages
+	if len(messages) != 2 {
+		t.Fatalf("len(RequestMessages) = %d, want 2", len(messages))
+	}
+	assertMessage(t, messages[0], "developer", "[REDACTED]")
+	if messages[0].Kind != "" {
+		t.Fatalf("provider request message kind = %q, want empty", messages[0].Kind)
+	}
+	assertMessage(t, messages[1], "user", "do work")
 }
 
 func TestNewRunnerUsesEightDefaultMaxTurns(t *testing.T) {
@@ -104,10 +143,10 @@ func TestRunnerExposesSandboxVerificationPolicyToModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	systemMessage := model.requests[0].Messages[0]
-	assertMessage(t, systemMessage, "system", "call sandbox_exec before final")
-	assertMessage(t, systemMessage, "system", "Do not guess exact answers when sandbox_exec can verify them.")
-	assertMessage(t, systemMessage, "system", "arithmetic, counts, searches, file content inspection")
+	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "[REDACTED]")
+	assertInstruction(t, model.requests[0], "call sandbox_exec before final")
+	assertInstruction(t, model.requests[0], "Do not guess exact answers when sandbox_exec can verify them.")
+	assertInstruction(t, model.requests[0], "arithmetic, counts, searches, file content inspection")
 	if !strings.Contains(result.SystemPrompt, "exact or verifiable answer") {
 		t.Fatalf("SystemPrompt = %q, want sandbox verification policy", result.SystemPrompt)
 	}
@@ -166,13 +205,17 @@ func TestRunnerIncludesUploadedFileMetadataInInitialMessage(t *testing.T) {
 	if result.Summary != "done" {
 		t.Fatalf("summary = %q, want done", result.Summary)
 	}
-	initialUserMessage := model.requests[0].Messages[1]
-	assertMessage(t, initialUserMessage, "user", "count this file")
-	assertMessage(t, initialUserMessage, "user", "Uploaded files available in the workspace:")
-	assertMessage(t, initialUserMessage, "user", "path: README.md; media_type: text/markdown; size_bytes: 7")
-	assertMessage(t, initialUserMessage, "user", "If the user refers to this file without naming it")
-	if strings.Contains(initialUserMessage.Content, "# Demo") {
-		t.Fatalf("initial user message exposed attachment content: %q", initialUserMessage.Content)
+	initialMessages := requestMessages(model.requests[0])
+	assertMessage(t, initialMessages[1], "user", "count this file")
+	workspaceContext := initialMessages[2]
+	if workspaceContext.Kind != string(outbound.ModelPartKindWorkspaceContext) {
+		t.Fatalf("workspace context kind = %q, want %q", workspaceContext.Kind, outbound.ModelPartKindWorkspaceContext)
+	}
+	assertMessage(t, workspaceContext, "user", "Workspace input files available to tools:")
+	assertMessage(t, workspaceContext, "user", "path: README.md; virtual_path: /workspace/input/README.md; media_type: text/markdown; size_bytes: 7")
+	assertMessage(t, workspaceContext, "user", "If the user refers to this file without naming it")
+	if strings.Contains(workspaceContext.Content, "# Demo") {
+		t.Fatalf("initial workspace context exposed attachment content: %q", workspaceContext.Content)
 	}
 }
 
@@ -232,12 +275,84 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
 	}
-	lastMessages := model.requests[1].Messages
+	lastMessages := requestMessages(model.requests[1])
 	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", `"type":"tool_call"`)
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool result for echo:\nhello")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "Tool result for echo:\nhello")
 	tools.calls[0].Arguments["text"] = "changed"
 	if result.ToolCalls[0].Arguments["text"] != "hello" {
 		t.Fatalf("record text after mutation = %q, want hello", result.ToolCalls[0].Arguments["text"])
+	}
+}
+
+func TestRunnerCallsNativeToolAndReturnsFinalSummary(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{
+				ToolCalls: []outbound.ModelToolCall{
+					{ID: "call_echo_1", Name: "echo", Arguments: map[string]string{"text": "hello"}},
+				},
+			},
+			{Content: `{"type":"final","summary":"echoed hello"}`},
+		},
+	}
+	tools := newFakeToolRunner()
+	runner := NewRunner(
+		model,
+		tools,
+		WithClock(sequenceClock(
+			timeUnix(101),
+			timeUnix(102),
+			timeUnix(103),
+			timeUnix(104),
+			timeUnix(105),
+			timeUnix(106),
+		)),
+	)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "echo hello"},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspace(),
+			Sandbox:   outbound.Sandbox{ID: "sandbox_test"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "echoed hello" {
+		t.Fatalf("summary = %q, want echoed hello", result.Summary)
+	}
+	if result.ToolCallCount != 1 {
+		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
+	}
+	assertEchoToolInvocation(t, tools)
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "echo",
+		message:    "model requested native tool call",
+		startedAt:  timeUnix(101),
+		endedAt:    timeUnix(102),
+	})
+	if !strings.Contains(result.AgentTurns[0].RawResponse, `"id":"call_echo_1"`) {
+		t.Fatalf("native raw response = %q, want tool call id", result.AgentTurns[0].RawResponse)
+	}
+	if len(model.requests[1].Turns) < 3 {
+		t.Fatalf("len(second request turns) = %d, want task, assistant tool call, and tool result", len(model.requests[1].Turns))
+	}
+	lastMessages := requestMessages(model.requests[1])
+	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", "")
+	if lastMessages[len(lastMessages)-2].Kind != string(outbound.ModelPartKindToolCall) {
+		t.Fatalf("assistant native part kind = %q, want tool_call", lastMessages[len(lastMessages)-2].Kind)
+	}
+	if lastMessages[len(lastMessages)-2].ToolCallID != "call_echo_1" {
+		t.Fatalf("assistant native tool_call_id = %q, want call_echo_1", lastMessages[len(lastMessages)-2].ToolCallID)
+	}
+	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "Tool result for echo:\nhello")
+	if lastMessages[len(lastMessages)-1].ToolCallID != "call_echo_1" {
+		t.Fatalf("tool result tool_call_id = %q, want call_echo_1", lastMessages[len(lastMessages)-1].ToolCallID)
 	}
 }
 
@@ -283,10 +398,10 @@ func TestRunnerRejectsUnavailableToolBeforeToolRunner(t *testing.T) {
 		status:     run.AgentTurnStatusFinal,
 		actionType: run.AgentTurnActionTypeFinal,
 	})
-	lastMessages := model.requests[1].Messages
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", `The tool "sh_script" is not available.`)
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Available tools: none")
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not invent tool names.")
+	lastMessages := requestMessages(model.requests[1])
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", `The tool "sh_script" is not available.`)
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Available tools: none")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Do not invent tool names.")
 	if !strings.Contains(result.SystemPrompt, "Available tools:\n- none") {
 		t.Fatalf("SystemPrompt = %q, want no available tools", result.SystemPrompt)
 	}
@@ -332,8 +447,8 @@ func TestRunnerRecordsExistingToolResultError(t *testing.T) {
 	if len(tools.calls) != 1 {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
-	lastMessages := model.requests[1].Messages
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool error for workspace:\npath is not available")
+	lastMessages := requestMessages(model.requests[1])
+	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "Tool error for workspace:\npath is not available")
 }
 
 func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {
@@ -398,10 +513,10 @@ func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {
 		actionType: run.AgentTurnActionTypeToolCall,
 		toolName:   "sandbox_exec",
 	})
-	correction := model.requests[1].Messages[len(model.requests[1].Messages)-1]
-	assertMessage(t, correction, "user", "placeholder argument values: command=<file_path>")
-	assertMessage(t, correction, "user", "Uploaded files: README.md")
-	assertMessage(t, correction, "user", "Available tools: sandbox_exec, workspace")
+	correction := requestMessages(model.requests[1])[len(requestMessages(model.requests[1]))-1]
+	assertMessage(t, correction, "runtime", "placeholder argument values: command=<file_path>")
+	assertMessage(t, correction, "runtime", "Uploaded files: README.md")
+	assertMessage(t, correction, "runtime", "Available tools: sandbox_exec, workspace")
 }
 
 func TestRunnerAllowsAdvertisedSandboxExecTool(t *testing.T) {
@@ -470,15 +585,18 @@ func TestRunnerRejectsUnknownJSONActionTypeAndContinues(t *testing.T) {
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
 	}
-	lastMessages := model.requests[1].Messages
-	if len(lastMessages) != 3 {
-		t.Fatalf("len(second request messages) = %d, want system, task, and correction", len(lastMessages))
+	lastMessages := requestMessages(model.requests[1])
+	if len(lastMessages) != 4 {
+		t.Fatalf("len(second request messages) = %d, want instructions, task, assistant attempt, and correction", len(lastMessages))
 	}
-	assertNoAssistantMessages(t, lastMessages)
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Protocol error:")
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Error code: unknown_action_type")
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "action type must be final or tool_call")
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not return tool_result.")
+	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", "tool_result")
+	if lastMessages[len(lastMessages)-2].Kind != string(outbound.ModelPartKindAssistantAttempt) {
+		t.Fatalf("assistant attempt kind = %q, want %q", lastMessages[len(lastMessages)-2].Kind, outbound.ModelPartKindAssistantAttempt)
+	}
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Protocol error:")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Error code: unknown_action_type")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "action type must be final or tool_call")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Do not return tool_result.")
 	if strings.Contains(lastMessages[len(lastMessages)-1].Content, "hello from tool") {
 		t.Fatalf("protocol correction included invalid raw response content: %q", lastMessages[len(lastMessages)-1].Content)
 	}
@@ -498,7 +616,7 @@ func TestRunnerRejectsUnknownJSONActionTypeAndContinues(t *testing.T) {
 		index:               2,
 		status:              run.AgentTurnStatusFinal,
 		actionType:          run.AgentTurnActionTypeFinal,
-		requestMessageCount: 3,
+		requestMessageCount: 4,
 		requestContains:     "Error code: unknown_action_type",
 	})
 }
@@ -529,9 +647,9 @@ func TestRunnerRejectsMultipleJSONObjectsAndContinues(t *testing.T) {
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
 	}
-	lastMessages := model.requests[1].Messages
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not return multiple JSON objects.")
-	assertNoAssistantMessages(t, lastMessages)
+	lastMessages := requestMessages(model.requests[1])
+	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", `"type":"tool_call"`)
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Do not return multiple JSON objects.")
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
 		index:             1,
 		status:            run.AgentTurnStatusProtocolError,
@@ -542,7 +660,7 @@ func TestRunnerRejectsMultipleJSONObjectsAndContinues(t *testing.T) {
 	})
 }
 
-func TestRunnerRejectsFencedJSONToolCallAndContinues(t *testing.T) {
+func TestRunnerParsesWholeResponseFencedJSONToolCallAndContinues(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
 			{Content: "```json\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```"},
@@ -562,29 +680,27 @@ func TestRunnerRejectsFencedJSONToolCallAndContinues(t *testing.T) {
 	if result.Summary != "corrected final" {
 		t.Fatalf("summary = %q, want corrected final", result.Summary)
 	}
-	if len(tools.calls) != 0 {
-		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
 	}
-	lastMessages := model.requests[1].Messages
-	if len(lastMessages) != 3 {
-		t.Fatalf("len(second request messages) = %d, want system, task, and correction", len(lastMessages))
+	lastMessages := requestMessages(model.requests[1])
+	if len(lastMessages) != 4 {
+		t.Fatalf("len(second request messages) = %d, want instructions, task, assistant action, and tool result", len(lastMessages))
 	}
-	assertNoAssistantMessages(t, lastMessages)
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not use markdown fences.")
-	if strings.Contains(lastMessages[len(lastMessages)-1].Content, "```json") {
-		t.Fatalf("protocol correction included invalid raw response content: %q", lastMessages[len(lastMessages)-1].Content)
-	}
+	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", `"type":"tool_call"`)
+	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "Tool result for echo:\nhello")
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
-		index:             1,
-		status:            run.AgentTurnStatusProtocolError,
-		message:           "model response was not valid JSON",
-		rawResponse:       "```json\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```",
-		responseFormat:    modelResponseFormatMarkdownFence,
-		protocolErrorCode: actionParseCodeInvalidJSON,
-		responsePreview:   "```json\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```",
+		index:           1,
+		status:          run.AgentTurnStatusToolCall,
+		actionType:      run.AgentTurnActionTypeToolCall,
+		toolName:        "echo",
+		message:         "model requested tool call",
+		rawResponse:     "```json\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```",
+		responseFormat:  modelResponseFormatMarkdownFence,
+		responsePreview: "```json\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```",
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
 		index:      2,
@@ -654,8 +770,8 @@ func TestRunnerProvidesTargetedCorrectionForInvalidSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	lastMessages := model.requests[1].Messages
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "final.summary must be a string, boolean, or number")
+	lastMessages := requestMessages(model.requests[1])
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "final.summary must be a string, boolean, or number")
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
 		index:             1,
 		status:            run.AgentTurnStatusProtocolError,
@@ -1165,7 +1281,11 @@ func assertAgentErrorCode(t *testing.T, err error, code ErrorCode) {
 	}
 }
 
-func assertMessage(t *testing.T, message outbound.ModelMessage, role string, contentContains string) {
+func requestMessages(request outbound.ModelRequest) []TurnMessageRecord {
+	return copyModelRequestMessages(request.Instructions, request.Turns)
+}
+
+func assertMessage(t *testing.T, message TurnMessageRecord, role string, contentContains string) {
 	t.Helper()
 
 	if message.Role != role {
@@ -1176,13 +1296,11 @@ func assertMessage(t *testing.T, message outbound.ModelMessage, role string, con
 	}
 }
 
-func assertNoAssistantMessages(t *testing.T, messages []outbound.ModelMessage) {
+func assertInstruction(t *testing.T, request outbound.ModelRequest, contentContains string) {
 	t.Helper()
 
-	for index, message := range messages {
-		if message.Role == modelRoleAssistant {
-			t.Fatalf("Messages[%d] is assistant message after protocol error: %#v", index, message)
-		}
+	if !strings.Contains(request.Instructions, contentContains) {
+		t.Fatalf("Instructions = %q, want to contain %q", request.Instructions, contentContains)
 	}
 }
 

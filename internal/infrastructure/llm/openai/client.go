@@ -15,6 +15,7 @@ import (
 )
 
 const defaultTimeout = 30 * time.Second
+const chatRoleDeveloper = "developer"
 
 // Config contains OpenAI model client configuration.
 type Config struct {
@@ -59,9 +60,11 @@ func NewClient(cfg Config) (*Client, error) {
 
 // Generate sends a chat completion request and returns generated content.
 func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbound.ModelResponse, error) {
+	messages := toChatMessages(req)
 	body, err := json.Marshal(chatCompletionRequest{
 		Model:    c.model,
-		Messages: toChatMessages(req.Messages),
+		Messages: messages,
+		Tools:    toChatTools(req.Tools, false),
 		Stream:   false,
 	})
 	if err != nil {
@@ -94,23 +97,32 @@ func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbo
 	if len(decoded.Choices) == 0 {
 		return outbound.ModelResponse{}, errors.New("openai response has no choices")
 	}
-	content := strings.TrimSpace(decoded.Choices[0].Message.Content)
-	if content == "" {
+	message := decoded.Choices[0].Message
+	content := strings.TrimSpace(message.Content)
+	toolCalls := toModelToolCalls(message.ToolCalls)
+	if content == "" && len(toolCalls) == 0 {
 		return outbound.ModelResponse{}, errors.New("openai response content is empty")
 	}
 
-	return outbound.ModelResponse{Content: content}, nil
+	return outbound.ModelResponse{
+		Content:         content,
+		ToolCalls:       toolCalls,
+		RequestMessages: toModelRequestMessages(req),
+	}, nil
 }
 
 type chatCompletionRequest struct {
 	Model    string        `json:"model"`
 	Messages []chatMessage `json:"messages"`
+	Tools    []chatTool    `json:"tools,omitempty"`
 	Stream   bool          `json:"stream"`
 }
 
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content"`
+	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
 }
 
 type chatCompletionResponse struct {
@@ -119,16 +131,299 @@ type chatCompletionResponse struct {
 	} `json:"choices"`
 }
 
-func toChatMessages(messages []outbound.ModelMessage) []chatMessage {
-	items := make([]chatMessage, 0, len(messages))
-	for _, message := range messages {
+type chatTool struct {
+	Type     string           `json:"type"`
+	Function chatToolFunction `json:"function"`
+}
+
+type chatToolFunction struct {
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	Parameters  chatToolParameters `json:"parameters"`
+	Strict      bool               `json:"strict,omitempty"`
+}
+
+type chatToolParameters struct {
+	Type                 string                             `json:"type"`
+	Properties           map[string]chatToolParameterSchema `json:"properties"`
+	Required             []string                           `json:"required,omitempty"`
+	AdditionalProperties bool                               `json:"additionalProperties"`
+}
+
+type chatToolParameterSchema struct {
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+}
+
+type chatToolCall struct {
+	ID       string               `json:"id,omitempty"`
+	Type     string               `json:"type,omitempty"`
+	Function chatToolCallFunction `json:"function"`
+}
+
+type chatToolCallFunction struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+}
+
+func toChatMessages(request outbound.ModelRequest) []chatMessage {
+	items := make([]chatMessage, 0, len(request.Turns)+1)
+	if strings.TrimSpace(request.Instructions) != "" {
 		items = append(items, chatMessage{
-			Role:    message.Role,
-			Content: message.Content,
+			Role:    chatRoleDeveloper,
+			Content: request.Instructions,
+		})
+	}
+	for _, turn := range request.Turns {
+		items = appendChatMessages(items, turn)
+	}
+
+	return items
+}
+
+func toModelRequestMessages(request outbound.ModelRequest) []outbound.ModelRequestMessage {
+	items := make([]outbound.ModelRequestMessage, 0, len(request.Turns)+1)
+	if strings.TrimSpace(request.Instructions) != "" {
+		items = append(items, outbound.ModelRequestMessage{
+			Role:    chatRoleDeveloper,
+			Content: "[REDACTED]",
+		})
+	}
+	for _, message := range toChatMessages(outbound.ModelRequest{Turns: request.Turns}) {
+		items = append(items, toModelRequestMessage(message))
+	}
+
+	return items
+}
+
+func appendChatMessages(items []chatMessage, turn outbound.ModelTurn) []chatMessage {
+	if turn.Role == outbound.ModelRoleTool {
+		for _, part := range turn.Parts {
+			if part.Kind != outbound.ModelPartKindToolResult {
+				continue
+			}
+			content := strings.TrimSpace(part.Text)
+			if content == "" {
+				continue
+			}
+			items = append(items, chatMessage{
+				Role:       "tool",
+				Content:    content,
+				ToolCallID: strings.TrimSpace(part.ToolCallID),
+			})
+		}
+
+		return items
+	}
+
+	content := joinModelTextParts(turn.Parts)
+	toolCalls := toChatToolCallParts(turn.Parts)
+	if content == "" && len(toolCalls) == 0 {
+		return items
+	}
+
+	return append(items, chatMessage{
+		Role:      toChatRole(turn.Role),
+		Content:   content,
+		ToolCalls: toolCalls,
+	})
+}
+
+func toChatRole(role outbound.ModelRole) string {
+	switch role {
+	case outbound.ModelRoleRuntime:
+		return chatRoleDeveloper
+	case outbound.ModelRoleAssistant:
+		return "assistant"
+	case outbound.ModelRoleTool:
+		return "tool"
+	default:
+		return "user"
+	}
+}
+
+func joinModelTextParts(parts []outbound.ModelPart) string {
+	items := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Kind == outbound.ModelPartKindToolCall || part.Kind == outbound.ModelPartKindToolResult {
+			continue
+		}
+		text := strings.TrimSpace(part.Text)
+		if text == "" {
+			continue
+		}
+		if part.Kind == outbound.ModelPartKindWorkspaceContext {
+			text = "Workspace context:\n" + text
+		}
+		items = append(items, text)
+	}
+
+	return strings.Join(items, "\n\n")
+}
+
+func toChatTools(tools []outbound.ToolDefinition, strict bool) []chatTool {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	items := make([]chatTool, 0, len(tools))
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			continue
+		}
+		items = append(items, chatTool{
+			Type: "function",
+			Function: chatToolFunction{
+				Name:        name,
+				Description: strings.TrimSpace(tool.Description),
+				Parameters:  toChatToolParameters(tool.Arguments),
+				Strict:      strict,
+			},
 		})
 	}
 
 	return items
+}
+
+func toChatToolParameters(arguments []outbound.ToolArgumentDefinition) chatToolParameters {
+	properties := map[string]chatToolParameterSchema{}
+	required := []string{}
+	for _, argument := range arguments {
+		name := strings.TrimSpace(argument.Name)
+		if name == "" {
+			continue
+		}
+		description := strings.TrimSpace(argument.Description)
+		if argument.Example != "" {
+			description = strings.TrimSpace(description + " Example: " + argument.Example)
+		}
+		properties[name] = chatToolParameterSchema{
+			Type:        "string",
+			Description: description,
+		}
+		if argument.Required {
+			required = append(required, name)
+		}
+	}
+
+	return chatToolParameters{
+		Type:                 "object",
+		Properties:           properties,
+		Required:             required,
+		AdditionalProperties: false,
+	}
+}
+
+func toChatToolCallParts(parts []outbound.ModelPart) []chatToolCall {
+	items := make([]chatToolCall, 0)
+	for _, part := range parts {
+		if part.Kind != outbound.ModelPartKindToolCall {
+			continue
+		}
+		name := strings.TrimSpace(part.ToolName)
+		if name == "" {
+			continue
+		}
+		items = append(items, chatToolCall{
+			ID:   strings.TrimSpace(part.ToolCallID),
+			Type: "function",
+			Function: chatToolCallFunction{
+				Name:      name,
+				Arguments: encodeToolArguments(part.ToolArguments),
+			},
+		})
+	}
+
+	return items
+}
+
+func encodeToolArguments(arguments map[string]string) string {
+	encoded, err := json.Marshal(arguments)
+	if err != nil {
+		return "{}"
+	}
+
+	return string(encoded)
+}
+
+func toModelToolCalls(calls []chatToolCall) []outbound.ModelToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+
+	items := make([]outbound.ModelToolCall, 0, len(calls))
+	for _, call := range calls {
+		name := strings.TrimSpace(call.Function.Name)
+		if name == "" {
+			continue
+		}
+		items = append(items, outbound.ModelToolCall{
+			ID:        strings.TrimSpace(call.ID),
+			Name:      name,
+			Arguments: decodeToolArguments(call.Function.Arguments),
+		})
+	}
+
+	return items
+}
+
+func decodeToolArguments(value string) map[string]string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
+	var decoded map[string]interface{}
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil
+	}
+
+	items := make(map[string]string, len(decoded))
+	for key, value := range decoded {
+		switch item := value.(type) {
+		case string:
+			items[key] = item
+		case json.Number:
+			items[key] = item.String()
+		case bool:
+			items[key] = fmt.Sprintf("%t", item)
+		default:
+			encoded, err := json.Marshal(item)
+			if err == nil {
+				items[key] = string(encoded)
+			}
+		}
+	}
+
+	return items
+}
+
+func toModelRequestMessage(message chatMessage) outbound.ModelRequestMessage {
+	content := strings.TrimSpace(message.Content)
+	if len(message.ToolCalls) > 0 {
+		content = compactJSON(map[string]interface{}{
+			"content":    content,
+			"tool_calls": message.ToolCalls,
+		})
+	}
+
+	return outbound.ModelRequestMessage{
+		Role:       message.Role,
+		Content:    content,
+		ToolCallID: message.ToolCallID,
+	}
+}
+
+func compactJSON(value interface{}) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+
+	return string(encoded)
 }
 
 func readBodySnippet(reader io.Reader) string {

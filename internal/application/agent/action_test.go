@@ -29,9 +29,12 @@ func TestParseActionParsesFinalNumberAsString(t *testing.T) {
 	}
 }
 
-func TestParseActionRejectsFencedFinalAction(t *testing.T) {
+func TestParseActionParsesWholeResponseFencedFinalAction(t *testing.T) {
 	result := parseAction("```JSON\n{\"type\":\"final\",\"summary\":\"done\"}\n```")
-	assertProtocolErrorCode(t, result, actionParseCodeInvalidJSON)
+	assertValidAction(t, result, actionTypeFinal)
+	if result.action.Summary != "done" {
+		t.Fatalf("Summary = %q, want done", result.action.Summary)
+	}
 }
 
 func TestParseActionRejectsEmbeddedJSONObject(t *testing.T) {
@@ -50,8 +53,19 @@ func TestParseActionParsesToolCallAction(t *testing.T) {
 	}
 }
 
-func TestParseActionRejectsFencedToolCallAction(t *testing.T) {
+func TestParseActionParsesWholeResponseFencedToolCallAction(t *testing.T) {
 	result := parseAction("```\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```")
+	assertValidAction(t, result, actionTypeToolCall)
+	if result.action.Tool != "echo" {
+		t.Fatalf("Tool = %q, want echo", result.action.Tool)
+	}
+	if result.action.Arguments["text"] != "hello" {
+		t.Fatalf("text argument = %q, want hello", result.action.Arguments["text"])
+	}
+}
+
+func TestParseActionRejectsFencedJSONWithTrailingProse(t *testing.T) {
+	result := parseAction("```json\n{\"type\":\"final\",\"summary\":\"done\"}\n```\nThanks.")
 	assertProtocolErrorCode(t, result, actionParseCodeInvalidJSON)
 }
 
@@ -63,6 +77,34 @@ func TestParseActionParsesToolCallScalarArgumentsAsStrings(t *testing.T) {
 	}
 	if result.action.Arguments["dry_run"] != "false" {
 		t.Fatalf("dry_run = %q, want false", result.action.Arguments["dry_run"])
+	}
+}
+
+func TestParseActionRejectsProviderStyleToolCallWithSpecificCorrection(t *testing.T) {
+	result := parseAction(`{"name":"sandbox_exec","arguments":{"command":"echo $((123 * 321))"}}`)
+	assertProtocolErrorCode(t, result, actionParseCodeMissingType)
+	for _, want := range []string{
+		`{"name":...,"arguments":...} is a provider-style tool call object`,
+		`returned as assistant text so AgentPool could not execute it`,
+		`{"type":"tool_call","tool":"sandbox_exec","arguments":{...}}`,
+		"Do not return a final answer until the tool has actually executed",
+	} {
+		if !strings.Contains(result.parseErr.Message+" "+result.parseErr.Hint, want) {
+			t.Fatalf("parse correction does not contain %q: %#v", want, result.parseErr)
+		}
+	}
+}
+
+func TestParseActionRejectsToolCallWithoutTypeWithSpecificCorrection(t *testing.T) {
+	result := parseAction(`{"tool":"workspace","arguments":{"operation":"list"}}`)
+	assertProtocolErrorCode(t, result, actionParseCodeMissingType)
+	for _, want := range []string{
+		`looked like a tool call but omitted "type":"tool_call"`,
+		`{"type":"tool_call","tool":"workspace","arguments":{...}}`,
+	} {
+		if !strings.Contains(result.parseErr.Message+" "+result.parseErr.Hint, want) {
+			t.Fatalf("parse correction does not contain %q: %#v", want, result.parseErr)
+		}
 	}
 }
 

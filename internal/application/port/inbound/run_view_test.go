@@ -23,10 +23,12 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 		Result: RunResultView{
 			Summary: "model output",
 		},
-		FailureReason:     "model failed",
-		FailureCode:       "model_generate_failed",
-		FailureMessage:    "model generation failed",
-		AgentSystemPrompt: "system prompt",
+		FailureReason:             "model failed",
+		FailureCode:               "model_generate_failed",
+		FailureMessage:            "model generation failed",
+		AgentPromptVersion:        "agentpool-runtime-v1",
+		AgentPromptSHA256:         "abc123",
+		AgentSystemPromptRedacted: true,
 		Steps: []StepView{
 			{
 				Name:      "execute",
@@ -87,8 +89,14 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	if view.FailureMessage != "model generation failed" {
 		t.Fatalf("FailureMessage = %q, want model generation failed", view.FailureMessage)
 	}
-	if view.AgentSystemPrompt != "system prompt" {
-		t.Fatalf("AgentSystemPrompt = %q, want system prompt", view.AgentSystemPrompt)
+	if view.AgentPromptVersion != "agentpool-runtime-v1" {
+		t.Fatalf("AgentPromptVersion = %q, want agentpool-runtime-v1", view.AgentPromptVersion)
+	}
+	if view.AgentPromptSHA256 != "abc123" {
+		t.Fatalf("AgentPromptSHA256 = %q, want abc123", view.AgentPromptSHA256)
+	}
+	if !view.AgentSystemPromptRedacted {
+		t.Fatal("AgentSystemPromptRedacted = false, want true")
 	}
 	if view.AgentTurns[0].RawResponse != `{"type":"tool_call"}` {
 		t.Fatalf("AgentTurns[0].RawResponse = %q, want raw tool call", view.AgentTurns[0].RawResponse)

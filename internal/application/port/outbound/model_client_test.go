@@ -9,9 +9,15 @@ func TestModelClientContract(t *testing.T) {
 	var client ModelClient = fakeModelClient{}
 
 	response, err := client.Generate(context.Background(), ModelRequest{
-		RunID: "run_test",
-		Messages: []ModelMessage{
-			{Role: "user", Content: "do work"},
+		RunID:        "run_test",
+		Instructions: "follow protocol",
+		Turns: []ModelTurn{
+			{
+				Role: ModelRoleUser,
+				Parts: []ModelPart{
+					{Kind: ModelPartKindTaskPrompt, Text: "do work"},
+				},
+			},
 		},
 	})
 	if err != nil {

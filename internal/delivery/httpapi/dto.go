@@ -14,20 +14,23 @@ type createRunRequest struct {
 }
 
 type runResponse struct {
-	ID                string              `json:"id"`
-	Status            string              `json:"status"`
-	Task              taskResponse        `json:"task"`
-	Result            *runResultResponse  `json:"result,omitempty"`
-	FailureReason     string              `json:"failure_reason,omitempty"`
-	FailureCode       string              `json:"failure_code,omitempty"`
-	FailureMessage    string              `json:"failure_message,omitempty"`
-	Steps             []stepResponse      `json:"steps"`
-	ToolCalls         []toolCallResponse  `json:"tool_calls,omitempty"`
-	AgentTurns        []agentTurnResponse `json:"agent_turns,omitempty"`
-	Artifacts         []artifactResponse  `json:"artifacts,omitempty"`
-	AgentSystemPrompt string              `json:"agent_system_prompt,omitempty"`
-	CreatedAt         time.Time           `json:"created_at"`
-	UpdatedAt         time.Time           `json:"updated_at"`
+	ID                        string              `json:"id"`
+	Status                    string              `json:"status"`
+	Task                      taskResponse        `json:"task"`
+	Result                    *runResultResponse  `json:"result,omitempty"`
+	FailureReason             string              `json:"failure_reason,omitempty"`
+	FailureCode               string              `json:"failure_code,omitempty"`
+	FailureMessage            string              `json:"failure_message,omitempty"`
+	Steps                     []stepResponse      `json:"steps"`
+	ToolCalls                 []toolCallResponse  `json:"tool_calls,omitempty"`
+	AgentTurns                []agentTurnResponse `json:"agent_turns,omitempty"`
+	Artifacts                 []artifactResponse  `json:"artifacts,omitempty"`
+	AgentSystemPrompt         string              `json:"agent_system_prompt,omitempty"`
+	AgentPromptVersion        string              `json:"agent_prompt_version,omitempty"`
+	AgentPromptSHA256         string              `json:"agent_prompt_sha256,omitempty"`
+	AgentSystemPromptRedacted bool                `json:"agent_system_prompt_redacted,omitempty"`
+	CreatedAt                 time.Time           `json:"created_at"`
+	UpdatedAt                 time.Time           `json:"updated_at"`
 }
 
 type runResultResponse struct {
@@ -92,8 +95,11 @@ type agentTurnResponse struct {
 }
 
 type messageResponse struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string `json:"role"`
+	Kind       string `json:"kind,omitempty"`
+	Content    string `json:"content"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
 }
 
 type errorResponse struct {
@@ -162,16 +168,19 @@ func toRunResponse(item inbound.RunView) runResponse {
 			Branch:        item.Task.Branch,
 			Attachments:   attachments,
 		},
-		FailureReason:     item.FailureReason,
-		FailureCode:       item.FailureCode,
-		FailureMessage:    item.FailureMessage,
-		Steps:             steps,
-		ToolCalls:         toolCalls,
-		AgentTurns:        agentTurns,
-		Artifacts:         artifacts,
-		AgentSystemPrompt: item.AgentSystemPrompt,
-		CreatedAt:         item.CreatedAt,
-		UpdatedAt:         item.UpdatedAt,
+		FailureReason:             item.FailureReason,
+		FailureCode:               item.FailureCode,
+		FailureMessage:            item.FailureMessage,
+		Steps:                     steps,
+		ToolCalls:                 toolCalls,
+		AgentTurns:                agentTurns,
+		Artifacts:                 artifacts,
+		AgentSystemPrompt:         item.AgentSystemPrompt,
+		AgentPromptVersion:        item.AgentPromptVersion,
+		AgentPromptSHA256:         item.AgentPromptSHA256,
+		AgentSystemPromptRedacted: item.AgentSystemPromptRedacted,
+		CreatedAt:                 item.CreatedAt,
+		UpdatedAt:                 item.UpdatedAt,
 	}
 	if item.Result.Summary != "" {
 		response.Result = &runResultResponse{Summary: item.Result.Summary}
@@ -188,8 +197,11 @@ func messageResponses(messages []inbound.AgentTurnMessageView) []messageResponse
 	responses := make([]messageResponse, 0, len(messages))
 	for _, message := range messages {
 		responses = append(responses, messageResponse{
-			Role:    message.Role,
-			Content: message.Content,
+			Role:       message.Role,
+			Kind:       message.Kind,
+			Content:    message.Content,
+			ToolCallID: message.ToolCallID,
+			ToolName:   message.ToolName,
 		})
 	}
 

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"sort"
@@ -19,12 +20,6 @@ const defaultMaxTurns = 8
 var errToolRunnerRequired = errors.New("tool runner is required")
 
 const agentTurnPreviewTruncatedMarker = "\n... [truncated]"
-
-const (
-	modelRoleSystem    = "system"
-	modelRoleUser      = "user"
-	modelRoleAssistant = "assistant"
-)
 
 const (
 	modelResponseFormatEmpty              = "empty"
@@ -62,6 +57,7 @@ type RunResult struct {
 	ToolCalls     []ToolCallRecord
 	AgentTurns    []TurnRecord
 	SystemPrompt  string
+	PromptVersion string
 }
 
 // ToolCallRecord captures one tool execution observed by the agent loop.
@@ -91,22 +87,26 @@ type TurnRecord struct {
 	EndedAt           time.Time
 }
 
-// TurnMessageRecord captures one provider-neutral model request message observed by the agent runner.
+// TurnMessageRecord captures one provider-facing model request message observed by the agent runner.
 type TurnMessageRecord struct {
-	Role    string
-	Content string
+	Role       string
+	Kind       string
+	Content    string
+	ToolCallID string
+	ToolName   string
 }
 
 type runSession struct {
 	request            RunRequest
 	systemPrompt       string
 	availableTools     map[string]outbound.ToolDefinition
+	toolDefinitions    []outbound.ToolDefinition
 	availableToolNames []string
-	messages           []outbound.ModelMessage
+	turns              []outbound.ModelTurn
 	turnIndex          int
 	toolCallCount      int
 	toolCalls          []ToolCallRecord
-	turns              []TurnRecord
+	turnRecords        []TurnRecord
 }
 
 type modelTurnContext struct {
@@ -206,23 +206,24 @@ func (r *Runner) newRunSession(ctx context.Context, request RunRequest) (*runSes
 		request:            request,
 		systemPrompt:       systemPrompt,
 		availableTools:     availableToolMap(tools),
+		toolDefinitions:    copyToolDefinitions(tools),
 		availableToolNames: availableToolNames(tools),
-		messages: []outbound.ModelMessage{
-			{Role: modelRoleSystem, Content: systemPrompt},
-			{Role: modelRoleUser, Content: buildTaskMessage(request.Task)},
-		},
+		turns:              buildInitialTurns(request.Task),
 	}, nil
 }
 
 func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, bool, error) {
 	turnIndex := session.nextTurnIndex()
 	startedAt := r.clock()
-	requestMessages := copyModelMessages(session.messages)
+	fallbackRequestMessages := copyModelRequestMessages(session.systemPrompt, session.turns)
 	response, err := r.model.Generate(ctx, outbound.ModelRequest{
-		RunID:    session.request.RunID,
-		Messages: session.messages,
+		RunID:        session.request.RunID,
+		Instructions: session.systemPrompt,
+		Turns:        session.turns,
+		Tools:        session.toolDefinitions,
 	})
 	endedAt := r.clock()
+	requestMessages := responseRequestMessages(response, fallbackRequestMessages)
 	if err != nil {
 		session.recordTurn(TurnRecord{
 			Index:           turnIndex,
@@ -237,6 +238,20 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 	}
 
 	responseFormat := classifyModelResponseFormat(response.Content)
+	if len(response.ToolCalls) > 0 {
+		rawResponse := nativeToolCallsRawResponse(response.ToolCalls)
+		turn := modelTurnContext{
+			content:         rawResponse,
+			requestMessages: requestMessages,
+			responseFormat:  classifyModelResponseFormat(rawResponse),
+			index:           turnIndex,
+			startedAt:       startedAt,
+			endedAt:         endedAt,
+		}
+
+		return r.handleNativeToolCalls(ctx, session, turn, response.ToolCalls)
+	}
+
 	parsed := parseAction(response.Content)
 	switch parsed.status {
 	case actionParseProtocolError:
@@ -258,8 +273,9 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 			StartedAt:         startedAt,
 			EndedAt:           endedAt,
 		})
-		session.messages = append(session.messages,
-			outbound.ModelMessage{Role: modelRoleUser, Content: correctionMessage},
+		session.turns = append(session.turns,
+			assistantAttemptTurn(response.Content),
+			runtimeTurn(outbound.ModelPartKindProtocolCorrection, correctionMessage),
 		)
 
 		return RunResult{}, false, nil
@@ -377,16 +393,88 @@ func (r *Runner) handleAction(
 	}
 }
 
-func buildTaskMessage(task run.TaskSpec) string {
+func buildInitialTurns(task run.TaskSpec) []outbound.ModelTurn {
+	parts := []outbound.ModelPart{
+		{Kind: outbound.ModelPartKindTaskPrompt, Text: task.Prompt},
+	}
+	if workspaceContext := buildWorkspaceContextPart(task); workspaceContext != "" {
+		parts = append(parts, outbound.ModelPart{
+			Kind: outbound.ModelPartKindWorkspaceContext,
+			Text: workspaceContext,
+		})
+	}
+
+	return []outbound.ModelTurn{{Role: outbound.ModelRoleUser, Parts: parts}}
+}
+
+func assistantTurn(content string) outbound.ModelTurn {
+	return outbound.ModelTurn{
+		Role: outbound.ModelRoleAssistant,
+		Parts: []outbound.ModelPart{
+			{Kind: outbound.ModelPartKindAssistantResponse, Text: content},
+		},
+	}
+}
+
+func assistantAttemptTurn(content string) outbound.ModelTurn {
+	return outbound.ModelTurn{
+		Role: outbound.ModelRoleAssistant,
+		Parts: []outbound.ModelPart{
+			{Kind: outbound.ModelPartKindAssistantAttempt, Text: boundedAssistantAttempt(content)},
+		},
+	}
+}
+
+func assistantToolCallTurn(content string, calls []outbound.ModelToolCall) outbound.ModelTurn {
+	parts := []outbound.ModelPart{}
+	if text := strings.TrimSpace(content); text != "" {
+		parts = append(parts, outbound.ModelPart{
+			Kind: outbound.ModelPartKindAssistantResponse,
+			Text: text,
+		})
+	}
+	for _, call := range calls {
+		parts = append(parts, outbound.ModelPart{
+			Kind:          outbound.ModelPartKindToolCall,
+			ToolCallID:    call.ID,
+			ToolName:      call.Name,
+			ToolArguments: copyArguments(call.Arguments),
+		})
+	}
+
+	return outbound.ModelTurn{
+		Role:  outbound.ModelRoleAssistant,
+		Parts: parts,
+	}
+}
+
+func runtimeTurn(kind outbound.ModelPartKind, content string) outbound.ModelTurn {
+	return outbound.ModelTurn{
+		Role: outbound.ModelRoleRuntime,
+		Parts: []outbound.ModelPart{
+			{Kind: kind, Text: content},
+		},
+	}
+}
+
+func toolResultTurn(results []outbound.ModelPart) outbound.ModelTurn {
+	return outbound.ModelTurn{
+		Role:  outbound.ModelRoleTool,
+		Parts: results,
+	}
+}
+
+func buildWorkspaceContextPart(task run.TaskSpec) string {
 	if len(task.Attachments) == 0 {
-		return task.Prompt
+		return ""
 	}
 
 	var builder strings.Builder
-	builder.WriteString(task.Prompt)
-	builder.WriteString("\n\nUploaded files available in the workspace:\n")
+	builder.WriteString("Workspace input files available to tools:\n")
 	for _, attachment := range task.Attachments {
 		builder.WriteString("- path: ")
+		builder.WriteString(attachment.Filename)
+		builder.WriteString("; virtual_path: /workspace/input/")
 		builder.WriteString(attachment.Filename)
 		if attachment.MediaType != "" {
 			builder.WriteString("; media_type: ")
@@ -416,8 +504,9 @@ func (s *runSession) finalResult(summary string) RunResult {
 		Summary:       summary,
 		ToolCallCount: s.toolCallCount,
 		ToolCalls:     copyToolCallRecords(s.toolCalls),
-		AgentTurns:    copyTurnRecords(s.turns),
+		AgentTurns:    copyTurnRecords(s.turnRecords),
 		SystemPrompt:  s.systemPrompt,
+		PromptVersion: agentPromptVersion,
 	}
 }
 
@@ -425,8 +514,9 @@ func (s *runSession) partialResult() RunResult {
 	return RunResult{
 		ToolCallCount: s.toolCallCount,
 		ToolCalls:     copyToolCallRecords(s.toolCalls),
-		AgentTurns:    copyTurnRecords(s.turns),
+		AgentTurns:    copyTurnRecords(s.turnRecords),
 		SystemPrompt:  s.systemPrompt,
+		PromptVersion: agentPromptVersion,
 	}
 }
 
@@ -457,15 +547,15 @@ func handleUnavailableToolCall(
 		StartedAt:       turn.startedAt,
 		EndedAt:         turn.endedAt,
 	})
-	session.messages = append(session.messages,
-		outbound.ModelMessage{Role: modelRoleAssistant, Content: turn.content},
-		outbound.ModelMessage{
-			Role: modelRoleUser,
-			Content: buildUnavailableToolCorrectionMessage(unavailableToolCorrectionRequest{
+	session.turns = append(session.turns,
+		assistantAttemptTurn(turn.content),
+		runtimeTurn(
+			outbound.ModelPartKindToolCorrection,
+			buildUnavailableToolCorrectionMessage(unavailableToolCorrectionRequest{
 				RequestedTool:  parsed.Tool,
 				AvailableTools: session.availableToolNames,
 			}),
-		},
+		),
 	)
 
 	return RunResult{}, false, nil
@@ -491,16 +581,16 @@ func handlePlaceholderToolCall(
 		StartedAt:       turn.startedAt,
 		EndedAt:         turn.endedAt,
 	})
-	session.messages = append(session.messages,
-		outbound.ModelMessage{Role: modelRoleAssistant, Content: turn.content},
-		outbound.ModelMessage{
-			Role: modelRoleUser,
-			Content: buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
+	session.turns = append(session.turns,
+		assistantAttemptTurn(turn.content),
+		runtimeTurn(
+			outbound.ModelPartKindToolCorrection,
+			buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
 				Placeholders:    placeholders,
 				AvailableTools:  session.availableToolNames,
 				UploadedFileIDs: uploadedFilePaths(session.request.Task),
 			}),
-		},
+		),
 	)
 
 	return RunResult{}, false, nil
@@ -520,14 +610,14 @@ func uploadedFilePaths(task run.TaskSpec) []string {
 }
 
 func (r *Runner) handleToolCall(ctx context.Context, session *runSession, content string, parsed action) (RunResult, bool, error) {
-	session.messages = append(session.messages, outbound.ModelMessage{Role: modelRoleAssistant, Content: content})
 	if strings.TrimSpace(parsed.Tool) == "" {
-		session.messages = append(session.messages, outbound.ModelMessage{
-			Role:    modelRoleUser,
-			Content: "Tool error:\nmissing tool name",
-		})
+		session.turns = append(session.turns,
+			assistantAttemptTurn(content),
+			runtimeTurn(outbound.ModelPartKindToolCorrection, "Tool error:\nmissing tool name"),
+		)
 		return RunResult{}, false, nil
 	}
+	session.turns = append(session.turns, assistantTurn(content))
 
 	startedAt := r.clock()
 	call := outbound.ToolCall{
@@ -546,10 +636,149 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 	session.toolCallCount++
 	session.recordToolCall(parsed.Tool, parsed.Arguments, result.Content, result.IsError, startedAt, endedAt)
 
-	session.messages = append(session.messages, outbound.ModelMessage{
-		Role:    modelRoleUser,
-		Content: buildToolObservation(parsed.Tool, result),
+	session.turns = append(session.turns, toolResultTurn([]outbound.ModelPart{{
+		Kind:       outbound.ModelPartKindToolResult,
+		Text:       buildToolObservation(parsed.Tool, result),
+		ToolName:   parsed.Tool,
+		IsError:    result.IsError,
+		ToolCallID: legacyToolCallID(parsed.Tool),
+	}}))
+
+	return RunResult{}, false, nil
+}
+
+func (r *Runner) handleNativeToolCalls(
+	ctx context.Context,
+	session *runSession,
+	turn modelTurnContext,
+	calls []outbound.ModelToolCall,
+) (RunResult, bool, error) {
+	normalized := normalizeModelToolCalls(calls)
+	if len(normalized) == 0 {
+		return session.partialResult(), false, newAgentError(
+			ErrorCodeAgentProtocolError,
+			"",
+			errors.New("native tool call response had no usable tool calls"),
+		)
+	}
+	for _, call := range normalized {
+		if !session.toolIsAvailable(call.Name) {
+			return handleUnavailableNativeToolCall(session, turn, call)
+		}
+		if placeholders := placeholderArgumentValues(call.Arguments); len(placeholders) > 0 {
+			return handlePlaceholderNativeToolCall(session, turn, call, placeholders)
+		}
+	}
+
+	session.recordTurn(TurnRecord{
+		Index:           turn.index,
+		Status:          run.AgentTurnStatusToolCall,
+		ActionType:      run.AgentTurnActionTypeToolCall,
+		ToolName:        joinedToolCallNames(normalized),
+		Message:         "model requested native tool call",
+		RequestMessages: turn.requestMessages,
+		RawResponse:     turn.content,
+		ResponseFormat:  turn.responseFormat,
+		ResponsePreview: previewModelResponse(turn.content),
+		StartedAt:       turn.startedAt,
+		EndedAt:         turn.endedAt,
 	})
+	session.turns = append(session.turns, assistantToolCallTurn("", normalized))
+
+	resultParts := make([]outbound.ModelPart, 0, len(normalized))
+	for _, call := range normalized {
+		startedAt := r.clock()
+		result, err := r.tools.RunTool(ctx, outbound.ToolCall{
+			RunID:     session.request.RunID,
+			Context:   session.request.Context,
+			Name:      call.Name,
+			Arguments: call.Arguments,
+		})
+		endedAt := r.clock()
+		if err != nil {
+			session.recordToolCall(call.Name, call.Arguments, "tool execution failed", true, startedAt, endedAt)
+
+			return session.partialResult(), false, newAgentError(ErrorCodeToolExecutionFailed, "", err)
+		}
+		session.toolCallCount++
+		session.recordToolCall(call.Name, call.Arguments, result.Content, result.IsError, startedAt, endedAt)
+		resultParts = append(resultParts, outbound.ModelPart{
+			Kind:       outbound.ModelPartKindToolResult,
+			Text:       buildToolObservation(call.Name, result),
+			ToolCallID: call.ID,
+			ToolName:   call.Name,
+			IsError:    result.IsError,
+		})
+	}
+	session.turns = append(session.turns, toolResultTurn(resultParts))
+
+	return RunResult{}, false, nil
+}
+
+func handleUnavailableNativeToolCall(
+	session *runSession,
+	turn modelTurnContext,
+	call outbound.ModelToolCall,
+) (RunResult, bool, error) {
+	message := "tool is not available: " + call.Name
+	session.recordTurn(TurnRecord{
+		Index:           turn.index,
+		Status:          run.AgentTurnStatusInvalidToolCall,
+		ActionType:      run.AgentTurnActionTypeToolCall,
+		ToolName:        call.Name,
+		Message:         message,
+		RequestMessages: turn.requestMessages,
+		RawResponse:     turn.content,
+		ResponseFormat:  turn.responseFormat,
+		ResponsePreview: previewModelResponse(turn.content),
+		StartedAt:       turn.startedAt,
+		EndedAt:         turn.endedAt,
+	})
+	session.turns = append(session.turns,
+		assistantAttemptTurn(turn.content),
+		runtimeTurn(
+			outbound.ModelPartKindToolCorrection,
+			buildUnavailableToolCorrectionMessage(unavailableToolCorrectionRequest{
+				RequestedTool:  call.Name,
+				AvailableTools: session.availableToolNames,
+			}),
+		),
+	)
+
+	return RunResult{}, false, nil
+}
+
+func handlePlaceholderNativeToolCall(
+	session *runSession,
+	turn modelTurnContext,
+	call outbound.ModelToolCall,
+	placeholders []string,
+) (RunResult, bool, error) {
+	message := "tool call arguments contain placeholder values"
+	session.recordTurn(TurnRecord{
+		Index:           turn.index,
+		Status:          run.AgentTurnStatusInvalidToolCall,
+		ActionType:      run.AgentTurnActionTypeToolCall,
+		ToolName:        call.Name,
+		Message:         message,
+		RequestMessages: turn.requestMessages,
+		RawResponse:     turn.content,
+		ResponseFormat:  turn.responseFormat,
+		ResponsePreview: previewModelResponse(turn.content),
+		StartedAt:       turn.startedAt,
+		EndedAt:         turn.endedAt,
+	})
+	session.turns = append(session.turns,
+		assistantAttemptTurn(turn.content),
+		runtimeTurn(
+			outbound.ModelPartKindToolCorrection,
+			buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
+				Placeholders:    placeholders,
+				AvailableTools:  session.availableToolNames,
+				UploadedFileIDs: uploadedFilePaths(session.request.Task),
+			}),
+		),
+	)
 
 	return RunResult{}, false, nil
 }
@@ -593,7 +822,7 @@ func (s *runSession) recordTurn(record TurnRecord) {
 	record.RawResponse = previewRawResponse(record.RawResponse)
 	record.ResponsePreview = previewModelResponse(record.ResponsePreview)
 	record.CorrectionMessage = previewCorrectionMessage(record.CorrectionMessage)
-	s.turns = append(s.turns, record)
+	s.turnRecords = append(s.turnRecords, record)
 }
 
 func copyToolCallRecords(records []ToolCallRecord) []ToolCallRecord {
@@ -642,7 +871,131 @@ func copyArguments(arguments map[string]string) map[string]string {
 	return copied
 }
 
-func copyModelMessages(messages []outbound.ModelMessage) []TurnMessageRecord {
+func copyToolDefinitions(definitions []outbound.ToolDefinition) []outbound.ToolDefinition {
+	if len(definitions) == 0 {
+		return nil
+	}
+
+	copied := make([]outbound.ToolDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		item := definition
+		if len(definition.Arguments) > 0 {
+			item.Arguments = append([]outbound.ToolArgumentDefinition(nil), definition.Arguments...)
+		}
+		copied = append(copied, item)
+	}
+
+	return copied
+}
+
+func normalizeModelToolCalls(calls []outbound.ModelToolCall) []outbound.ModelToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+
+	normalized := make([]outbound.ModelToolCall, 0, len(calls))
+	for index, call := range calls {
+		name := strings.TrimSpace(call.Name)
+		if name == "" {
+			continue
+		}
+		id := strings.TrimSpace(call.ID)
+		if id == "" {
+			id = generatedToolCallID(name, index)
+		}
+		normalized = append(normalized, outbound.ModelToolCall{
+			ID:        id,
+			Name:      name,
+			Arguments: copyArguments(call.Arguments),
+		})
+	}
+
+	return normalized
+}
+
+func generatedToolCallID(name string, index int) string {
+	normalized := strings.Map(func(char rune) rune {
+		switch {
+		case char >= 'a' && char <= 'z':
+			return char
+		case char >= 'A' && char <= 'Z':
+			return char + ('a' - 'A')
+		case char >= '0' && char <= '9':
+			return char
+		default:
+			return '_'
+		}
+	}, name)
+	normalized = strings.Trim(normalized, "_")
+	if normalized == "" {
+		normalized = "tool"
+	}
+
+	return normalized + "_" + strconv.Itoa(index+1)
+}
+
+func legacyToolCallID(name string) string {
+	return generatedToolCallID(name, 0)
+}
+
+func joinedToolCallNames(calls []outbound.ModelToolCall) string {
+	if len(calls) == 0 {
+		return ""
+	}
+
+	names := make([]string, 0, len(calls))
+	for _, call := range calls {
+		if name := strings.TrimSpace(call.Name); name != "" {
+			names = append(names, name)
+		}
+	}
+
+	return strings.Join(names, ",")
+}
+
+func nativeToolCallsRawResponse(calls []outbound.ModelToolCall) string {
+	type nativeToolCallRecord struct {
+		ID        string            `json:"id,omitempty"`
+		Tool      string            `json:"tool"`
+		Arguments map[string]string `json:"arguments,omitempty"`
+	}
+	payload := struct {
+		Type      string                 `json:"type"`
+		ToolCalls []nativeToolCallRecord `json:"tool_calls"`
+	}{
+		Type:      string(outbound.ModelPartKindToolCall),
+		ToolCalls: make([]nativeToolCallRecord, 0, len(calls)),
+	}
+	for _, call := range calls {
+		name := strings.TrimSpace(call.Name)
+		if name == "" {
+			continue
+		}
+		payload.ToolCalls = append(payload.ToolCalls, nativeToolCallRecord{
+			ID:        strings.TrimSpace(call.ID),
+			Tool:      name,
+			Arguments: copyArguments(call.Arguments),
+		})
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return `{"type":"tool_call","tool_calls":[]}`
+	}
+
+	return string(encoded)
+}
+
+func responseRequestMessages(response outbound.ModelResponse, fallback []TurnMessageRecord) []TurnMessageRecord {
+	messages := copyProviderRequestMessages(response.RequestMessages)
+	if len(messages) == 0 {
+		return fallback
+	}
+
+	return messages
+}
+
+func copyProviderRequestMessages(messages []outbound.ModelRequestMessage) []TurnMessageRecord {
 	if len(messages) == 0 {
 		return nil
 	}
@@ -650,12 +1003,40 @@ func copyModelMessages(messages []outbound.ModelMessage) []TurnMessageRecord {
 	copied := make([]TurnMessageRecord, 0, len(messages))
 	for _, message := range messages {
 		copied = append(copied, TurnMessageRecord{
-			Role:    message.Role,
-			Content: message.Content,
+			Role:       message.Role,
+			Kind:       message.Kind,
+			Content:    message.Content,
+			ToolCallID: message.ToolCallID,
+			ToolName:   message.ToolName,
 		})
 	}
 
-	return copied
+	return copyTurnMessageRecords(copied)
+}
+
+func copyModelRequestMessages(instructions string, turns []outbound.ModelTurn) []TurnMessageRecord {
+	var copied []TurnMessageRecord
+	if strings.TrimSpace(instructions) != "" {
+		copied = append(copied, TurnMessageRecord{
+			Role:    string(outbound.ModelRoleRuntime),
+			Kind:    "instructions",
+			Content: "[REDACTED]",
+		})
+	}
+	for _, turn := range turns {
+		role := string(turn.Role)
+		for _, part := range turn.Parts {
+			copied = append(copied, TurnMessageRecord{
+				Role:       role,
+				Kind:       string(part.Kind),
+				Content:    part.Text,
+				ToolCallID: part.ToolCallID,
+				ToolName:   part.ToolName,
+			})
+		}
+	}
+
+	return copyTurnMessageRecords(copied)
 }
 
 func copyTurnMessageRecords(messages []TurnMessageRecord) []TurnMessageRecord {
@@ -671,8 +1052,11 @@ func copyTurnMessageRecords(messages []TurnMessageRecord) []TurnMessageRecord {
 		}
 
 		copied = append(copied, TurnMessageRecord{
-			Role:    role,
-			Content: previewRequestMessageContent(message.Content),
+			Role:       role,
+			Kind:       strings.TrimSpace(message.Kind),
+			Content:    previewRequestMessageContent(message.Content),
+			ToolCallID: strings.TrimSpace(message.ToolCallID),
+			ToolName:   strings.TrimSpace(message.ToolName),
 		})
 	}
 
@@ -813,6 +1197,10 @@ func previewRawResponse(content string) string {
 
 func previewRequestMessageContent(content string) string {
 	return truncateAgentTurnText(content, run.MaxAgentTurnMessageContentLength)
+}
+
+func boundedAssistantAttempt(content string) string {
+	return truncateAgentTurnText(content, run.MaxAgentTurnPreviewLength)
 }
 
 func previewCorrectionMessage(content string) string {

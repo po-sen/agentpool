@@ -17,6 +17,32 @@ func NewClient() *Client {
 }
 
 // Generate returns a placeholder model response.
-func (c *Client) Generate(context.Context, outbound.ModelRequest) (outbound.ModelResponse, error) {
-	return outbound.ModelResponse{Content: "noop model response"}, nil
+func (c *Client) Generate(_ context.Context, request outbound.ModelRequest) (outbound.ModelResponse, error) {
+	return outbound.ModelResponse{
+		Content:         "noop model response",
+		RequestMessages: toModelRequestMessages(request),
+	}, nil
+}
+
+func toModelRequestMessages(request outbound.ModelRequest) []outbound.ModelRequestMessage {
+	messages := []outbound.ModelRequestMessage{}
+	if request.Instructions != "" {
+		messages = append(messages, outbound.ModelRequestMessage{
+			Role:    "runtime",
+			Content: "[REDACTED]",
+		})
+	}
+	for _, turn := range request.Turns {
+		for _, part := range turn.Parts {
+			messages = append(messages, outbound.ModelRequestMessage{
+				Role:       string(turn.Role),
+				Kind:       string(part.Kind),
+				Content:    part.Text,
+				ToolCallID: part.ToolCallID,
+				ToolName:   part.ToolName,
+			})
+		}
+	}
+
+	return messages
 }

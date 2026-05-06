@@ -26,10 +26,12 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 		Result: inbound.RunResultView{
 			Summary: "model output",
 		},
-		FailureReason:     "model failed",
-		FailureCode:       "model_generate_failed",
-		FailureMessage:    "model generation failed",
-		AgentSystemPrompt: "system prompt",
+		FailureReason:             "model failed",
+		FailureCode:               "model_generate_failed",
+		FailureMessage:            "model generation failed",
+		AgentPromptVersion:        "agentpool-runtime-v1",
+		AgentPromptSHA256:         "abc123",
+		AgentSystemPromptRedacted: true,
 		Steps: []inbound.StepView{
 			{
 				Name:      "execute",
@@ -96,8 +98,17 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 	if response.FailureMessage != view.FailureMessage {
 		t.Fatalf("FailureMessage = %q, want %q", response.FailureMessage, view.FailureMessage)
 	}
-	if response.AgentSystemPrompt != view.AgentSystemPrompt {
-		t.Fatalf("AgentSystemPrompt = %q, want %q", response.AgentSystemPrompt, view.AgentSystemPrompt)
+	if response.AgentSystemPrompt != "" {
+		t.Fatalf("AgentSystemPrompt = %q, want redacted empty prompt", response.AgentSystemPrompt)
+	}
+	if response.AgentPromptVersion != view.AgentPromptVersion {
+		t.Fatalf("AgentPromptVersion = %q, want %q", response.AgentPromptVersion, view.AgentPromptVersion)
+	}
+	if response.AgentPromptSHA256 != view.AgentPromptSHA256 {
+		t.Fatalf("AgentPromptSHA256 = %q, want %q", response.AgentPromptSHA256, view.AgentPromptSHA256)
+	}
+	if response.AgentSystemPromptRedacted != view.AgentSystemPromptRedacted {
+		t.Fatalf("AgentSystemPromptRedacted = %t, want %t", response.AgentSystemPromptRedacted, view.AgentSystemPromptRedacted)
 	}
 	if len(response.Steps) != 1 {
 		t.Fatalf("len(Steps) = %d, want 1", len(response.Steps))
@@ -459,22 +470,33 @@ func TestRunResponseJSONIncludesAgentTurns(t *testing.T) {
 	}
 }
 
-func TestRunResponseJSONIncludesAgentSystemPrompt(t *testing.T) {
+func TestRunResponseJSONIncludesAgentPromptMetadata(t *testing.T) {
 	payload, err := json.Marshal(toRunResponse(inbound.RunView{
-		ID:                "run_test",
-		Status:            "completed",
-		AgentSystemPrompt: "AgentPool is running a task.\nAvailable tools:\n- none\n",
-		Steps:             []inbound.StepView{},
-		CreatedAt:         time.Unix(100, 0).UTC(),
-		UpdatedAt:         time.Unix(101, 0).UTC(),
+		ID:                        "run_test",
+		Status:                    "completed",
+		AgentPromptVersion:        "agentpool-runtime-v1",
+		AgentPromptSHA256:         "abc123",
+		AgentSystemPromptRedacted: true,
+		Steps:                     []inbound.StepView{},
+		CreatedAt:                 time.Unix(100, 0).UTC(),
+		UpdatedAt:                 time.Unix(101, 0).UTC(),
 	}))
 	if err != nil {
 		t.Fatalf("marshal response: %v", err)
 	}
 
 	got := string(payload)
-	if !strings.Contains(got, `"agent_system_prompt":"AgentPool is running a task.\nAvailable tools:\n- none\n"`) {
-		t.Fatalf("response does not contain agent_system_prompt: %s", got)
+	for _, want := range []string{
+		`"agent_prompt_version":"agentpool-runtime-v1"`,
+		`"agent_prompt_sha256":"abc123"`,
+		`"agent_system_prompt_redacted":true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("response does not contain %s: %s", want, got)
+		}
+	}
+	if strings.Contains(got, `"agent_system_prompt"`) && !strings.Contains(got, `"agent_system_prompt_redacted"`) {
+		t.Fatalf("response contains raw agent_system_prompt: %s", got)
 	}
 }
 

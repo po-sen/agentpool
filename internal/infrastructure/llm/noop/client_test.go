@@ -12,8 +12,13 @@ func TestClientGenerateReturnsContent(t *testing.T) {
 
 	response, err := client.Generate(context.Background(), outbound.ModelRequest{
 		RunID: "run_test",
-		Messages: []outbound.ModelMessage{
-			{Role: "user", Content: "do work"},
+		Turns: []outbound.ModelTurn{
+			{
+				Role: outbound.ModelRoleUser,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindTaskPrompt, Text: "do work"},
+				},
+			},
 		},
 	})
 	if err != nil {
