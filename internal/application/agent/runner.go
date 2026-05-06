@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,17 @@ const (
 	modelRoleSystem    = "system"
 	modelRoleUser      = "user"
 	modelRoleAssistant = "assistant"
+)
+
+const (
+	modelResponseFormatEmpty              = "empty"
+	modelResponseFormatPlainText          = "plain_text"
+	modelResponseFormatMarkdownFence      = "markdown_fence"
+	modelResponseFormatJSONObject         = "json_object"
+	modelResponseFormatJSONArray          = "json_array"
+	modelResponseFormatJSONScalar         = "json_scalar"
+	modelResponseFormatInvalidJSON        = "invalid_json"
+	modelResponseFormatMultipleJSONValues = "multiple_json_values"
 )
 
 // Runner owns AgentPool's application-level agent behavior.
@@ -64,14 +76,25 @@ type ToolCallRecord struct {
 
 // TurnRecord captures one model-loop diagnostic observed by the agent runner.
 type TurnRecord struct {
-	Index           int
-	Status          string
-	ActionType      string
-	ToolName        string
-	Message         string
-	ResponsePreview string
-	StartedAt       time.Time
-	EndedAt         time.Time
+	Index             int
+	Status            string
+	ActionType        string
+	ToolName          string
+	Message           string
+	RequestMessages   []TurnMessageRecord
+	RawResponse       string
+	ResponseFormat    string
+	ProtocolErrorCode string
+	CorrectionMessage string
+	ResponsePreview   string
+	StartedAt         time.Time
+	EndedAt           time.Time
+}
+
+// TurnMessageRecord captures one provider-neutral model request message observed by the agent runner.
+type TurnMessageRecord struct {
+	Role    string
+	Content string
 }
 
 type runSession struct {
@@ -84,6 +107,15 @@ type runSession struct {
 	toolCallCount      int
 	toolCalls          []ToolCallRecord
 	turns              []TurnRecord
+}
+
+type modelTurnContext struct {
+	content         string
+	requestMessages []TurnMessageRecord
+	responseFormat  string
+	index           int
+	startedAt       time.Time
+	endedAt         time.Time
 }
 
 // NewRunner creates an application agent runner.
@@ -185,6 +217,7 @@ func (r *Runner) newRunSession(ctx context.Context, request RunRequest) (*runSes
 func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, bool, error) {
 	turnIndex := session.nextTurnIndex()
 	startedAt := r.clock()
+	requestMessages := copyModelMessages(session.messages)
 	response, err := r.model.Generate(ctx, outbound.ModelRequest{
 		RunID:    session.request.RunID,
 		Messages: session.messages,
@@ -192,68 +225,63 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 	endedAt := r.clock()
 	if err != nil {
 		session.recordTurn(TurnRecord{
-			Index:     turnIndex,
-			Status:    run.AgentTurnStatusModelError,
-			Message:   messageModelGenerateFailed,
-			StartedAt: startedAt,
-			EndedAt:   endedAt,
+			Index:           turnIndex,
+			Status:          run.AgentTurnStatusModelError,
+			Message:         messageModelGenerateFailed,
+			RequestMessages: requestMessages,
+			StartedAt:       startedAt,
+			EndedAt:         endedAt,
 		})
 
 		return session.partialResult(), false, newAgentError(ErrorCodeModelGenerateFailed, "", err)
 	}
 
+	responseFormat := classifyModelResponseFormat(response.Content)
 	parsed := parseAction(response.Content)
 	switch parsed.status {
-	case actionParseNaturalLanguage:
-		if err := validateFinalSummary(response.Content); err != nil {
-			session.recordTurn(TurnRecord{
-				Index:           turnIndex,
-				Status:          run.AgentTurnStatusFinal,
-				ActionType:      run.AgentTurnActionTypeFinal,
-				Message:         messageFinalSummaryInvalid,
-				ResponsePreview: previewModelResponse(response.Content),
-				StartedAt:       startedAt,
-				EndedAt:         endedAt,
-			})
-
-			return session.partialResult(), false, newAgentError(ErrorCodeFinalSummaryInvalid, "", err)
-		}
-		session.recordTurn(TurnRecord{
-			Index:           turnIndex,
-			Status:          run.AgentTurnStatusNaturalLanguageFinal,
-			Message:         "model returned natural-language final answer",
-			ResponsePreview: previewModelResponse(response.Content),
-			StartedAt:       startedAt,
-			EndedAt:         endedAt,
-		})
-
-		return session.finalResult(response.Content), true, nil
 	case actionParseProtocolError:
 		message := "model response did not match AgentPool action protocol"
 		if parsed.parseErr.Message != "" {
 			message = parsed.parseErr.Message
 		}
+		correctionMessage := buildProtocolCorrectionMessage(parsed.parseErr)
 		session.recordTurn(TurnRecord{
-			Index:           turnIndex,
-			Status:          run.AgentTurnStatusProtocolError,
-			Message:         message,
-			ResponsePreview: previewModelResponse(response.Content),
-			StartedAt:       startedAt,
-			EndedAt:         endedAt,
+			Index:             turnIndex,
+			Status:            run.AgentTurnStatusProtocolError,
+			Message:           message,
+			RequestMessages:   requestMessages,
+			RawResponse:       response.Content,
+			ResponseFormat:    responseFormat,
+			ProtocolErrorCode: parsed.parseErr.Code,
+			CorrectionMessage: correctionMessage,
+			ResponsePreview:   previewModelResponse(response.Content),
+			StartedAt:         startedAt,
+			EndedAt:           endedAt,
 		})
 		session.messages = append(session.messages,
-			outbound.ModelMessage{Role: modelRoleAssistant, Content: response.Content},
-			outbound.ModelMessage{Role: modelRoleUser, Content: buildProtocolCorrectionMessage(parsed.parseErr)},
+			outbound.ModelMessage{Role: modelRoleUser, Content: correctionMessage},
 		)
 
 		return RunResult{}, false, nil
 	case actionParseValid:
-		return r.handleAction(ctx, session, response.Content, parsed.action, turnIndex, startedAt, endedAt)
+		turn := modelTurnContext{
+			content:         response.Content,
+			requestMessages: requestMessages,
+			responseFormat:  responseFormat,
+			index:           turnIndex,
+			startedAt:       startedAt,
+			endedAt:         endedAt,
+		}
+
+		return r.handleAction(ctx, session, turn, parsed.action)
 	default:
 		session.recordTurn(TurnRecord{
 			Index:           turnIndex,
 			Status:          run.AgentTurnStatusProtocolError,
 			Message:         messageAgentProtocolError,
+			RequestMessages: requestMessages,
+			RawResponse:     response.Content,
+			ResponseFormat:  responseFormat,
 			ResponsePreview: previewModelResponse(response.Content),
 			StartedAt:       startedAt,
 			EndedAt:         endedAt,
@@ -270,66 +298,75 @@ func (r *Runner) runTurn(ctx context.Context, session *runSession) (RunResult, b
 func (r *Runner) handleAction(
 	ctx context.Context,
 	session *runSession,
-	content string,
+	turn modelTurnContext,
 	parsed action,
-	turnIndex int,
-	startedAt time.Time,
-	endedAt time.Time,
 ) (RunResult, bool, error) {
 	switch parsed.Type {
 	case actionTypeFinal:
 		if err := validateFinalSummary(parsed.Summary); err != nil {
 			session.recordTurn(TurnRecord{
-				Index:           turnIndex,
+				Index:           turn.index,
 				Status:          run.AgentTurnStatusFinal,
 				ActionType:      run.AgentTurnActionTypeFinal,
 				Message:         messageFinalSummaryInvalid,
-				ResponsePreview: previewModelResponse(content),
-				StartedAt:       startedAt,
-				EndedAt:         endedAt,
+				RequestMessages: turn.requestMessages,
+				RawResponse:     turn.content,
+				ResponseFormat:  turn.responseFormat,
+				ResponsePreview: previewModelResponse(turn.content),
+				StartedAt:       turn.startedAt,
+				EndedAt:         turn.endedAt,
 			})
 
 			return session.partialResult(), false, newAgentError(ErrorCodeFinalSummaryInvalid, "", err)
 		}
 		session.recordTurn(TurnRecord{
-			Index:           turnIndex,
+			Index:           turn.index,
 			Status:          run.AgentTurnStatusFinal,
 			ActionType:      run.AgentTurnActionTypeFinal,
 			Message:         "model returned final answer",
+			RequestMessages: turn.requestMessages,
+			RawResponse:     turn.content,
+			ResponseFormat:  turn.responseFormat,
 			ResponsePreview: previewModelResponse(parsed.Summary),
-			StartedAt:       startedAt,
-			EndedAt:         endedAt,
+			StartedAt:       turn.startedAt,
+			EndedAt:         turn.endedAt,
 		})
 
 		return session.finalResult(parsed.Summary), true, nil
 	case actionTypeToolCall:
 		if !session.toolIsAvailable(parsed.Tool) {
-			return handleUnavailableToolCall(session, content, parsed, turnIndex, startedAt, endedAt)
+			return handleUnavailableToolCall(session, turn, parsed)
 		}
 		if placeholders := placeholderArgumentValues(parsed.Arguments); len(placeholders) > 0 {
-			return handlePlaceholderToolCall(session, content, parsed, placeholders, turnIndex, startedAt, endedAt)
+			return handlePlaceholderToolCall(session, turn, parsed, placeholders)
 		}
 
 		session.recordTurn(TurnRecord{
-			Index:           turnIndex,
+			Index:           turn.index,
 			Status:          run.AgentTurnStatusToolCall,
 			ActionType:      run.AgentTurnActionTypeToolCall,
 			ToolName:        parsed.Tool,
 			Message:         "model requested tool call",
-			ResponsePreview: previewModelResponse(content),
-			StartedAt:       startedAt,
-			EndedAt:         endedAt,
+			RequestMessages: turn.requestMessages,
+			RawResponse:     turn.content,
+			ResponseFormat:  turn.responseFormat,
+			ResponsePreview: previewModelResponse(turn.content),
+			StartedAt:       turn.startedAt,
+			EndedAt:         turn.endedAt,
 		})
 
-		return r.handleToolCall(ctx, session, content, parsed)
+		return r.handleToolCall(ctx, session, turn.content, parsed)
 	default:
 		session.recordTurn(TurnRecord{
-			Index:           turnIndex,
+			Index:           turn.index,
 			Status:          run.AgentTurnStatusProtocolError,
 			Message:         messageAgentProtocolError,
-			ResponsePreview: previewModelResponse(content),
-			StartedAt:       startedAt,
-			EndedAt:         endedAt,
+			RequestMessages: turn.requestMessages,
+			RawResponse:     turn.content,
+			ResponseFormat:  turn.responseFormat,
+			ResponsePreview: previewModelResponse(turn.content),
+			StartedAt:       turn.startedAt,
+			EndedAt:         turn.endedAt,
 		})
 
 		return session.partialResult(), false, newAgentError(
@@ -403,25 +440,25 @@ func validateFinalSummary(summary string) error {
 
 func handleUnavailableToolCall(
 	session *runSession,
-	content string,
+	turn modelTurnContext,
 	parsed action,
-	turnIndex int,
-	startedAt time.Time,
-	endedAt time.Time,
 ) (RunResult, bool, error) {
 	message := "tool is not available: " + parsed.Tool
 	session.recordTurn(TurnRecord{
-		Index:           turnIndex,
+		Index:           turn.index,
 		Status:          run.AgentTurnStatusInvalidToolCall,
 		ActionType:      run.AgentTurnActionTypeToolCall,
 		ToolName:        parsed.Tool,
 		Message:         message,
-		ResponsePreview: previewModelResponse(content),
-		StartedAt:       startedAt,
-		EndedAt:         endedAt,
+		RequestMessages: turn.requestMessages,
+		RawResponse:     turn.content,
+		ResponseFormat:  turn.responseFormat,
+		ResponsePreview: previewModelResponse(turn.content),
+		StartedAt:       turn.startedAt,
+		EndedAt:         turn.endedAt,
 	})
 	session.messages = append(session.messages,
-		outbound.ModelMessage{Role: modelRoleAssistant, Content: content},
+		outbound.ModelMessage{Role: modelRoleAssistant, Content: turn.content},
 		outbound.ModelMessage{
 			Role: modelRoleUser,
 			Content: buildUnavailableToolCorrectionMessage(unavailableToolCorrectionRequest{
@@ -436,26 +473,26 @@ func handleUnavailableToolCall(
 
 func handlePlaceholderToolCall(
 	session *runSession,
-	content string,
+	turn modelTurnContext,
 	parsed action,
 	placeholders []string,
-	turnIndex int,
-	startedAt time.Time,
-	endedAt time.Time,
 ) (RunResult, bool, error) {
 	message := "tool call arguments contain placeholder values"
 	session.recordTurn(TurnRecord{
-		Index:           turnIndex,
+		Index:           turn.index,
 		Status:          run.AgentTurnStatusInvalidToolCall,
 		ActionType:      run.AgentTurnActionTypeToolCall,
 		ToolName:        parsed.Tool,
 		Message:         message,
-		ResponsePreview: previewModelResponse(content),
-		StartedAt:       startedAt,
-		EndedAt:         endedAt,
+		RequestMessages: turn.requestMessages,
+		RawResponse:     turn.content,
+		ResponseFormat:  turn.responseFormat,
+		ResponsePreview: previewModelResponse(turn.content),
+		StartedAt:       turn.startedAt,
+		EndedAt:         turn.endedAt,
 	})
 	session.messages = append(session.messages,
-		outbound.ModelMessage{Role: modelRoleAssistant, Content: content},
+		outbound.ModelMessage{Role: modelRoleAssistant, Content: turn.content},
 		outbound.ModelMessage{
 			Role: modelRoleUser,
 			Content: buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
@@ -552,7 +589,10 @@ func (s *runSession) nextTurnIndex() int {
 }
 
 func (s *runSession) recordTurn(record TurnRecord) {
+	record.RequestMessages = copyTurnMessageRecords(record.RequestMessages)
+	record.RawResponse = previewRawResponse(record.RawResponse)
 	record.ResponsePreview = previewModelResponse(record.ResponsePreview)
+	record.CorrectionMessage = previewCorrectionMessage(record.CorrectionMessage)
 	s.turns = append(s.turns, record)
 }
 
@@ -579,7 +619,10 @@ func copyTurnRecords(records []TurnRecord) []TurnRecord {
 	copied := make([]TurnRecord, 0, len(records))
 	for _, record := range records {
 		item := record
+		item.RequestMessages = copyTurnMessageRecords(record.RequestMessages)
+		item.RawResponse = previewRawResponse(record.RawResponse)
 		item.ResponsePreview = previewModelResponse(record.ResponsePreview)
+		item.CorrectionMessage = previewCorrectionMessage(record.CorrectionMessage)
 		copied = append(copied, item)
 	}
 
@@ -594,6 +637,43 @@ func copyArguments(arguments map[string]string) map[string]string {
 	copied := make(map[string]string, len(arguments))
 	for key, value := range arguments {
 		copied[key] = value
+	}
+
+	return copied
+}
+
+func copyModelMessages(messages []outbound.ModelMessage) []TurnMessageRecord {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	copied := make([]TurnMessageRecord, 0, len(messages))
+	for _, message := range messages {
+		copied = append(copied, TurnMessageRecord{
+			Role:    message.Role,
+			Content: message.Content,
+		})
+	}
+
+	return copied
+}
+
+func copyTurnMessageRecords(messages []TurnMessageRecord) []TurnMessageRecord {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	copied := make([]TurnMessageRecord, 0, len(messages))
+	for _, message := range messages {
+		role := strings.TrimSpace(message.Role)
+		if role == "" {
+			continue
+		}
+
+		copied = append(copied, TurnMessageRecord{
+			Role:    role,
+			Content: previewRequestMessageContent(message.Content),
+		})
 	}
 
 	return copied
@@ -692,13 +772,60 @@ func isPlaceholderName(name string) bool {
 	}
 }
 
+func classifyModelResponseFormat(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return modelResponseFormatEmpty
+	}
+	if strings.HasPrefix(trimmed, "```") {
+		return modelResponseFormatMarkdownFence
+	}
+
+	decoded, extraErr, decodeErr := decodeSingleJSONValue(trimmed)
+	if decodeErr != nil {
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			return modelResponseFormatInvalidJSON
+		}
+
+		return modelResponseFormatPlainText
+	}
+	if !errors.Is(extraErr, io.EOF) {
+		return modelResponseFormatMultipleJSONValues
+	}
+
+	switch decoded.(type) {
+	case map[string]any:
+		return modelResponseFormatJSONObject
+	case []any:
+		return modelResponseFormatJSONArray
+	default:
+		return modelResponseFormatJSONScalar
+	}
+}
+
 func previewModelResponse(content string) string {
+	return truncateAgentTurnText(content, run.MaxAgentTurnPreviewLength)
+}
+
+func previewRawResponse(content string) string {
+	return truncateAgentTurnText(content, run.MaxAgentTurnRawResponseLength)
+}
+
+func previewRequestMessageContent(content string) string {
+	return truncateAgentTurnText(content, run.MaxAgentTurnMessageContentLength)
+}
+
+func previewCorrectionMessage(content string) string {
+	return truncateAgentTurnText(strings.TrimSpace(content), run.MaxAgentTurnCorrectionLength)
+}
+
+func truncateAgentTurnText(content string, maxLength int) string {
 	content = strings.ToValidUTF8(content, "\uFFFD")
-	if len(content) <= run.MaxAgentTurnPreviewLength {
+	if len(content) <= maxLength {
 		return content
 	}
 
-	maxContentLength := run.MaxAgentTurnPreviewLength - len(agentTurnPreviewTruncatedMarker)
+	maxContentLength := maxLength - len(agentTurnPreviewTruncatedMarker)
 	if maxContentLength < 0 {
 		maxContentLength = 0
 	}

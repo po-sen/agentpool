@@ -76,14 +76,24 @@ type toolCallResponse struct {
 }
 
 type agentTurnResponse struct {
-	Index           int       `json:"index"`
-	Status          string    `json:"status"`
-	ActionType      string    `json:"action_type,omitempty"`
-	ToolName        string    `json:"tool_name,omitempty"`
-	Message         string    `json:"message,omitempty"`
-	ResponsePreview string    `json:"response_preview,omitempty"`
-	StartedAt       time.Time `json:"started_at"`
-	EndedAt         time.Time `json:"ended_at"`
+	Index             int               `json:"index"`
+	Status            string            `json:"status"`
+	ActionType        string            `json:"action_type,omitempty"`
+	ToolName          string            `json:"tool_name,omitempty"`
+	Message           string            `json:"message,omitempty"`
+	RequestMessages   []messageResponse `json:"request_messages,omitempty"`
+	RawResponse       string            `json:"raw_response,omitempty"`
+	ResponseFormat    string            `json:"response_format,omitempty"`
+	ProtocolErrorCode string            `json:"protocol_error_code,omitempty"`
+	CorrectionMessage string            `json:"correction_message,omitempty"`
+	ResponsePreview   string            `json:"response_preview,omitempty"`
+	StartedAt         time.Time         `json:"started_at"`
+	EndedAt           time.Time         `json:"ended_at"`
+}
+
+type messageResponse struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 type errorResponse struct {
@@ -123,14 +133,19 @@ func toRunResponse(item inbound.RunView) runResponse {
 	agentTurns := make([]agentTurnResponse, 0, len(item.AgentTurns))
 	for _, turn := range item.AgentTurns {
 		agentTurns = append(agentTurns, agentTurnResponse{
-			Index:           turn.Index,
-			Status:          turn.Status,
-			ActionType:      turn.ActionType,
-			ToolName:        turn.ToolName,
-			Message:         turn.Message,
-			ResponsePreview: turn.ResponsePreview,
-			StartedAt:       turn.StartedAt,
-			EndedAt:         turn.EndedAt,
+			Index:             turn.Index,
+			Status:            turn.Status,
+			ActionType:        turn.ActionType,
+			ToolName:          turn.ToolName,
+			Message:           turn.Message,
+			RequestMessages:   messageResponses(turn.RequestMessages),
+			RawResponse:       turn.RawResponse,
+			ResponseFormat:    turn.ResponseFormat,
+			ProtocolErrorCode: turn.ProtocolErrorCode,
+			CorrectionMessage: turn.CorrectionMessage,
+			ResponsePreview:   turn.ResponsePreview,
+			StartedAt:         turn.StartedAt,
+			EndedAt:           turn.EndedAt,
 		})
 	}
 	artifacts := make([]artifactResponse, 0, len(item.Artifacts))
@@ -163,6 +178,22 @@ func toRunResponse(item inbound.RunView) runResponse {
 	}
 
 	return response
+}
+
+func messageResponses(messages []inbound.AgentTurnMessageView) []messageResponse {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	responses := make([]messageResponse, 0, len(messages))
+	for _, message := range messages {
+		responses = append(responses, messageResponse{
+			Role:    message.Role,
+			Content: message.Content,
+		})
+	}
+
+	return responses
 }
 
 func toArtifactsResponse(artifacts []inbound.ArtifactView) artifactsResponse {

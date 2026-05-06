@@ -8,11 +8,15 @@ import (
 const (
 	// MaxAgentTurnPreviewLength bounds stored model response previews exposed through read APIs.
 	MaxAgentTurnPreviewLength = 4 << 10
+	// MaxAgentTurnCorrectionLength bounds stored correction prompts exposed through read APIs.
+	MaxAgentTurnCorrectionLength = 4 << 10
+	// MaxAgentTurnRawResponseLength bounds stored raw model response content exposed through read APIs.
+	MaxAgentTurnRawResponseLength = 16 << 10
+	// MaxAgentTurnMessageContentLength bounds stored model request message content exposed through read APIs.
+	MaxAgentTurnMessageContentLength = 16 << 10
 
 	// AgentTurnStatusModelResponse identifies a generic model response turn.
 	AgentTurnStatusModelResponse = "model_response"
-	// AgentTurnStatusNaturalLanguageFinal identifies a natural-language final answer.
-	AgentTurnStatusNaturalLanguageFinal = "natural_language_final"
 	// AgentTurnStatusFinal identifies a parsed final action.
 	AgentTurnStatusFinal = "final"
 	// AgentTurnStatusToolCall identifies a parsed tool call action.
@@ -36,14 +40,25 @@ const (
 
 // AgentTurn records one provider-neutral model-loop diagnostic observed during a run.
 type AgentTurn struct {
-	Index           int
-	Status          string
-	ActionType      string
-	ToolName        string
-	Message         string
-	ResponsePreview string
-	StartedAt       time.Time
-	EndedAt         time.Time
+	Index             int
+	Status            string
+	ActionType        string
+	ToolName          string
+	Message           string
+	RequestMessages   []AgentTurnMessage
+	RawResponse       string
+	ResponseFormat    string
+	ProtocolErrorCode string
+	CorrectionMessage string
+	ResponsePreview   string
+	StartedAt         time.Time
+	EndedAt           time.Time
+}
+
+// AgentTurnMessage records one provider-neutral model request message for debugging.
+type AgentTurnMessage struct {
+	Role    string
+	Content string
 }
 
 func copyAgentTurns(turns []AgentTurn) []AgentTurn {
@@ -62,8 +77,34 @@ func copyAgentTurns(turns []AgentTurn) []AgentTurn {
 		item.ActionType = strings.TrimSpace(turn.ActionType)
 		item.ToolName = strings.TrimSpace(turn.ToolName)
 		item.Message = strings.TrimSpace(turn.Message)
+		item.RequestMessages = copyAgentTurnMessages(turn.RequestMessages)
+		item.RawResponse = truncateUTF8Text(turn.RawResponse, MaxAgentTurnRawResponseLength)
+		item.ResponseFormat = strings.TrimSpace(turn.ResponseFormat)
+		item.ProtocolErrorCode = strings.TrimSpace(turn.ProtocolErrorCode)
+		item.CorrectionMessage = truncateUTF8Text(strings.TrimSpace(turn.CorrectionMessage), MaxAgentTurnCorrectionLength)
 		item.ResponsePreview = truncateUTF8Text(turn.ResponsePreview, MaxAgentTurnPreviewLength)
 		copied = append(copied, item)
+	}
+
+	return copied
+}
+
+func copyAgentTurnMessages(messages []AgentTurnMessage) []AgentTurnMessage {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	copied := make([]AgentTurnMessage, 0, len(messages))
+	for _, message := range messages {
+		role := strings.TrimSpace(message.Role)
+		if role == "" {
+			continue
+		}
+
+		copied = append(copied, AgentTurnMessage{
+			Role:    role,
+			Content: truncateUTF8Text(message.Content, MaxAgentTurnMessageContentLength),
+		})
 	}
 
 	return copied

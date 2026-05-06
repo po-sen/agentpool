@@ -7,15 +7,21 @@ import (
 
 func TestBuildProtocolCorrectionMessageUsesParseErrorDetails(t *testing.T) {
 	message := buildProtocolCorrectionMessage(actionParseError{
+		Code:    actionParseCodeInvalidSummary,
 		Message: "final.summary must be a string, boolean, or number",
 		Hint:    `Return {"type":"final","summary":"..."}`,
 	})
 
 	for _, want := range []string{
 		"Protocol error:",
+		"Error code: invalid_summary",
 		"final.summary must be a string, boolean, or number",
 		`Return {"type":"final","summary":"..."}`,
-		`{"type":"final","summary":"Finished the task."}`,
+		"The invalid response is recorded for diagnostics but is not included here.",
+		"Re-answer the original user task in the required JSON format.",
+		`final.summary must contain the actual answer to the user's task, not a completion note such as "Finished the task."`,
+		"Preserve the user's requested language.",
+		`{"type":"final","summary":"Here is the answer the user asked for."}`,
 		`{"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}`,
 		"Do not return tool_result.",
 		"Do not return multiple JSON objects.",
@@ -30,6 +36,9 @@ func TestBuildProtocolCorrectionMessageUsesParseErrorDetails(t *testing.T) {
 func TestBuildProtocolCorrectionMessageUsesFallbacks(t *testing.T) {
 	message := buildProtocolCorrectionMessage(actionParseError{})
 
+	if !strings.Contains(message, "Error code: protocol_error") {
+		t.Fatalf("message does not contain fallback error code:\n%s", message)
+	}
 	if !strings.Contains(message, "model response did not match AgentPool action protocol") {
 		t.Fatalf("message does not contain fallback parse error:\n%s", message)
 	}
@@ -48,7 +57,7 @@ func TestBuildUnavailableToolCorrectionMessageHandlesNoAvailableTools(t *testing
 		"Available tools: none",
 		"Do not invent tool names.",
 		"Tool names are exact and case-sensitive.",
-		"If no tools are available, return a final answer directly.",
+		"If no tools are available, return a final JSON action directly.",
 	} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("message does not contain %q:\n%s", want, message)

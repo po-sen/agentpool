@@ -46,14 +46,19 @@ func toRunView(item *run.Run) inbound.RunView {
 	agentTurns := make([]inbound.AgentTurnView, 0, len(item.AgentTurns))
 	for _, turn := range item.AgentTurns {
 		agentTurns = append(agentTurns, inbound.AgentTurnView{
-			Index:           turn.Index,
-			Status:          turn.Status,
-			ActionType:      turn.ActionType,
-			ToolName:        turn.ToolName,
-			Message:         turn.Message,
-			ResponsePreview: turn.ResponsePreview,
-			StartedAt:       turn.StartedAt,
-			EndedAt:         turn.EndedAt,
+			Index:             turn.Index,
+			Status:            turn.Status,
+			ActionType:        turn.ActionType,
+			ToolName:          turn.ToolName,
+			Message:           turn.Message,
+			RequestMessages:   agentTurnMessageViews(turn.RequestMessages),
+			RawResponse:       turn.RawResponse,
+			ResponseFormat:    turn.ResponseFormat,
+			ProtocolErrorCode: turn.ProtocolErrorCode,
+			CorrectionMessage: turn.CorrectionMessage,
+			ResponsePreview:   turn.ResponsePreview,
+			StartedAt:         turn.StartedAt,
+			EndedAt:           turn.EndedAt,
 		})
 	}
 	artifacts := artifactViews(item.Artifacts)
@@ -82,6 +87,22 @@ func toRunView(item *run.Run) inbound.RunView {
 		CreatedAt:         item.CreatedAt,
 		UpdatedAt:         item.UpdatedAt,
 	}
+}
+
+func agentTurnMessageViews(messages []run.AgentTurnMessage) []inbound.AgentTurnMessageView {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	views := make([]inbound.AgentTurnMessageView, 0, len(messages))
+	for _, message := range messages {
+		views = append(views, inbound.AgentTurnMessageView{
+			Role:    message.Role,
+			Content: message.Content,
+		})
+	}
+
+	return views
 }
 
 func artifactViews(artifacts []run.Artifact) []inbound.ArtifactView {

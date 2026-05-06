@@ -119,14 +119,25 @@ type ToolCallResponse struct {
 
 // AgentTurnResponse mirrors one agent turn diagnostic in the public run JSON response.
 type AgentTurnResponse struct {
-	Index           int       `json:"index"`
-	Status          string    `json:"status"`
-	ActionType      string    `json:"action_type,omitempty"`
-	ToolName        string    `json:"tool_name,omitempty"`
-	Message         string    `json:"message,omitempty"`
-	ResponsePreview string    `json:"response_preview,omitempty"`
-	StartedAt       time.Time `json:"started_at"`
-	EndedAt         time.Time `json:"ended_at"`
+	Index             int               `json:"index"`
+	Status            string            `json:"status"`
+	ActionType        string            `json:"action_type,omitempty"`
+	ToolName          string            `json:"tool_name,omitempty"`
+	Message           string            `json:"message,omitempty"`
+	RequestMessages   []MessageResponse `json:"request_messages,omitempty"`
+	RawResponse       string            `json:"raw_response,omitempty"`
+	ResponseFormat    string            `json:"response_format,omitempty"`
+	ProtocolErrorCode string            `json:"protocol_error_code,omitempty"`
+	CorrectionMessage string            `json:"correction_message,omitempty"`
+	ResponsePreview   string            `json:"response_preview,omitempty"`
+	StartedAt         time.Time         `json:"started_at"`
+	EndedAt           time.Time         `json:"ended_at"`
+}
+
+// MessageResponse mirrors one provider-neutral model request message in run diagnostics.
+type MessageResponse struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 type createRunJSONRequest struct {

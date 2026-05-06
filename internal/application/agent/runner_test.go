@@ -12,9 +12,12 @@ import (
 	"github.com/po-sen/agentpool/internal/domain/run"
 )
 
-func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
+func TestRunnerRejectsNaturalLanguageResponseAndContinues(t *testing.T) {
 	model := &recordingModelClient{
-		responses: []outbound.ModelResponse{{Content: "done"}},
+		responses: []outbound.ModelResponse{
+			{Content: "done"},
+			{Content: `{"type":"final","summary":"corrected final"}`},
+		},
 	}
 	tools := newFakeToolRunner()
 	runner := NewRunner(model, tools)
@@ -26,8 +29,8 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	if result.Summary != "done" {
-		t.Fatalf("summary = %q, want done", result.Summary)
+	if result.Summary != "corrected final" {
+		t.Fatalf("summary = %q, want corrected final", result.Summary)
 	}
 	if result.ToolCallCount != 0 {
 		t.Fatalf("ToolCallCount = %d, want 0", result.ToolCallCount)
@@ -36,10 +39,22 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 		t.Fatalf("len(ToolCalls) = %d, want 0", len(result.ToolCalls))
 	}
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
-		index:           1,
-		status:          run.AgentTurnStatusNaturalLanguageFinal,
-		message:         "model returned natural-language final answer",
-		responsePreview: "done",
+		index:               1,
+		status:              run.AgentTurnStatusProtocolError,
+		message:             "model response was not valid JSON",
+		requestMessageCount: 2,
+		requestContains:     "do work",
+		rawResponse:         "done",
+		responseFormat:      modelResponseFormatPlainText,
+		protocolErrorCode:   actionParseCodeInvalidJSON,
+		correctionContains:  "Re-answer the original user task in the required JSON format.",
+		responsePreview:     "done",
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+		message:    "model returned final answer",
 	})
 	if model.requests[0].RunID != "run_test" {
 		t.Fatalf("model RunID = %s, want run_test", model.requests[0].RunID)
@@ -51,6 +66,11 @@ func TestRunnerTreatsNaturalLanguageResponseAsFinalSummary(t *testing.T) {
 	if !strings.Contains(result.SystemPrompt, "Available tools") {
 		t.Fatalf("SystemPrompt = %q, want available tools", result.SystemPrompt)
 	}
+	if len(model.requests) != 2 {
+		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
+	}
+	lastMessages := model.requests[1].Messages
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Return exactly one JSON object")
 }
 
 func TestNewRunnerUsesEightDefaultMaxTurns(t *testing.T) {
@@ -114,6 +134,8 @@ func TestRunnerReturnsJSONFinalActionSummary(t *testing.T) {
 		status:          run.AgentTurnStatusFinal,
 		actionType:      run.AgentTurnActionTypeFinal,
 		message:         "model returned final answer",
+		rawResponse:     `{"type":"final","summary":"done"}`,
+		responseFormat:  modelResponseFormatJSONObject,
 		responsePreview: "done",
 	})
 }
@@ -449,23 +471,35 @@ func TestRunnerRejectsUnknownJSONActionTypeAndContinues(t *testing.T) {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
 	}
 	lastMessages := model.requests[1].Messages
-	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", "tool_result")
+	if len(lastMessages) != 3 {
+		t.Fatalf("len(second request messages) = %d, want system, task, and correction", len(lastMessages))
+	}
+	assertNoAssistantMessages(t, lastMessages)
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Protocol error:")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Error code: unknown_action_type")
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "action type must be final or tool_call")
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not return tool_result.")
+	if strings.Contains(lastMessages[len(lastMessages)-1].Content, "hello from tool") {
+		t.Fatalf("protocol correction included invalid raw response content: %q", lastMessages[len(lastMessages)-1].Content)
+	}
 	if len(tools.calls) != 0 {
 		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
 	}
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
-		index:           1,
-		status:          run.AgentTurnStatusProtocolError,
-		message:         "action type must be final or tool_call",
-		responsePreview: `{"type":"tool_result","result":"hello from tool"}`,
+		index:             1,
+		status:            run.AgentTurnStatusProtocolError,
+		message:           "action type must be final or tool_call",
+		rawResponse:       `{"type":"tool_result","result":"hello from tool"}`,
+		responseFormat:    modelResponseFormatJSONObject,
+		protocolErrorCode: actionParseCodeUnknownActionType,
+		responsePreview:   `{"type":"tool_result","result":"hello from tool"}`,
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
-		index:      2,
-		status:     run.AgentTurnStatusFinal,
-		actionType: run.AgentTurnActionTypeFinal,
+		index:               2,
+		status:              run.AgentTurnStatusFinal,
+		actionType:          run.AgentTurnActionTypeFinal,
+		requestMessageCount: 3,
+		requestContains:     "Error code: unknown_action_type",
 	})
 }
 
@@ -497,13 +531,22 @@ func TestRunnerRejectsMultipleJSONObjectsAndContinues(t *testing.T) {
 	}
 	lastMessages := model.requests[1].Messages
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not return multiple JSON objects.")
+	assertNoAssistantMessages(t, lastMessages)
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:             1,
+		status:            run.AgentTurnStatusProtocolError,
+		message:           "model response must contain exactly one JSON object",
+		rawResponse:       `{"type":"tool_call","tool":"echo","arguments":{"text":"hello"}}{"type":"final","summary":"bad"}`,
+		responseFormat:    modelResponseFormatMultipleJSONValues,
+		protocolErrorCode: actionParseCodeMultipleJSONValues,
+	})
 }
 
-func TestRunnerParsesFencedJSONToolCallAndContinues(t *testing.T) {
+func TestRunnerRejectsFencedJSONToolCallAndContinues(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
 			{Content: "```json\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```"},
-			{Content: `{"type":"final","summary":"fenced tool handled"}`},
+			{Content: `{"type":"final","summary":"corrected final"}`},
 		},
 	}
 	tools := newFakeToolRunner()
@@ -516,23 +559,32 @@ func TestRunnerParsesFencedJSONToolCallAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	if result.Summary != "fenced tool handled" {
-		t.Fatalf("summary = %q, want fenced tool handled", result.Summary)
+	if result.Summary != "corrected final" {
+		t.Fatalf("summary = %q, want corrected final", result.Summary)
 	}
-	if len(tools.calls) != 1 {
-		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	if len(tools.calls) != 0 {
+		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
 	}
 	if len(model.requests) != 2 {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
 	}
 	lastMessages := model.requests[1].Messages
-	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", "```json")
-	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Tool result for echo:\nhello")
+	if len(lastMessages) != 3 {
+		t.Fatalf("len(second request messages) = %d, want system, task, and correction", len(lastMessages))
+	}
+	assertNoAssistantMessages(t, lastMessages)
+	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "Do not use markdown fences.")
+	if strings.Contains(lastMessages[len(lastMessages)-1].Content, "```json") {
+		t.Fatalf("protocol correction included invalid raw response content: %q", lastMessages[len(lastMessages)-1].Content)
+	}
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
-		index:      1,
-		status:     run.AgentTurnStatusToolCall,
-		actionType: run.AgentTurnActionTypeToolCall,
-		toolName:   "echo",
+		index:             1,
+		status:            run.AgentTurnStatusProtocolError,
+		message:           "model response was not valid JSON",
+		rawResponse:       "```json\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```",
+		responseFormat:    modelResponseFormatMarkdownFence,
+		protocolErrorCode: actionParseCodeInvalidJSON,
+		responsePreview:   "```json\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```",
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
 		index:      2,
@@ -605,9 +657,12 @@ func TestRunnerProvidesTargetedCorrectionForInvalidSummary(t *testing.T) {
 	lastMessages := model.requests[1].Messages
 	assertMessage(t, lastMessages[len(lastMessages)-1], "user", "final.summary must be a string, boolean, or number")
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
-		index:   1,
-		status:  run.AgentTurnStatusProtocolError,
-		message: "final.summary must be a string, boolean, or number",
+		index:             1,
+		status:            run.AgentTurnStatusProtocolError,
+		message:           "final.summary must be a string, boolean, or number",
+		rawResponse:       `{"type":"final","summary":{"value":"done"}}`,
+		responseFormat:    modelResponseFormatJSONObject,
+		protocolErrorCode: actionParseCodeInvalidSummary,
 	})
 }
 
@@ -713,9 +768,12 @@ func TestRunnerReturnsErrorWhenProtocolErrorsExceedMaxTurns(t *testing.T) {
 		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
 	}
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
-		index:           1,
-		status:          run.AgentTurnStatusProtocolError,
-		responsePreview: `{"type":"tool_result","result":"hello from tool"}`,
+		index:             1,
+		status:            run.AgentTurnStatusProtocolError,
+		rawResponse:       `{"type":"tool_result","result":"hello from tool"}`,
+		responseFormat:    modelResponseFormatJSONObject,
+		protocolErrorCode: actionParseCodeUnknownActionType,
+		responsePreview:   `{"type":"tool_result","result":"hello from tool"}`,
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
 		index:  2,
@@ -886,9 +944,12 @@ func TestRunnerRecordsToolExecutionErrorAndReturnsPartialResult(t *testing.T) {
 	})
 }
 
-func TestRunnerReturnsFinalSummaryInvalidForEmptyNaturalLanguageOutput(t *testing.T) {
+func TestRunnerRejectsEmptyModelResponseAndContinues(t *testing.T) {
 	model := &recordingModelClient{
-		responses: []outbound.ModelResponse{{Content: "   "}},
+		responses: []outbound.ModelResponse{
+			{Content: "   "},
+			{Content: `{"type":"final","summary":"fixed"}`},
+		},
 	}
 	runner := NewRunner(model, newFakeToolRunner())
 
@@ -897,12 +958,23 @@ func TestRunnerReturnsFinalSummaryInvalidForEmptyNaturalLanguageOutput(t *testin
 		Task:  run.TaskSpec{Prompt: "do work"},
 	})
 
-	assertAgentErrorCode(t, err, ErrorCodeFinalSummaryInvalid)
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "fixed" {
+		t.Fatalf("summary = %q, want fixed", result.Summary)
+	}
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
-		index:      1,
+		index:             1,
+		status:            run.AgentTurnStatusProtocolError,
+		message:           "model response was not valid JSON",
+		responseFormat:    modelResponseFormatEmpty,
+		protocolErrorCode: actionParseCodeInvalidJSON,
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
 		status:     run.AgentTurnStatusFinal,
 		actionType: run.AgentTurnActionTypeFinal,
-		message:    "agent final summary is invalid",
 	})
 }
 
@@ -931,6 +1003,31 @@ func TestRunnerBoundsTurnResponsePreviewWithoutBreakingUTF8(t *testing.T) {
 	}
 	if !strings.HasSuffix(preview, agentTurnPreviewTruncatedMarker) {
 		t.Fatalf("ResponsePreview does not contain truncation marker: %q", preview)
+	}
+}
+
+func TestClassifyModelResponseFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "empty", content: " \n\t", want: modelResponseFormatEmpty},
+		{name: "plain text", content: "done", want: modelResponseFormatPlainText},
+		{name: "markdown fence", content: "```json\n{}\n```", want: modelResponseFormatMarkdownFence},
+		{name: "object", content: `{"type":"final","summary":"done"}`, want: modelResponseFormatJSONObject},
+		{name: "array", content: `[]`, want: modelResponseFormatJSONArray},
+		{name: "scalar", content: `true`, want: modelResponseFormatJSONScalar},
+		{name: "invalid json", content: `{"type":`, want: modelResponseFormatInvalidJSON},
+		{name: "multiple values", content: `{"type":"final","summary":"done"}{"type":"final","summary":"again"}`, want: modelResponseFormatMultipleJSONValues},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyModelResponseFormat(tt.content); got != tt.want {
+				t.Fatalf("classifyModelResponseFormat() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1079,6 +1176,16 @@ func assertMessage(t *testing.T, message outbound.ModelMessage, role string, con
 	}
 }
 
+func assertNoAssistantMessages(t *testing.T, messages []outbound.ModelMessage) {
+	t.Helper()
+
+	for index, message := range messages {
+		if message.Role == modelRoleAssistant {
+			t.Fatalf("Messages[%d] is assistant message after protocol error: %#v", index, message)
+		}
+	}
+}
+
 func assertEchoToolRecord(t *testing.T, records []ToolCallRecord) {
 	t.Helper()
 
@@ -1107,14 +1214,20 @@ func assertEchoToolRecord(t *testing.T, records []ToolCallRecord) {
 }
 
 type wantTurn struct {
-	index           int
-	status          string
-	actionType      string
-	toolName        string
-	message         string
-	responsePreview string
-	startedAt       time.Time
-	endedAt         time.Time
+	index               int
+	status              string
+	actionType          string
+	toolName            string
+	message             string
+	requestMessageCount int
+	requestContains     string
+	rawResponse         string
+	responseFormat      string
+	protocolErrorCode   string
+	correctionContains  string
+	responsePreview     string
+	startedAt           time.Time
+	endedAt             time.Time
 }
 
 func assertTurn(t *testing.T, turns []TurnRecord, index int, want wantTurn) {
@@ -1138,6 +1251,38 @@ func assertTurn(t *testing.T, turns []TurnRecord, index int, want wantTurn) {
 	}
 	if want.message != "" && turn.Message != want.message {
 		t.Fatalf("AgentTurns[%d].Message = %q, want %q", index, turn.Message, want.message)
+	}
+	if want.requestMessageCount > 0 && len(turn.RequestMessages) != want.requestMessageCount {
+		t.Fatalf("AgentTurns[%d].RequestMessages length = %d, want %d", index, len(turn.RequestMessages), want.requestMessageCount)
+	}
+	if want.requestContains != "" {
+		found := false
+		for _, message := range turn.RequestMessages {
+			if strings.Contains(message.Content, want.requestContains) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("AgentTurns[%d].RequestMessages = %#v, want content containing %q", index, turn.RequestMessages, want.requestContains)
+		}
+	}
+	if want.rawResponse != "" && turn.RawResponse != want.rawResponse {
+		t.Fatalf("AgentTurns[%d].RawResponse = %q, want %q", index, turn.RawResponse, want.rawResponse)
+	}
+	if want.responseFormat != "" && turn.ResponseFormat != want.responseFormat {
+		t.Fatalf("AgentTurns[%d].ResponseFormat = %q, want %q", index, turn.ResponseFormat, want.responseFormat)
+	}
+	if want.protocolErrorCode != "" && turn.ProtocolErrorCode != want.protocolErrorCode {
+		t.Fatalf("AgentTurns[%d].ProtocolErrorCode = %q, want %q", index, turn.ProtocolErrorCode, want.protocolErrorCode)
+	}
+	if want.correctionContains != "" && !strings.Contains(turn.CorrectionMessage, want.correctionContains) {
+		t.Fatalf(
+			"AgentTurns[%d].CorrectionMessage = %q, want to contain %q",
+			index,
+			turn.CorrectionMessage,
+			want.correctionContains,
+		)
 	}
 	if want.responsePreview != "" && turn.ResponsePreview != want.responsePreview {
 		t.Fatalf("AgentTurns[%d].ResponsePreview = %q, want %q", index, turn.ResponsePreview, want.responsePreview)

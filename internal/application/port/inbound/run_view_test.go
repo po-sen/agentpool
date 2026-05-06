@@ -52,6 +52,8 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 				ActionType:      "tool_call",
 				ToolName:        "workspace",
 				Message:         "model requested tool call",
+				RequestMessages: []AgentTurnMessageView{{Role: "user", Content: "do work"}},
+				RawResponse:     `{"type":"tool_call"}`,
 				ResponsePreview: `{"type":"tool_call"}`,
 				StartedAt:       time.Unix(106, 0).UTC(),
 				EndedAt:         time.Unix(107, 0).UTC(),
@@ -87,6 +89,12 @@ func TestRunViewCarriesApplicationOutputFields(t *testing.T) {
 	}
 	if view.AgentSystemPrompt != "system prompt" {
 		t.Fatalf("AgentSystemPrompt = %q, want system prompt", view.AgentSystemPrompt)
+	}
+	if view.AgentTurns[0].RawResponse != `{"type":"tool_call"}` {
+		t.Fatalf("AgentTurns[0].RawResponse = %q, want raw tool call", view.AgentTurns[0].RawResponse)
+	}
+	if len(view.AgentTurns[0].RequestMessages) != 1 || view.AgentTurns[0].RequestMessages[0].Content != "do work" {
+		t.Fatalf("AgentTurns[0].RequestMessages = %#v, want request messages", view.AgentTurns[0].RequestMessages)
 	}
 	if view.Steps[0].EndedAt == nil || !view.Steps[0].EndedAt.Equal(endedAt) {
 		t.Fatalf("EndedAt = %v, want %v", view.Steps[0].EndedAt, endedAt)

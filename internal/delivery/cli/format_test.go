@@ -53,14 +53,23 @@ func TestFormatRunDebugIncludesSystemPromptAndDetails(t *testing.T) {
 		Status:            statusCompleted,
 		AgentSystemPrompt: "AgentPool is running a task.",
 		AgentTurns: []AgentTurnResponse{
-			{Index: 1, Status: "tool_call", ActionType: "tool_call", ToolName: "workspace", ResponsePreview: `{"type":"tool_call"}`},
+			{
+				Index:             1,
+				Status:            "protocol_error",
+				ResponseFormat:    "plain_text",
+				ProtocolErrorCode: "invalid_json",
+				CorrectionMessage: "Protocol error:\nReturn exactly one JSON object.",
+				RequestMessages:   []MessageResponse{{Role: "user", Content: "do work"}},
+				RawResponse:       "done",
+				ResponsePreview:   "done",
+			},
 		},
 		ToolCalls: []ToolCallResponse{
 			{Name: "workspace", Arguments: map[string]string{"operation": "list", "path": "."}, Result: "/workspace/input/README.md"},
 		},
 	}, OutputOptions{Debug: true})
 
-	for _, want := range []string{"Agent system prompt:", "AgentPool is running a task.", "response_preview:", "operation: list", "path: .", "result: /workspace/input/README.md"} {
+	for _, want := range []string{"Agent system prompt:", "AgentPool is running a task.", "response_format: plain_text", "protocol_error_code: invalid_json", "correction_message: Protocol error:", "request_messages:", "1. user: do work", "raw_response: done", "response_preview:", "operation: list", "path: .", "result: /workspace/input/README.md"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}

@@ -15,7 +15,9 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		"Output protocol:",
 		"Return exactly one JSON object, no markdown fences.",
 		`Final: {"type":"final","summary":"..."}`,
+		"summary is the complete user-facing answer, not a completion note.",
 		`Tool call: {"type":"tool_call","tool":"<tool_name>","arguments":{"key":"value"}}`,
+		"Preserve the user's requested language in final.summary.",
 		"Never return tool_result or multiple JSON objects.",
 		"Only call tools listed under Available tools.",
 		"Never invent tool names.",
@@ -42,7 +44,7 @@ func TestBuildSystemPromptListsPriorityToolPolicy(t *testing.T) {
 		"If sandbox_exec is available and the task has an exact or verifiable answer, call sandbox_exec before final.",
 		"Do not guess exact answers when sandbox_exec can verify them.",
 		"Use sandbox_exec for arithmetic, counts, searches, file content inspection, data transforms, tests, builds, linters, and code behavior checks.",
-		"For subjective discussion, architecture advice, brainstorming, or simple conversation, answer directly when no command is needed.",
+		"For subjective discussion, architecture advice, brainstorming, or simple conversation, return a final JSON action directly when no command is needed.",
 		"If a needed tool is unavailable, answer with what can be known and say what could not be verified.",
 	} {
 		assertPromptContains(t, prompt, want)

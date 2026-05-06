@@ -17,6 +17,10 @@ type placeholderToolArgumentCorrectionRequest struct {
 }
 
 func buildProtocolCorrectionMessage(parseErr actionParseError) string {
+	code := strings.TrimSpace(parseErr.Code)
+	if code == "" {
+		code = "protocol_error"
+	}
 	message := parseErr.Message
 	if message == "" {
 		message = "model response did not match AgentPool action protocol"
@@ -27,11 +31,16 @@ func buildProtocolCorrectionMessage(parseErr actionParseError) string {
 	}
 
 	return `Protocol error:
-Your previous response was invalid because ` + message + `.
+Error code: ` + code + `
+A previous model response was invalid because ` + message + `.
 ` + hint + `
 Return exactly one JSON object with only the allowed fields.
+The invalid response is recorded for diagnostics but is not included here. Do not rely on any previous invalid content.
+Re-answer the original user task in the required JSON format.
+final.summary must contain the actual answer to the user's task, not a completion note such as "Finished the task."
+Preserve the user's requested language.
 Examples:
-{"type":"final","summary":"Finished the task."}
+{"type":"final","summary":"Here is the answer the user asked for."}
 {"type":"tool_call","tool":"workspace","arguments":{"operation":"list","area":"all","path":"."}}
 Do not return tool_result. Do not return multiple JSON objects. Do not use markdown fences.`
 }
@@ -49,7 +58,7 @@ Available tools: %s
 You may only call tools listed in Available tools.
 Do not invent tool names.
 Tool names are exact and case-sensitive.
-If no tools are available, return a final answer directly.`, request.RequestedTool, availableText)
+If no tools are available, return a final JSON action directly.`, request.RequestedTool, availableText)
 }
 
 func buildPlaceholderToolArgumentCorrectionMessage(request placeholderToolArgumentCorrectionRequest) string {

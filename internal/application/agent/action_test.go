@@ -29,20 +29,14 @@ func TestParseActionParsesFinalNumberAsString(t *testing.T) {
 	}
 }
 
-func TestParseActionParsesFencedFinalAction(t *testing.T) {
+func TestParseActionRejectsFencedFinalAction(t *testing.T) {
 	result := parseAction("```JSON\n{\"type\":\"final\",\"summary\":\"done\"}\n```")
-	assertValidAction(t, result, actionTypeFinal)
-	if result.action.Summary != "done" {
-		t.Fatalf("Summary = %q, want done", result.action.Summary)
-	}
+	assertProtocolErrorCode(t, result, actionParseCodeInvalidJSON)
 }
 
-func TestParseActionExtractsOneEmbeddedJSONObject(t *testing.T) {
+func TestParseActionRejectsEmbeddedJSONObject(t *testing.T) {
 	result := parseAction("Here is the action:\n{\"type\":\"final\",\"summary\":\"done\"}\nThanks.")
-	assertValidAction(t, result, actionTypeFinal)
-	if result.action.Summary != "done" {
-		t.Fatalf("Summary = %q, want done", result.action.Summary)
-	}
+	assertProtocolErrorCode(t, result, actionParseCodeInvalidJSON)
 }
 
 func TestParseActionParsesToolCallAction(t *testing.T) {
@@ -56,12 +50,9 @@ func TestParseActionParsesToolCallAction(t *testing.T) {
 	}
 }
 
-func TestParseActionParsesFencedToolCallAction(t *testing.T) {
+func TestParseActionRejectsFencedToolCallAction(t *testing.T) {
 	result := parseAction("```\n{\"type\":\"tool_call\",\"tool\":\"echo\",\"arguments\":{\"text\":\"hello\"}}\n```")
-	assertValidAction(t, result, actionTypeToolCall)
-	if result.action.Tool != "echo" {
-		t.Fatalf("Tool = %q, want echo", result.action.Tool)
-	}
+	assertProtocolErrorCode(t, result, actionParseCodeInvalidJSON)
 }
 
 func TestParseActionParsesToolCallScalarArgumentsAsStrings(t *testing.T) {
@@ -88,11 +79,9 @@ func TestParseActionRejectsInvalidJSONStringEscapeWithClearReason(t *testing.T) 
 	}
 }
 
-func TestParseActionTreatsPlainTextAsNaturalLanguage(t *testing.T) {
+func TestParseActionRejectsPlainText(t *testing.T) {
 	result := parseAction("done")
-	if result.status != actionParseNaturalLanguage {
-		t.Fatalf("status = %v, want %v", result.status, actionParseNaturalLanguage)
-	}
+	assertProtocolErrorCode(t, result, actionParseCodeInvalidJSON)
 }
 
 func TestParseActionReturnsProtocolErrorForInvalidProtocol(t *testing.T) {
@@ -147,9 +136,9 @@ func TestParseActionReturnsProtocolErrorForInvalidProtocol(t *testing.T) {
 			code: actionParseCodeMultipleJSONValues,
 		},
 		{
-			name: "multiple embedded objects",
+			name: "surrounding prose with objects",
 			body: `First {"type":"tool_call","tool":"echo","arguments":{"text":"hello"}} then {"type":"final","summary":"done"}`,
-			code: actionParseCodeMultipleJSONValues,
+			code: actionParseCodeInvalidJSON,
 		},
 		{
 			name: "invalid json",
@@ -171,13 +160,6 @@ func TestParseActionReturnsProtocolErrorForInvalidProtocol(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := parseAction(tt.body)
-			if tt.code == "" {
-				if result.status != actionParseNaturalLanguage {
-					t.Fatalf("status = %v, want natural language", result.status)
-				}
-
-				return
-			}
 			assertProtocolErrorCode(t, result, tt.code)
 		})
 	}

@@ -55,6 +55,9 @@ func TestToRunResponseMapsApplicationView(t *testing.T) {
 				ActionType:      "tool_call",
 				ToolName:        "sandbox_exec",
 				Message:         "model requested tool call",
+				RequestMessages: []inbound.AgentTurnMessageView{{Role: "user", Content: "do work"}},
+				RawResponse:     `{"type":"tool_call"}`,
+				ResponseFormat:  "json_object",
 				ResponsePreview: `{"type":"tool_call"}`,
 				StartedAt:       time.Unix(106, 0).UTC(),
 				EndedAt:         time.Unix(107, 0).UTC(),
@@ -128,6 +131,15 @@ func assertAgentTurnResponse(t *testing.T, turns []agentTurnResponse) {
 	}
 	if turns[0].ToolName != "sandbox_exec" {
 		t.Fatalf("AgentTurns[0].ToolName = %q, want sandbox_exec", turns[0].ToolName)
+	}
+	if turns[0].ResponseFormat != "json_object" {
+		t.Fatalf("AgentTurns[0].ResponseFormat = %q, want json_object", turns[0].ResponseFormat)
+	}
+	if turns[0].RawResponse != `{"type":"tool_call"}` {
+		t.Fatalf("AgentTurns[0].RawResponse = %q, want raw tool call", turns[0].RawResponse)
+	}
+	if len(turns[0].RequestMessages) != 1 || turns[0].RequestMessages[0].Content != "do work" {
+		t.Fatalf("AgentTurns[0].RequestMessages = %#v, want request messages", turns[0].RequestMessages)
 	}
 }
 
@@ -389,12 +401,17 @@ func TestRunResponseJSONIncludesAgentTurns(t *testing.T) {
 		Status: "completed",
 		AgentTurns: []inbound.AgentTurnView{
 			{
-				Index:           1,
-				Status:          "protocol_error",
-				Message:         "model response did not match AgentPool action protocol",
-				ResponsePreview: "{bad}",
-				StartedAt:       time.Unix(101, 0).UTC(),
-				EndedAt:         time.Unix(102, 0).UTC(),
+				Index:             1,
+				Status:            "protocol_error",
+				Message:           "model response did not match AgentPool action protocol",
+				RequestMessages:   []inbound.AgentTurnMessageView{{Role: "user", Content: "do work"}},
+				RawResponse:       "done",
+				ResponseFormat:    "plain_text",
+				ProtocolErrorCode: "invalid_json",
+				CorrectionMessage: "Protocol error:\nReturn exactly one JSON object.",
+				ResponsePreview:   "{bad}",
+				StartedAt:         time.Unix(101, 0).UTC(),
+				EndedAt:           time.Unix(102, 0).UTC(),
 			},
 			{
 				Index:           2,
@@ -424,6 +441,21 @@ func TestRunResponseJSONIncludesAgentTurns(t *testing.T) {
 	}
 	if !strings.Contains(got, `"response_preview":"{bad}"`) {
 		t.Fatalf("response does not contain response preview: %s", got)
+	}
+	if !strings.Contains(got, `"request_messages":[{"role":"user","content":"do work"}]`) {
+		t.Fatalf("response does not contain request messages: %s", got)
+	}
+	if !strings.Contains(got, `"raw_response":"done"`) {
+		t.Fatalf("response does not contain raw response: %s", got)
+	}
+	if !strings.Contains(got, `"response_format":"plain_text"`) {
+		t.Fatalf("response does not contain response format: %s", got)
+	}
+	if !strings.Contains(got, `"protocol_error_code":"invalid_json"`) {
+		t.Fatalf("response does not contain protocol error code: %s", got)
+	}
+	if !strings.Contains(got, `"correction_message":"Protocol error:\nReturn exactly one JSON object."`) {
+		t.Fatalf("response does not contain correction message: %s", got)
 	}
 }
 

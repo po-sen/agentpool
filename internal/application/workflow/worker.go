@@ -580,18 +580,39 @@ func toDomainAgentTurns(records []agent.TurnRecord) []run.AgentTurn {
 	turns := make([]run.AgentTurn, 0, len(records))
 	for _, record := range records {
 		turns = append(turns, run.AgentTurn{
-			Index:           record.Index,
-			Status:          record.Status,
-			ActionType:      record.ActionType,
-			ToolName:        record.ToolName,
-			Message:         record.Message,
-			ResponsePreview: record.ResponsePreview,
-			StartedAt:       record.StartedAt,
-			EndedAt:         record.EndedAt,
+			Index:             record.Index,
+			Status:            record.Status,
+			ActionType:        record.ActionType,
+			ToolName:          record.ToolName,
+			Message:           record.Message,
+			RequestMessages:   toDomainAgentTurnMessages(record.RequestMessages),
+			RawResponse:       record.RawResponse,
+			ResponseFormat:    record.ResponseFormat,
+			ProtocolErrorCode: record.ProtocolErrorCode,
+			CorrectionMessage: record.CorrectionMessage,
+			ResponsePreview:   record.ResponsePreview,
+			StartedAt:         record.StartedAt,
+			EndedAt:           record.EndedAt,
 		})
 	}
 
 	return turns
+}
+
+func toDomainAgentTurnMessages(records []agent.TurnMessageRecord) []run.AgentTurnMessage {
+	if len(records) == 0 {
+		return nil
+	}
+
+	messages := make([]run.AgentTurnMessage, 0, len(records))
+	for _, record := range records {
+		messages = append(messages, run.AgentTurnMessage{
+			Role:    record.Role,
+			Content: record.Content,
+		})
+	}
+
+	return messages
 }
 
 func copyToolArguments(arguments map[string]string) map[string]string {

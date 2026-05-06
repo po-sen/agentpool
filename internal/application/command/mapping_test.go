@@ -49,6 +49,9 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 			ActionType:      run.AgentTurnActionTypeToolCall,
 			ToolName:        "sandbox_exec",
 			Message:         "model requested tool call",
+			RequestMessages: []run.AgentTurnMessage{{Role: "user", Content: "do work"}},
+			RawResponse:     `{"type":"tool_call"}`,
+			ResponseFormat:  "json_object",
 			ResponsePreview: `{"type":"tool_call"}`,
 			StartedAt:       time.Unix(106, 0).UTC(),
 			EndedAt:         time.Unix(107, 0).UTC(),
@@ -130,6 +133,15 @@ func assertMappedAgentTurn(t *testing.T, turns []inbound.AgentTurnView) {
 	}
 	if turns[0].ToolName != "sandbox_exec" {
 		t.Fatalf("AgentTurns[0].ToolName = %q, want sandbox_exec", turns[0].ToolName)
+	}
+	if turns[0].ResponseFormat != "json_object" {
+		t.Fatalf("AgentTurns[0].ResponseFormat = %q, want json_object", turns[0].ResponseFormat)
+	}
+	if turns[0].RawResponse != `{"type":"tool_call"}` {
+		t.Fatalf("AgentTurns[0].RawResponse = %q, want raw tool call", turns[0].RawResponse)
+	}
+	if len(turns[0].RequestMessages) != 1 || turns[0].RequestMessages[0].Content != "do work" {
+		t.Fatalf("AgentTurns[0].RequestMessages = %#v, want mapped request messages", turns[0].RequestMessages)
 	}
 }
 

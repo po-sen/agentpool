@@ -229,6 +229,24 @@ func agentTurnLine(turn AgentTurnResponse) string {
 func agentTurnDebugLine(turn AgentTurnResponse) string {
 	parts := compactParts(turn.Status, turn.ActionType, turn.ToolName, turn.Message)
 	line := strings.Join(parts, " ")
+	if turn.ResponseFormat != "" {
+		line += "\n  response_format: " + turn.ResponseFormat
+	}
+	if turn.ProtocolErrorCode != "" {
+		line += "\n  protocol_error_code: " + turn.ProtocolErrorCode
+	}
+	if turn.CorrectionMessage != "" {
+		line += "\n  correction_message: " + turn.CorrectionMessage
+	}
+	if len(turn.RequestMessages) > 0 {
+		line += "\n  request_messages:"
+		for index, message := range turn.RequestMessages {
+			line += fmt.Sprintf("\n    %d. %s: %s", index+1, message.Role, message.Content)
+		}
+	}
+	if turn.RawResponse != "" {
+		line += "\n  raw_response: " + turn.RawResponse
+	}
 	if turn.ResponsePreview != "" {
 		line += "\n  response_preview: " + turn.ResponsePreview
 	}

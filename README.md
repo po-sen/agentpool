@@ -163,7 +163,15 @@ Failed runs can include partial `agent_turns` and `tool_calls` when the agent in
     {
       "index": 1,
       "status": "protocol_error",
-      "message": "model response did not match AgentPool action protocol"
+      "message": "model response did not match AgentPool action protocol",
+      "request_messages": [
+        {"role": "system", "content": "AgentPool is running one task..."},
+        {"role": "user", "content": "do work"}
+      ],
+      "raw_response": "{\"type\":\"tool_result\",\"result\":\"hello\"}",
+      "response_format": "json_object",
+      "protocol_error_code": "unknown_action_type",
+      "correction_message": "Protocol error:\nError code: unknown_action_type\nA previous model response was invalid because action type must be final or tool_call.\n\nReturn exactly one JSON object with only the allowed fields..."
     },
     {
       "index": 2,
@@ -483,7 +491,7 @@ curl -sS http://localhost:8080/v1/runs/run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1/arti
 
 AgentPool has an application-owned tool loop. Models can respond with a JSON `tool_call` action, the agent runner validates the requested tool against the tools advertised for that run, executes valid tools through the `ToolRunner` port, and feeds the tool result back to the model for a final JSON answer.
 
-The agent protocol accepts only `tool_call` and `final` JSON actions. Models should return exactly one JSON object with no markdown fences. For compatibility, AgentPool normalizes whole-response fenced JSON blocks, accepts one JSON object embedded in otherwise harmless prose, and converts simple scalar values that can safely become strings, such as `{"type":"final","summary":true}` becoming summary `"true"` and numeric tool arguments becoming string arguments. Multiple JSON objects, arrays, unknown JSON action types, malformed JSON, unsupported fields, and nested argument values are rejected as protocol errors with targeted correction feedback. Plain natural-language output is still accepted as a final summary for compatibility with local models.
+The agent protocol accepts only `tool_call` and `final` JSON actions. Models must return exactly one JSON object with no markdown fences or surrounding prose. `final.summary` is the complete user-facing answer in the user's requested language, not a completion note. AgentPool converts simple scalar values that can safely become strings, such as `{"type":"final","summary":true}` becoming summary `"true"` and numeric tool arguments becoming string arguments. Plain natural-language output, multiple JSON objects, arrays, unknown JSON action types, malformed JSON, unsupported fields, and nested argument values are rejected as protocol errors with targeted correction feedback.
 
 AgentPool exposes exactly two model-facing tools:
 
@@ -499,7 +507,7 @@ Each run gets a workspace with two areas:
 
 Run attachments are materialized under `/workspace/input` by default. `workspace` lists and stats paths only; file contents are inspected through `sandbox_exec`. `workspace` accepts either relative paths with an `area`, or full virtual paths such as `/workspace/input/README.md` and `/workspace/work/report.md`. It never returns host temp paths. `sandbox_exec` is advertised only when a command-capable sandbox is available. In the default runtime the sandbox provider is `noop`, so only `workspace` is available.
 
-When `sandbox_exec` is available, exact or verifiable tasks should be checked through sandbox execution instead of guessed. That includes exact arithmetic, counting or searching files, transforming data, and running small scripts, tests, builds, or linters. Subjective discussion, design advice, brainstorming, and simple conversation can answer directly when no command is needed.
+When `sandbox_exec` is available, exact or verifiable tasks should be checked through sandbox execution instead of guessed. That includes exact arithmetic, counting or searching files, transforming data, and running small scripts, tests, builds, or linters. Subjective discussion, design advice, brainstorming, and simple conversation can return a final JSON action directly when no command is needed.
 
 Tool calls use this provider-neutral shape when a tool is available:
 
@@ -534,7 +542,7 @@ Final answers use:
 ```json
 {
   "type": "final",
-  "summary": "Finished the task."
+  "summary": "Here is the answer the user asked for."
 }
 ```
 
@@ -558,7 +566,7 @@ Run diagnostics are intentionally split:
 - `agent_turns`: per-model-turn diagnostics from the agent loop.
 - `tool_calls`: concrete tool execution history and tool results.
 
-`agent_turns` records safe, bounded metadata for each model turn: index, status, parsed action type, tool name for tool calls, safe message, optional response preview, and timestamps. This helps debug `agent_max_turns` without turning steps into a full model transcript.
+`agent_turns` records bounded provider-neutral model-loop diagnostics for each model turn: index, status, parsed action type, tool name for tool calls, safe message, the exact request messages sent to the model, the raw model response content returned through the model port, response format classification, optional protocol error code, optional correction message sent back to the model, optional short response preview, and timestamps. `response_format` can be `json_object`, `json_array`, `json_scalar`, `multiple_json_values`, `invalid_json`, `plain_text`, `markdown_fence`, or `empty`. Protocol correction turns do not include the invalid raw response in the next model request; the raw response is kept in diagnostics only.
 
 Example snippet:
 
@@ -573,6 +581,14 @@ Example snippet:
       "index": 1,
       "status": "protocol_error",
       "message": "model response did not match AgentPool action protocol",
+      "request_messages": [
+        {"role": "system", "content": "AgentPool is running one task..."},
+        {"role": "user", "content": "do work"}
+      ],
+      "raw_response": "{\"type\":\"tool_result\",\"result\":\"hello\"}",
+      "response_format": "json_object",
+      "protocol_error_code": "unknown_action_type",
+      "correction_message": "Protocol error:\nError code: unknown_action_type\nA previous model response was invalid because action type must be final or tool_call.\n\nReturn exactly one JSON object with only the allowed fields...",
       "response_preview": "{\"type\":\"tool_result\"}"
     },
     {
@@ -591,7 +607,7 @@ Example snippet:
 }
 ```
 
-`agent_turns` are in-memory only for now. `response_preview` is UTF-8 safe and truncated, and it is not a full model transcript. Raw provider errors, secrets, stack traces, and product ACL decisions are intentionally not exposed.
+`agent_turns` are in-memory only for now. `request_messages`, `raw_response`, `response_preview`, and `correction_message` are UTF-8 safe and truncated. `raw_response` is the provider-neutral model content, not a provider-specific SDK or HTTP payload. Raw provider errors, secrets resolved by AgentPool, stack traces, hidden provider internals, and product ACL decisions are intentionally not exposed.
 
 ## Tool Call History
 

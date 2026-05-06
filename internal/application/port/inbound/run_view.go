@@ -70,14 +70,25 @@ type ToolCallView struct {
 
 // AgentTurnView is the application-level representation of one model-loop diagnostic turn.
 type AgentTurnView struct {
-	Index           int
-	Status          string
-	ActionType      string
-	ToolName        string
-	Message         string
-	ResponsePreview string
-	StartedAt       time.Time
-	EndedAt         time.Time
+	Index             int
+	Status            string
+	ActionType        string
+	ToolName          string
+	Message           string
+	RequestMessages   []AgentTurnMessageView
+	RawResponse       string
+	ResponseFormat    string
+	ProtocolErrorCode string
+	CorrectionMessage string
+	ResponsePreview   string
+	StartedAt         time.Time
+	EndedAt           time.Time
+}
+
+// AgentTurnMessageView is the application-level representation of one model request message.
+type AgentTurnMessageView struct {
+	Role    string
+	Content string
 }
 
 // StepView is the application-level representation of a run step.

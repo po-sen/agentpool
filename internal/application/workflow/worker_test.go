@@ -42,7 +42,7 @@ func TestWorkerProcessOneCompletesQueuedRun(t *testing.T) {
 	if !strings.Contains(stored.AgentSystemPrompt, "Available tools:") {
 		t.Fatalf("stored agent system prompt = %q, want available tools", stored.AgentSystemPrompt)
 	}
-	assertAgentTurnStatuses(t, stored.AgentTurns, []string{run.AgentTurnStatusNaturalLanguageFinal})
+	assertAgentTurnStatuses(t, stored.AgentTurns, []string{run.AgentTurnStatusFinal})
 	assertSteps(t, stored.Steps, []wantStep{
 		{
 			name:    "workspace",
@@ -897,6 +897,24 @@ func TestWorkerProcessOneStoresProtocolCorrectionAgentTurns(t *testing.T) {
 	if stored.AgentTurns[0].ResponsePreview != `{"type":"tool_result","result":"hello"}` {
 		t.Fatalf("protocol preview = %q, want invalid response", stored.AgentTurns[0].ResponsePreview)
 	}
+	if stored.AgentTurns[0].RawResponse != `{"type":"tool_result","result":"hello"}` {
+		t.Fatalf("protocol raw response = %q, want invalid response", stored.AgentTurns[0].RawResponse)
+	}
+	if len(stored.AgentTurns[0].RequestMessages) == 0 {
+		t.Fatal("protocol request messages are empty, want model input transcript")
+	}
+	if stored.AgentTurns[0].RequestMessages[len(stored.AgentTurns[0].RequestMessages)-1].Role != "user" {
+		t.Fatalf("last protocol request role = %q, want user", stored.AgentTurns[0].RequestMessages[len(stored.AgentTurns[0].RequestMessages)-1].Role)
+	}
+	if stored.AgentTurns[0].ResponseFormat != "json_object" {
+		t.Fatalf("protocol response format = %q, want json_object", stored.AgentTurns[0].ResponseFormat)
+	}
+	if stored.AgentTurns[0].ProtocolErrorCode != "unknown_action_type" {
+		t.Fatalf("protocol error code = %q, want unknown_action_type", stored.AgentTurns[0].ProtocolErrorCode)
+	}
+	if !strings.Contains(stored.AgentTurns[0].CorrectionMessage, "action type must be final or tool_call") {
+		t.Fatalf("protocol correction message = %q, want action-type correction", stored.AgentTurns[0].CorrectionMessage)
+	}
 	if len(stored.Steps) != 2 {
 		t.Fatalf("len(Steps) = %d, want coarse workspace and agent steps", len(stored.Steps))
 	}
@@ -1318,7 +1336,7 @@ func (q *fakeRunQueue) Dequeue(context.Context) (run.RunID, error) {
 type fakeModelClient struct{}
 
 func (c fakeModelClient) Generate(context.Context, outbound.ModelRequest) (outbound.ModelResponse, error) {
-	return outbound.ModelResponse{Content: "done"}, nil
+	return outbound.ModelResponse{Content: `{"type":"final","summary":"done"}`}, nil
 }
 
 type toolCallingModelClient struct {
