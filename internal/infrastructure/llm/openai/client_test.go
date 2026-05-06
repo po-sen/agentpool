@@ -141,6 +141,35 @@ func TestToChatMessagesMapsNativeToolCallsAndResults(t *testing.T) {
 	}
 }
 
+func TestToChatMessagesMapsLegacyToolObservationAsRuntimeText(t *testing.T) {
+	messages := toChatMessages(outbound.ModelRequest{
+		Turns: []outbound.ModelTurn{
+			{
+				Role: outbound.ModelRoleAssistant,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindAssistantResponse, Text: `{"type":"tool_call","tool":"workspace"}`},
+				},
+			},
+			{
+				Role: outbound.ModelRoleRuntime,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindToolObservation, Text: "Tool result for workspace:\nstaged"},
+				},
+			},
+		},
+	})
+
+	if len(messages) != 2 {
+		t.Fatalf("len(messages) = %d, want assistant text and runtime observation", len(messages))
+	}
+	if messages[0].Role != "assistant" || len(messages[0].ToolCalls) != 0 {
+		t.Fatalf("messages[0] = %#v, want assistant text without native tool_calls", messages[0])
+	}
+	if messages[1].Role != "developer" || !strings.Contains(messages[1].Content, "Tool result for workspace") {
+		t.Fatalf("messages[1] = %#v, want developer observation text", messages[1])
+	}
+}
+
 func TestToChatToolsBuildsFunctionSchemas(t *testing.T) {
 	tools := toChatTools([]outbound.ToolDefinition{
 		{

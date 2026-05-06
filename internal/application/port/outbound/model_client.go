@@ -34,11 +34,13 @@ const (
 	ModelPartKindAssistantResponse ModelPartKind = "assistant_response"
 	// ModelPartKindToolCall contains a previous accepted assistant native tool call.
 	ModelPartKindToolCall ModelPartKind = "tool_call"
+	// ModelPartKindToolObservation contains a non-native tool observation returned through runtime context.
+	ModelPartKindToolObservation ModelPartKind = "tool_observation"
 	// ModelPartKindProtocolCorrection contains protocol repair instructions.
 	ModelPartKindProtocolCorrection ModelPartKind = "protocol_correction"
 	// ModelPartKindToolCorrection contains tool-call repair instructions.
 	ModelPartKindToolCorrection ModelPartKind = "tool_correction"
-	// ModelPartKindToolResult contains a tool observation returned to the model.
+	// ModelPartKindToolResult contains a native provider tool result returned to the model.
 	ModelPartKindToolResult ModelPartKind = "tool_result"
 )
 

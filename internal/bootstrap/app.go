@@ -164,6 +164,7 @@ func (a *App) workerInstance() (*workflow.Worker, error) {
 		Repo:       a.runRepo,
 		StateStore: a.runRepo,
 		Events:     a.eventPublisher,
+		Logger:     a.logger,
 		Agent:      agentRunner,
 		Workspace:  workspaceProvider,
 		Sandbox:    sandboxProvider,

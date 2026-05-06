@@ -59,7 +59,7 @@ func TestRunnerRejectsNaturalLanguageResponseAndContinues(t *testing.T) {
 	if model.requests[0].RunID != "run_test" {
 		t.Fatalf("model RunID = %s, want run_test", model.requests[0].RunID)
 	}
-	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "Available tools")
+	assertMessage(t, requestMessages(model.requests[0])[0], "system", "Available tools")
 	assertInstruction(t, model.requests[0], "Available tools")
 	assertInstruction(t, model.requests[0], "workspace: Manages authorized input sources and staged files for the mutable /workspace.")
 	assertInstruction(t, model.requests[0], "sandbox_exec: Runs commands in a general-purpose sandbox from /workspace.")
@@ -178,7 +178,7 @@ func TestRunnerExposesGenericSandboxPolicyToModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	assertMessage(t, requestMessages(model.requests[0])[0], "runtime", "exact or externally checkable work")
+	assertMessage(t, requestMessages(model.requests[0])[0], "system", "exact or externally checkable work")
 	assertInstruction(t, model.requests[0], "prefer sandbox_exec before final")
 	assertInstruction(t, model.requests[0], "base final.summary on observed tool output")
 	assertInstruction(t, model.requests[0], "workspace is a control-plane tool for authorized input sources")
@@ -347,7 +347,13 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	}
 	lastMessages := requestMessages(model.requests[1])
 	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", `"type":"tool_call"`)
-	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "Tool result for echo:\nhello")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Tool result for echo:\nhello")
+	if lastMessages[len(lastMessages)-1].Kind != string(outbound.ModelPartKindToolObservation) {
+		t.Fatalf("tool observation kind = %q, want %q",
+			lastMessages[len(lastMessages)-1].Kind,
+			outbound.ModelPartKindToolObservation,
+		)
+	}
 	tools.calls[0].Arguments["text"] = "changed"
 	if result.ToolCalls[0].Arguments["text"] != "hello" {
 		t.Fatalf("record text after mutation = %q, want hello", result.ToolCalls[0].Arguments["text"])
@@ -468,7 +474,7 @@ func TestRunnerRecordsSandboxExecErrorAndAllowsFinal(t *testing.T) {
 		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
 	}
 	messages := requestMessages(model.requests[1])
-	assertMessage(t, messages[len(messages)-1], "tool", "Tool error for sandbox_exec:")
+	assertMessage(t, messages[len(messages)-1], "runtime", "Tool error for sandbox_exec:")
 }
 
 func TestRunnerAllowsRepeatedToolCallsWithoutSemanticPolicy(t *testing.T) {
@@ -719,7 +725,7 @@ func TestRunnerRecordsExistingToolResultError(t *testing.T) {
 		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
 	}
 	lastMessages := requestMessages(model.requests[1])
-	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "Tool error for workspace:\npath is not available")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Tool error for workspace:\npath is not available")
 }
 
 func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {
@@ -858,7 +864,7 @@ func TestRunnerRejectsUnknownJSONActionTypeAndContinues(t *testing.T) {
 	}
 	lastMessages := requestMessages(model.requests[1])
 	if len(lastMessages) != 4 {
-		t.Fatalf("len(second request messages) = %d, want instructions, task, assistant attempt, and correction", len(lastMessages))
+		t.Fatalf("len(second request messages) = %d, want system prompt, task, assistant attempt, and correction", len(lastMessages))
 	}
 	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", "tool_result")
 	if lastMessages[len(lastMessages)-2].Kind != string(outbound.ModelPartKindAssistantAttempt) {
@@ -959,10 +965,10 @@ func TestRunnerParsesWholeResponseFencedJSONToolCallAndContinues(t *testing.T) {
 	}
 	lastMessages := requestMessages(model.requests[1])
 	if len(lastMessages) != 4 {
-		t.Fatalf("len(second request messages) = %d, want instructions, task, assistant action, and tool result", len(lastMessages))
+		t.Fatalf("len(second request messages) = %d, want system prompt, task, assistant action, and tool observation", len(lastMessages))
 	}
 	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", `"type":"tool_call"`)
-	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "Tool result for echo:\nhello")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Tool result for echo:\nhello")
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
 		index:           1,
 		status:          run.AgentTurnStatusToolCall,

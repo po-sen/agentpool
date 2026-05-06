@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,6 +145,35 @@ func TestToChatMessagesMapsNativeToolCallsAndResults(t *testing.T) {
 	}
 	if messages[1].Role != "tool" || messages[1].ToolCallID != "call_1" {
 		t.Fatalf("messages[1] = %#v, want tool role with tool_call_id", messages[1])
+	}
+}
+
+func TestToChatMessagesMapsLegacyToolObservationAsRuntimeText(t *testing.T) {
+	messages := toChatMessages(outbound.ModelRequest{
+		Turns: []outbound.ModelTurn{
+			{
+				Role: outbound.ModelRoleAssistant,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindAssistantResponse, Text: `{"type":"tool_call","tool":"workspace"}`},
+				},
+			},
+			{
+				Role: outbound.ModelRoleRuntime,
+				Parts: []outbound.ModelPart{
+					{Kind: outbound.ModelPartKindToolObservation, Text: "Tool result for workspace:\nstaged"},
+				},
+			},
+		},
+	})
+
+	if len(messages) != 2 {
+		t.Fatalf("len(messages) = %d, want assistant text and runtime observation", len(messages))
+	}
+	if messages[0].Role != "assistant" || len(messages[0].ToolCalls) != 0 {
+		t.Fatalf("messages[0] = %#v, want assistant text without native tool_calls", messages[0])
+	}
+	if messages[1].Role != "system" || !strings.Contains(messages[1].Content, "Tool result for workspace") {
+		t.Fatalf("messages[1] = %#v, want system observation text", messages[1])
 	}
 }
 

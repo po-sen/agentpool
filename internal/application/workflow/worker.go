@@ -34,6 +34,7 @@ type Worker struct {
 	repo         run.Repository
 	stateStore   outbound.RunStateStore
 	events       outbound.EventPublisher
+	logger       Logger
 	agent        *agent.Runner
 	workspace    outbound.WorkspaceProvider
 	sandbox      outbound.SandboxProvider
@@ -41,6 +42,11 @@ type Worker struct {
 	secrets      outbound.SecretBroker
 	clock        func() time.Time
 	pollInterval time.Duration
+}
+
+// Logger records internal worker diagnostics that are not exposed through run APIs.
+type Logger interface {
+	Errorf(format string, args ...any)
 }
 
 // WorkerOption configures a Worker.
@@ -52,6 +58,7 @@ type WorkerDependencies struct {
 	Repo       run.Repository
 	StateStore outbound.RunStateStore
 	Events     outbound.EventPublisher
+	Logger     Logger
 	Agent      *agent.Runner
 	Workspace  outbound.WorkspaceProvider
 	Sandbox    outbound.SandboxProvider
@@ -83,6 +90,7 @@ func NewWorker(
 		repo:         deps.Repo,
 		stateStore:   deps.StateStore,
 		events:       deps.Events,
+		logger:       deps.Logger,
 		agent:        deps.Agent,
 		workspace:    deps.Workspace,
 		sandbox:      deps.Sandbox,
@@ -439,6 +447,7 @@ func (w *Worker) failRun(
 	item.RecordAgentTurns(now, toDomainAgentTurns(result.AgentTurns))
 	item.RecordArtifacts(now, artifacts)
 	code, message := failureDiagnosticsFor(item, cause)
+	w.logRunFailure(item.ID, code, cause)
 	if name, ok := latestRunningStepName(item); ok {
 		if err := item.FailStep(name, failedStepMessage(name), now); err != nil {
 			return errors.Join(cause, err)
@@ -459,6 +468,23 @@ func (w *Worker) failRun(
 	}
 
 	return nil
+}
+
+func (w *Worker) logRunFailure(id run.RunID, code string, cause error) {
+	if w.logger == nil || cause == nil {
+		return
+	}
+
+	w.logger.Errorf("run failed: run_id=%s failure_code=%s cause=%v", id, code, rawFailureCause(cause))
+}
+
+func rawFailureCause(cause error) error {
+	var agentErr agent.Error
+	if errors.As(cause, &agentErr) && agentErr.Cause != nil {
+		return agentErr.Cause
+	}
+
+	return cause
 }
 
 func failureDiagnosticsFor(item *run.Run, cause error) (string, string) {

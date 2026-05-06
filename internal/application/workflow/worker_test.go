@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -711,6 +712,8 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 		now,
 		failingModelClient{},
 	)
+	log := &recordingLogger{}
+	worker.logger = log
 	if err := worker.ProcessOne(ctx); err != nil {
 		t.Fatalf("process one: %v", err)
 	}
@@ -734,6 +737,13 @@ func TestWorkerProcessOneStoresSanitizedFailureReasonWhenExecutionFails(t *testi
 	}
 	if stored.FailureMessage == errModelGenerationFailed.Error() {
 		t.Fatalf("stored failure message exposes raw error: %q", stored.FailureMessage)
+	}
+	if len(log.messages) != 1 {
+		t.Fatalf("log message count = %d, want 1", len(log.messages))
+	}
+	if !strings.Contains(log.messages[0], errModelGenerationFailed.Error()) ||
+		!strings.Contains(log.messages[0], run.FailureCodeModelGenerateFailed) {
+		t.Fatalf("log message = %q, want raw provider error and failure code", log.messages[0])
 	}
 	if stored.ResultSummary != "" {
 		t.Fatalf("stored result summary = %q, want empty", stored.ResultSummary)
@@ -1720,6 +1730,14 @@ func (p *recordingPublisher) Publish(_ context.Context, event outbound.Event) er
 	p.events = append(p.events, event)
 
 	return nil
+}
+
+type recordingLogger struct {
+	messages []string
+}
+
+func (l *recordingLogger) Errorf(format string, args ...any) {
+	l.messages = append(l.messages, fmt.Sprintf(format, args...))
 }
 
 var errPublishFailed = errors.New("publish failed")

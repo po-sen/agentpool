@@ -477,17 +477,17 @@ go run ./cmd/agentpool dev
 
 Use `openai_compatible` with a local or internal endpoint for air-gapped environments. Do not configure external providers when outbound internet is disabled.
 
-AgentPool builds a provider-neutral model request with `instructions`, available tool definitions, and typed conversation turns and parts, such as task prompt, workspace context, assistant attempt, protocol correction, tool correction, native tool call, and tool result. Runtime correction turns use the provider-neutral `runtime` role so they are not represented as user-authored messages.
+AgentPool builds a provider-neutral model request with `instructions`, available tool definitions, and typed conversation turns and parts, such as task prompt, workspace context, assistant attempt, protocol correction, tool correction, native tool call, native tool result, and fallback tool observation. Runtime correction and fallback observation turns use the provider-neutral `runtime` role so they are not represented as user-authored messages.
 
 Provider adapters map that request into each provider's strongest native shape:
 
-- OpenAI: `developer` messages for instructions/runtime corrections, `tools` function schemas, assistant `tool_calls`, and `role: "tool"` messages with `tool_call_id` for results.
-- OpenAI-compatible: conservative `system` messages for instructions/runtime corrections, OpenAI-style `tools`, assistant `tool_calls`, and `role: "tool"` results. This is the best format for compatible servers that implement tool calling; endpoints without tool support should fail fast instead of entering a repeated JSON repair loop.
+- OpenAI: `developer` messages for instructions/runtime corrections and fallback observations, `tools` function schemas, assistant `tool_calls`, and `role: "tool"` messages with `tool_call_id` only for native tool results.
+- OpenAI-compatible: conservative `system` messages for instructions/runtime corrections and fallback observations, OpenAI-style `tools`, assistant `tool_calls`, and `role: "tool"` messages only for native tool results. This is the best format for compatible servers that implement tool calling; endpoints without tool support should fail fast instead of entering a repeated JSON repair loop.
 - Anthropic: top-level `system` for instructions/runtime corrections and invalid assistant attempts, `tools` with `input_schema`, assistant `tool_use` blocks, and user `tool_result` blocks. Anthropic does not use a literal `tool` role.
 - Gemini: `system_instruction` for instructions/runtime corrections and invalid assistant attempts, `functionDeclarations`, model `functionCall` parts, and user `functionResponse` parts with the original function call id when available. Gemini does not consistently use a literal `tool` role across APIs.
 - Noop: diagnostic-only provider; it echoes provider-neutral request messages and does not call real tools natively.
 
-`request_messages` in run diagnostics are provider-facing request messages returned by the model adapter, not the provider-neutral canonical request. During the POC, instruction content is exposed directly in these diagnostics, and roles and ordering match the adapted provider request. For providers without a chat-message array, top-level instruction fields are represented as messages such as `system` or `system_instruction` for debugging.
+`request_messages` in run diagnostics are provider-facing request messages returned by the model adapter, not the provider-neutral canonical request. During the POC, instruction content is exposed directly in these diagnostics, and roles and ordering match the adapted provider request. If model generation fails before the adapter can return provider-facing diagnostics, AgentPool records a bounded fallback view with `system` / `system_prompt` for the prompt. For providers without a chat-message array, top-level instruction fields are represented as messages such as `system` or `system_instruction` for debugging.
 
 ## Workspace And Files
 
@@ -652,7 +652,7 @@ Example snippet:
 }
 ```
 
-`agent_turns` are in-memory only for now. `request_messages`, `raw_response`, `response_preview`, and `correction_message` are UTF-8 safe and truncated. `raw_response` is the provider-neutral model content or provider-neutral native tool-call summary, not a provider-specific SDK or HTTP payload. During the POC, raw system/developer prompts are exposed through `request_messages`; raw provider errors, secrets resolved by AgentPool, stack traces, hidden provider internals, and product ACL decisions are intentionally not exposed through user-facing diagnostics.
+`agent_turns` are in-memory only for now. `request_messages`, `raw_response`, `response_preview`, and `correction_message` are UTF-8 safe and truncated. `raw_response` is the provider-neutral model content or provider-neutral native tool-call summary, not a provider-specific SDK or HTTP payload. During the POC, raw system/developer prompts are exposed through `request_messages`; raw provider errors, secrets resolved by AgentPool, stack traces, hidden provider internals, and product ACL decisions are intentionally not exposed through user-facing diagnostics. Worker logs include internal failure causes for debugging, so run API diagnostics can stay sanitized.
 
 ## Tool Call History
 

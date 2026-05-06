@@ -117,13 +117,10 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 	session.toolCallCount++
 	session.recordToolCall(parsed.Tool, parsed.Arguments, result.Content, result.IsError, startedAt, endedAt)
 
-	session.turns = append(session.turns, toolResultTurn([]outbound.ModelPart{{
-		Kind:       outbound.ModelPartKindToolResult,
-		Text:       buildToolObservation(parsed.Tool, parsed.Arguments, result),
-		ToolName:   parsed.Tool,
-		IsError:    result.IsError,
-		ToolCallID: legacyToolCallID(parsed.Tool),
-	}}))
+	session.turns = append(session.turns, runtimeTurn(
+		outbound.ModelPartKindToolObservation,
+		buildToolObservation(parsed.Tool, parsed.Arguments, result),
+	))
 
 	return RunResult{}, false, nil
 }

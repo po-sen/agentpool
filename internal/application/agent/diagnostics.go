@@ -137,10 +137,6 @@ func generatedToolCallID(name string, index int) string {
 	return normalized + "_" + strconv.Itoa(index+1)
 }
 
-func legacyToolCallID(name string) string {
-	return generatedToolCallID(name, 0)
-}
-
 func joinedToolCallNames(calls []outbound.ModelToolCall) string {
 	if len(calls) == 0 {
 		return ""
@@ -221,8 +217,8 @@ func copyModelRequestMessages(instructions string, turns []outbound.ModelTurn) [
 	var copied []TurnMessageRecord
 	if strings.TrimSpace(instructions) != "" {
 		copied = append(copied, TurnMessageRecord{
-			Role:    string(outbound.ModelRoleRuntime),
-			Kind:    "instructions",
+			Role:    "system",
+			Kind:    "system_prompt",
 			Content: instructions,
 		})
 	}
