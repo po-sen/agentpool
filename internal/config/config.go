@@ -7,7 +7,7 @@ import (
 )
 
 const defaultHTTPAddr = ":8080"
-const defaultModelTimeout = 60 * time.Second
+const defaultModelTimeout = 5 * time.Minute
 const defaultAgentMaxTurns = 16
 const defaultSandboxImage = "alpine:3.20"
 

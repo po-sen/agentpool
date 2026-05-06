@@ -15,7 +15,7 @@ import (
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 )
 
-const defaultTimeout = 30 * time.Second
+const defaultTimeout = 5 * time.Minute
 
 // Config contains Gemini model client configuration.
 type Config struct {

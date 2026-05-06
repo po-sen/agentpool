@@ -14,7 +14,7 @@ import (
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 )
 
-const defaultTimeout = 30 * time.Second
+const defaultTimeout = 5 * time.Minute
 const chatRoleDeveloper = "developer"
 
 // Config contains OpenAI model client configuration.

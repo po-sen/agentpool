@@ -436,6 +436,8 @@ AGENTPOOL_SANDBOX_PROVIDER
 AGENTPOOL_SANDBOX_IMAGE
 ```
 
+`AGENTPOOL_MODEL_TIMEOUT` is the per-model-request timeout. It accepts Go-style durations such as `30s`, `2m`, or `5m`, and defaults to `5m`. Set it on the `dev` process, or on the `worker` process when running `server` and `worker` separately. CLI `--timeout` only controls how long the CLI waits for a run result; it does not change the LLM request timeout.
+
 Local Ollama example:
 
 ```sh
@@ -445,6 +447,7 @@ ollama pull qwen2.5-coder:7b
 AGENTPOOL_MODEL_PROVIDER=openai_compatible \
 AGENTPOOL_MODEL_BASE_URL=http://localhost:11434/v1 \
 AGENTPOOL_MODEL_NAME=qwen2.5-coder:7b \
+AGENTPOOL_MODEL_TIMEOUT=5m \
 go run ./cmd/agentpool dev
 ```
 

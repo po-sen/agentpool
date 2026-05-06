@@ -14,7 +14,7 @@ import (
 	"github.com/po-sen/agentpool/internal/application/port/outbound"
 )
 
-const defaultTimeout = 30 * time.Second
+const defaultTimeout = 5 * time.Minute
 const anthropicVersion = "2023-06-01"
 
 // Config contains Anthropic model client configuration.
