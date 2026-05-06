@@ -6,23 +6,22 @@ import (
 
 // RunView is the application-level output contract for run use cases.
 type RunView struct {
-	ID                        string
-	Status                    string
-	Task                      TaskView
-	Result                    RunResultView
-	FailureReason             string
-	FailureCode               string
-	FailureMessage            string
-	Steps                     []StepView
-	ToolCalls                 []ToolCallView
-	AgentTurns                []AgentTurnView
-	Artifacts                 []ArtifactView
-	AgentSystemPrompt         string
-	AgentPromptVersion        string
-	AgentPromptSHA256         string
-	AgentSystemPromptRedacted bool
-	CreatedAt                 time.Time
-	UpdatedAt                 time.Time
+	ID                 string
+	Status             string
+	Task               TaskView
+	Result             RunResultView
+	FailureReason      string
+	FailureCode        string
+	FailureMessage     string
+	Steps              []StepView
+	ToolCalls          []ToolCallView
+	AgentTurns         []AgentTurnView
+	Artifacts          []ArtifactView
+	AgentSystemPrompt  string
+	AgentPromptVersion string
+	AgentPromptSHA256  string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // RunResultView is the application-level representation of successful run output.

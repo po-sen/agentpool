@@ -282,7 +282,7 @@ go run ./cmd/agentpool artifacts run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1
 go run ./cmd/agentpool artifact run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1 report.md
 ```
 
-Debug output includes prompt metadata, full `agent_turns`, and full `tool_calls`. The raw system/developer prompt is redacted from user-facing output:
+Debug output includes prompt metadata, the bounded system/developer prompt, full `agent_turns`, and full `tool_calls`:
 
 ```sh
 go run ./cmd/agentpool run \
@@ -562,13 +562,13 @@ Final answers use:
 
 Tools are dynamically advertised. Runs without the required context do not expose unavailable tools to the model. The model may only call tools listed under `Available tools`; unknown or unadvertised tool names are rejected by the agent runtime before `ToolRunner` dispatch. Those requests appear in `agent_turns` as invalid tool-call diagnostics, not in `tool_calls`.
 
-The run response includes prompt debug metadata after an agent session starts. User-facing API and CLI output do not expose the raw system/developer prompt; they expose the prompt version, SHA-256, and redaction flag:
+The run response includes prompt debug metadata after an agent session starts. During the POC, user-facing API and debug CLI output expose the bounded system/developer prompt along with the prompt version and SHA-256:
 
 ```json
 {
+  "agent_system_prompt": "AgentPool is running a task...",
   "agent_prompt_version": "agentpool-runtime-v1",
-  "agent_prompt_sha256": "abc123...",
-  "agent_system_prompt_redacted": true
+  "agent_prompt_sha256": "abc123..."
 }
 ```
 

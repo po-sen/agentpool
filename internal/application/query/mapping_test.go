@@ -36,7 +36,6 @@ func TestToRunViewMapsRunAggregate(t *testing.T) {
 	item.AgentSystemPrompt = "system prompt"
 	item.AgentPromptVersion = "agentpool-runtime-v1"
 	item.AgentPromptSHA256 = strings.Repeat("a", 64)
-	item.AgentSystemPromptRedacted = true
 	item.ToolCalls = []run.ToolCall{
 		{
 			Name:      "workspace",
@@ -152,17 +151,14 @@ func assertMappedAgentTurn(t *testing.T, turns []inbound.AgentTurnView) {
 func assertMappedAgentPromptMetadata(t *testing.T, view inbound.RunView, item *run.Run) {
 	t.Helper()
 
-	if view.AgentSystemPrompt != "" {
-		t.Fatalf("AgentSystemPrompt = %q, want redacted empty prompt", view.AgentSystemPrompt)
+	if view.AgentSystemPrompt != item.AgentSystemPrompt {
+		t.Fatalf("AgentSystemPrompt = %q, want %q", view.AgentSystemPrompt, item.AgentSystemPrompt)
 	}
 	if view.AgentPromptVersion != item.AgentPromptVersion {
 		t.Fatalf("AgentPromptVersion = %q, want %q", view.AgentPromptVersion, item.AgentPromptVersion)
 	}
 	if view.AgentPromptSHA256 != item.AgentPromptSHA256 {
 		t.Fatalf("AgentPromptSHA256 = %q, want %q", view.AgentPromptSHA256, item.AgentPromptSHA256)
-	}
-	if view.AgentSystemPromptRedacted != item.AgentSystemPromptRedacted {
-		t.Fatalf("AgentSystemPromptRedacted = %t, want %t", view.AgentSystemPromptRedacted, item.AgentSystemPromptRedacted)
 	}
 }
 

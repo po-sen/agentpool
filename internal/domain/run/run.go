@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	// MaxAgentSystemPromptLength bounds the stored agent system prompt kept for protected diagnostics.
+	// MaxAgentSystemPromptLength bounds the stored agent system prompt kept for diagnostics.
 	MaxAgentSystemPromptLength = 16 << 10
 )
 
@@ -24,23 +24,22 @@ func (id RunID) String() string {
 
 // Run is the aggregate root for a submitted agent task.
 type Run struct {
-	ID                        RunID
-	Task                      TaskSpec
-	Status                    Status
-	ResultSummary             string
-	FailureReason             string
-	FailureCode               string
-	FailureMessage            string
-	Steps                     []Step
-	ToolCalls                 []ToolCall
-	AgentTurns                []AgentTurn
-	Artifacts                 []Artifact
-	AgentSystemPrompt         string
-	AgentPromptVersion        string
-	AgentPromptSHA256         string
-	AgentSystemPromptRedacted bool
-	CreatedAt                 time.Time
-	UpdatedAt                 time.Time
+	ID                 RunID
+	Task               TaskSpec
+	Status             Status
+	ResultSummary      string
+	FailureReason      string
+	FailureCode        string
+	FailureMessage     string
+	Steps              []Step
+	ToolCalls          []ToolCall
+	AgentTurns         []AgentTurn
+	Artifacts          []Artifact
+	AgentSystemPrompt  string
+	AgentPromptVersion string
+	AgentPromptSHA256  string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // New creates a queued run.
@@ -160,17 +159,15 @@ func (r *Run) RecordAgentTurns(now time.Time, turns []AgentTurn) {
 	r.UpdatedAt = now
 }
 
-// RecordAgentSystemPrompt stores protected prompt diagnostics for the agent prompt used by the run.
+// RecordAgentSystemPrompt stores prompt diagnostics for the agent prompt used by the run.
 func (r *Run) RecordAgentSystemPrompt(now time.Time, prompt string, version string) {
 	r.AgentSystemPrompt = truncateUTF8Text(prompt, MaxAgentSystemPromptLength)
 	r.AgentPromptVersion = strings.TrimSpace(version)
 	if prompt != "" {
 		sum := sha256.Sum256([]byte(prompt))
 		r.AgentPromptSHA256 = hex.EncodeToString(sum[:])
-		r.AgentSystemPromptRedacted = true
 	} else {
 		r.AgentPromptSHA256 = ""
-		r.AgentSystemPromptRedacted = false
 	}
 	r.UpdatedAt = now
 }

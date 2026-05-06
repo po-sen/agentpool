@@ -70,8 +70,8 @@ func FormatRun(response RunResponse, options OutputOptions) string {
 		if response.AgentPromptSHA256 != "" {
 			fmt.Fprintf(&buffer, "sha256: %s\n", response.AgentPromptSHA256)
 		}
-		if response.AgentSystemPromptRedacted {
-			fmt.Fprintf(&buffer, "redacted: true\n")
+		if response.AgentSystemPrompt != "" {
+			fmt.Fprintf(&buffer, "system_prompt:\n%s\n", response.AgentSystemPrompt)
 		}
 	}
 
@@ -81,7 +81,7 @@ func FormatRun(response RunResponse, options OutputOptions) string {
 func hasAgentPromptMetadata(response RunResponse) bool {
 	return response.AgentPromptVersion != "" ||
 		response.AgentPromptSHA256 != "" ||
-		response.AgentSystemPromptRedacted
+		response.AgentSystemPrompt != ""
 }
 
 // FormatArtifacts returns a human-readable artifact list.

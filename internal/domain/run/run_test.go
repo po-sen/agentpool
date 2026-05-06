@@ -202,9 +202,6 @@ func TestRunRecordAgentSystemPromptStoresBoundedPrompt(t *testing.T) {
 	if len(item.AgentPromptSHA256) != 64 {
 		t.Fatalf("len(AgentPromptSHA256) = %d, want 64", len(item.AgentPromptSHA256))
 	}
-	if !item.AgentSystemPromptRedacted {
-		t.Fatal("AgentSystemPromptRedacted = false, want true")
-	}
 	if !item.UpdatedAt.Equal(now.Add(time.Second)) {
 		t.Fatalf("UpdatedAt = %v, want %v", item.UpdatedAt, now.Add(time.Second))
 	}
@@ -234,7 +231,6 @@ func TestRunCloneCopiesAgentSystemPrompt(t *testing.T) {
 	clone.AgentSystemPrompt = "changed"
 	clone.AgentPromptVersion = "changed"
 	clone.AgentPromptSHA256 = "changed"
-	clone.AgentSystemPromptRedacted = false
 
 	if item.AgentSystemPrompt != "system prompt" {
 		t.Fatalf("original AgentSystemPrompt = %q, want system prompt", item.AgentSystemPrompt)
@@ -244,9 +240,6 @@ func TestRunCloneCopiesAgentSystemPrompt(t *testing.T) {
 	}
 	if item.AgentPromptSHA256 == "" {
 		t.Fatal("original AgentPromptSHA256 is empty")
-	}
-	if !item.AgentSystemPromptRedacted {
-		t.Fatal("original AgentSystemPromptRedacted = false, want true")
 	}
 }
 

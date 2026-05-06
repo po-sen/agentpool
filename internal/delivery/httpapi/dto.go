@@ -14,23 +14,22 @@ type createRunRequest struct {
 }
 
 type runResponse struct {
-	ID                        string              `json:"id"`
-	Status                    string              `json:"status"`
-	Task                      taskResponse        `json:"task"`
-	Result                    *runResultResponse  `json:"result,omitempty"`
-	FailureReason             string              `json:"failure_reason,omitempty"`
-	FailureCode               string              `json:"failure_code,omitempty"`
-	FailureMessage            string              `json:"failure_message,omitempty"`
-	Steps                     []stepResponse      `json:"steps"`
-	ToolCalls                 []toolCallResponse  `json:"tool_calls,omitempty"`
-	AgentTurns                []agentTurnResponse `json:"agent_turns,omitempty"`
-	Artifacts                 []artifactResponse  `json:"artifacts,omitempty"`
-	AgentSystemPrompt         string              `json:"agent_system_prompt,omitempty"`
-	AgentPromptVersion        string              `json:"agent_prompt_version,omitempty"`
-	AgentPromptSHA256         string              `json:"agent_prompt_sha256,omitempty"`
-	AgentSystemPromptRedacted bool                `json:"agent_system_prompt_redacted,omitempty"`
-	CreatedAt                 time.Time           `json:"created_at"`
-	UpdatedAt                 time.Time           `json:"updated_at"`
+	ID                 string              `json:"id"`
+	Status             string              `json:"status"`
+	Task               taskResponse        `json:"task"`
+	Result             *runResultResponse  `json:"result,omitempty"`
+	FailureReason      string              `json:"failure_reason,omitempty"`
+	FailureCode        string              `json:"failure_code,omitempty"`
+	FailureMessage     string              `json:"failure_message,omitempty"`
+	Steps              []stepResponse      `json:"steps"`
+	ToolCalls          []toolCallResponse  `json:"tool_calls,omitempty"`
+	AgentTurns         []agentTurnResponse `json:"agent_turns,omitempty"`
+	Artifacts          []artifactResponse  `json:"artifacts,omitempty"`
+	AgentSystemPrompt  string              `json:"agent_system_prompt,omitempty"`
+	AgentPromptVersion string              `json:"agent_prompt_version,omitempty"`
+	AgentPromptSHA256  string              `json:"agent_prompt_sha256,omitempty"`
+	CreatedAt          time.Time           `json:"created_at"`
+	UpdatedAt          time.Time           `json:"updated_at"`
 }
 
 type runResultResponse struct {
@@ -168,19 +167,18 @@ func toRunResponse(item inbound.RunView) runResponse {
 			Branch:        item.Task.Branch,
 			Attachments:   attachments,
 		},
-		FailureReason:             item.FailureReason,
-		FailureCode:               item.FailureCode,
-		FailureMessage:            item.FailureMessage,
-		Steps:                     steps,
-		ToolCalls:                 toolCalls,
-		AgentTurns:                agentTurns,
-		Artifacts:                 artifacts,
-		AgentSystemPrompt:         item.AgentSystemPrompt,
-		AgentPromptVersion:        item.AgentPromptVersion,
-		AgentPromptSHA256:         item.AgentPromptSHA256,
-		AgentSystemPromptRedacted: item.AgentSystemPromptRedacted,
-		CreatedAt:                 item.CreatedAt,
-		UpdatedAt:                 item.UpdatedAt,
+		FailureReason:      item.FailureReason,
+		FailureCode:        item.FailureCode,
+		FailureMessage:     item.FailureMessage,
+		Steps:              steps,
+		ToolCalls:          toolCalls,
+		AgentTurns:         agentTurns,
+		Artifacts:          artifacts,
+		AgentSystemPrompt:  item.AgentSystemPrompt,
+		AgentPromptVersion: item.AgentPromptVersion,
+		AgentPromptSHA256:  item.AgentPromptSHA256,
+		CreatedAt:          item.CreatedAt,
+		UpdatedAt:          item.UpdatedAt,
 	}
 	if item.Result.Summary != "" {
 		response.Result = &runResultResponse{Summary: item.Result.Summary}
