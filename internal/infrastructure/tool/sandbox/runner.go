@@ -97,9 +97,9 @@ func (r *Runner) ListTools(_ context.Context, request outbound.ToolListRequest) 
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        argumentCommand,
-					Description: "Command to run inside the sandbox.",
+					Description: "Command to run inside the sandbox. For arithmetic, compute with shell arithmetic instead of echoing a guessed result.",
 					Required:    true,
-					Example:     "wc -l /workspace/input/README.md",
+					Example:     `printf '%s\n' "$((123 * 321))"`,
 				},
 				{
 					Name:        argumentTimeoutSeconds,

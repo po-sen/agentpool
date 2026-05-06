@@ -59,10 +59,12 @@ func NewClient(cfg Config) (*Client, error) {
 func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbound.ModelResponse, error) {
 	messages := toChatMessages(req)
 	body, err := json.Marshal(chatCompletionRequest{
-		Model:    c.model,
-		Messages: messages,
-		Tools:    toChatTools(req.Tools),
-		Stream:   false,
+		Model:          c.model,
+		Messages:       messages,
+		Tools:          toChatTools(req.Tools),
+		ResponseFormat: chatResponseFormat{Type: "json_object"},
+		Temperature:    0,
+		Stream:         false,
 	})
 	if err != nil {
 		return outbound.ModelResponse{}, err
@@ -111,10 +113,12 @@ func (c *Client) Generate(ctx context.Context, req outbound.ModelRequest) (outbo
 }
 
 type chatCompletionRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Tools    []chatTool    `json:"tools,omitempty"`
-	Stream   bool          `json:"stream"`
+	Model          string             `json:"model"`
+	Messages       []chatMessage      `json:"messages"`
+	Tools          []chatTool         `json:"tools,omitempty"`
+	ResponseFormat chatResponseFormat `json:"response_format"`
+	Temperature    float64            `json:"temperature"`
+	Stream         bool               `json:"stream"`
 }
 
 type chatMessage struct {
@@ -128,6 +132,10 @@ type chatCompletionResponse struct {
 	Choices []struct {
 		Message chatMessage `json:"message"`
 	} `json:"choices"`
+}
+
+type chatResponseFormat struct {
+	Type string `json:"type"`
 }
 
 type chatTool struct {

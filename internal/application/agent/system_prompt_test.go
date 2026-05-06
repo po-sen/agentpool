@@ -14,8 +14,9 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		"AgentPool is running one task.",
 		"Output protocol:",
 		"Return exactly one JSON object, no markdown fences.",
-		`Final: {"type":"final","summary":"..."}`,
+		`For final answers, return {"type":"final","summary":"..."}`,
 		"summary is the complete user-facing answer, not a completion note.",
+		"Do not prepend labels such as Final:",
 		"When the model API provides native/function tools, use the native tool call",
 		`If native tool calls are unavailable and a tool is needed, use: {"type":"tool_call","tool":"<tool_name>","arguments":{"key":"value"}}`,
 		"Preserve the user's requested language in final.summary.",
@@ -31,7 +32,7 @@ func TestBuildSystemPromptListsToolProtocol(t *testing.T) {
 		"workspace: Lists or stats workspace paths without reading file contents.",
 		`operation (required): Operation to run. Supported values: "list" or "stat". Example: list`,
 		"sandbox_exec: Runs a command inside the sandbox from /workspace/work.",
-		"command (required): Command to run inside the sandbox. Example: wc -l /workspace/input/README.md",
+		`command (required): Command to run inside the sandbox. For arithmetic, compute with shell arithmetic instead of echoing a guessed result. Example: printf '%s\n' "$((123 * 321))"`,
 		"timeout_seconds (optional): Optional timeout in seconds. Must be a positive integer and no more than the configured maximum. Example: 10",
 	} {
 		assertPromptContains(t, prompt, want)
@@ -48,6 +49,8 @@ func TestBuildSystemPromptListsPriorityToolPolicy(t *testing.T) {
 		"If sandbox_exec is available and the task has an exact or verifiable answer, call sandbox_exec before final.",
 		"Do not guess exact answers when sandbox_exec can verify them.",
 		"Use sandbox_exec for arithmetic, counts, searches, file content inspection, data transforms, tests, builds, linters, and code behavior checks.",
+		"The sandbox_exec command must compute or inspect the answer; do not use it to echo an unverified guess.",
+		"After a tool result, return final JSON based on that result or call another available tool if needed.",
 		"For subjective discussion, architecture advice, brainstorming, or simple conversation, return a final JSON action directly when no command is needed.",
 		"If a needed tool is unavailable, answer with what can be known and say what could not be verified.",
 	} {
@@ -130,9 +133,9 @@ func testPromptTools() []outbound.ToolDefinition {
 			Arguments: []outbound.ToolArgumentDefinition{
 				{
 					Name:        "command",
-					Description: "Command to run inside the sandbox.",
+					Description: "Command to run inside the sandbox. For arithmetic, compute with shell arithmetic instead of echoing a guessed result.",
 					Required:    true,
-					Example:     "wc -l /workspace/input/README.md",
+					Example:     `printf '%s\n' "$((123 * 321))"`,
 				},
 				{
 					Name:        "timeout_seconds",

@@ -47,7 +47,7 @@ func TestRunnerRejectsNaturalLanguageResponseAndContinues(t *testing.T) {
 		rawResponse:         "done",
 		responseFormat:      modelResponseFormatPlainText,
 		protocolErrorCode:   actionParseCodeInvalidJSON,
-		correctionContains:  "Re-answer the original user task in the required JSON format.",
+		correctionContains:  "Return only one raw JSON object",
 		responsePreview:     "done",
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
@@ -282,6 +282,61 @@ func TestRunnerCallsToolAndReturnsFinalSummary(t *testing.T) {
 	if result.ToolCalls[0].Arguments["text"] != "hello" {
 		t.Fatalf("record text after mutation = %q, want hello", result.ToolCalls[0].Arguments["text"])
 	}
+}
+
+func TestRunnerCallsProviderStyleToolCallTextAndReturnsFinalSummary(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: `{"name":"sandbox_exec","arguments":{"command":"printf '%s\n' \"$((123 * 321))\""}}`},
+			{Content: `{"type":"final","summary":"123 * 321 = 39483"}`},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "sandbox_exec", Description: "Runs a command inside the sandbox from /workspace/work."},
+	})
+	tools.results = map[string]outbound.ToolResult{
+		"sandbox_exec": {Content: "exit_code: 0\nstdout:\n39483\n"},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "告訴我 123 * 321 = ?"},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspace(),
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "123 * 321 = 39483" {
+		t.Fatalf("summary = %q, want computed result", result.Summary)
+	}
+	if result.ToolCallCount != 1 {
+		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
+	}
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	}
+	if tools.calls[0].Name != "sandbox_exec" {
+		t.Fatalf("tool name = %q, want sandbox_exec", tools.calls[0].Name)
+	}
+	assertTurn(t, result.AgentTurns, 0, wantTurn{
+		index:      1,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+		message:    "model requested tool call",
+	})
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusFinal,
+		actionType: run.AgentTurnActionTypeFinal,
+	})
 }
 
 func TestRunnerCallsNativeToolAndReturnsFinalSummary(t *testing.T) {
@@ -596,7 +651,7 @@ func TestRunnerRejectsUnknownJSONActionTypeAndContinues(t *testing.T) {
 	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Protocol error:")
 	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Error code: unknown_action_type")
 	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "action type must be final or tool_call")
-	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Do not return tool_result.")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Do not add labels such as Final:")
 	if strings.Contains(lastMessages[len(lastMessages)-1].Content, "hello from tool") {
 		t.Fatalf("protocol correction included invalid raw response content: %q", lastMessages[len(lastMessages)-1].Content)
 	}
@@ -649,7 +704,7 @@ func TestRunnerRejectsMultipleJSONObjectsAndContinues(t *testing.T) {
 	}
 	lastMessages := requestMessages(model.requests[1])
 	assertMessage(t, lastMessages[len(lastMessages)-2], "assistant", `"type":"tool_call"`)
-	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "Do not return multiple JSON objects.")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "runtime", "multiple JSON objects")
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
 		index:             1,
 		status:            run.AgentTurnStatusProtocolError,

@@ -37,6 +37,14 @@ func TestParseActionParsesWholeResponseFencedFinalAction(t *testing.T) {
 	}
 }
 
+func TestParseActionParsesFinalLabelFollowedByJSONObject(t *testing.T) {
+	result := parseAction(`Final: {"type":"final","summary":"done"}`)
+	assertValidAction(t, result, actionTypeFinal)
+	if result.action.Summary != "done" {
+		t.Fatalf("Summary = %q, want done", result.action.Summary)
+	}
+}
+
 func TestParseActionRejectsEmbeddedJSONObject(t *testing.T) {
 	result := parseAction("Here is the action:\n{\"type\":\"final\",\"summary\":\"done\"}\nThanks.")
 	assertProtocolErrorCode(t, result, actionParseCodeInvalidJSON)
@@ -80,32 +88,31 @@ func TestParseActionParsesToolCallScalarArgumentsAsStrings(t *testing.T) {
 	}
 }
 
-func TestParseActionRejectsProviderStyleToolCallWithSpecificCorrection(t *testing.T) {
+func TestParseActionParsesProviderStyleToolCallText(t *testing.T) {
 	result := parseAction(`{"name":"sandbox_exec","arguments":{"command":"echo $((123 * 321))"}}`)
-	assertProtocolErrorCode(t, result, actionParseCodeMissingType)
-	for _, want := range []string{
-		`{"name":...,"arguments":...} is a provider-style tool call object`,
-		`returned as assistant text so AgentPool could not execute it`,
-		`{"type":"tool_call","tool":"sandbox_exec","arguments":{...}}`,
-		"Do not return a final answer until the tool has actually executed",
-	} {
-		if !strings.Contains(result.parseErr.Message+" "+result.parseErr.Hint, want) {
-			t.Fatalf("parse correction does not contain %q: %#v", want, result.parseErr)
-		}
+	assertValidAction(t, result, actionTypeToolCall)
+	if result.action.Tool != "sandbox_exec" {
+		t.Fatalf("Tool = %q, want sandbox_exec", result.action.Tool)
+	}
+	if result.action.Arguments["command"] != "echo $((123 * 321))" {
+		t.Fatalf("command = %q, want shell arithmetic", result.action.Arguments["command"])
 	}
 }
 
-func TestParseActionRejectsToolCallWithoutTypeWithSpecificCorrection(t *testing.T) {
+func TestParseActionParsesToolCallWithoutTypeText(t *testing.T) {
 	result := parseAction(`{"tool":"workspace","arguments":{"operation":"list"}}`)
-	assertProtocolErrorCode(t, result, actionParseCodeMissingType)
-	for _, want := range []string{
-		`looked like a tool call but omitted "type":"tool_call"`,
-		`{"type":"tool_call","tool":"workspace","arguments":{...}}`,
-	} {
-		if !strings.Contains(result.parseErr.Message+" "+result.parseErr.Hint, want) {
-			t.Fatalf("parse correction does not contain %q: %#v", want, result.parseErr)
-		}
+	assertValidAction(t, result, actionTypeToolCall)
+	if result.action.Tool != "workspace" {
+		t.Fatalf("Tool = %q, want workspace", result.action.Tool)
 	}
+	if result.action.Arguments["operation"] != "list" {
+		t.Fatalf("operation = %q, want list", result.action.Arguments["operation"])
+	}
+}
+
+func TestParseActionRejectsProviderStyleToolCallTextWithExtraFields(t *testing.T) {
+	result := parseAction(`{"name":"sandbox_exec","arguments":{"command":"pwd"},"extra":"ignored"}`)
+	assertProtocolErrorCode(t, result, actionParseCodeMissingType)
 }
 
 func TestParseActionRejectsInvalidJSONStringEscapeWithClearReason(t *testing.T) {

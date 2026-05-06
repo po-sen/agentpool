@@ -77,7 +77,7 @@ type actionParseResult struct {
 }
 
 func parseAction(content string) actionParseResult {
-	trimmed := normalizeWholeResponseFencedJSON(strings.TrimSpace(content))
+	trimmed := normalizeWholeResponseActionLabel(normalizeWholeResponseFencedJSON(strings.TrimSpace(content)))
 	raw, parseErr := decodeActionObject(trimmed)
 	if parseErr != nil {
 		return protocolError(*parseErr)
@@ -117,6 +117,21 @@ func normalizeWholeResponseFencedJSON(content string) string {
 	}
 
 	return strings.TrimSpace(bodyWithClosing[:closingStart])
+}
+
+func normalizeWholeResponseActionLabel(content string) string {
+	const finalLabel = "Final:"
+
+	if !strings.HasPrefix(content, finalLabel) {
+		return content
+	}
+
+	afterLabel := strings.TrimSpace(strings.TrimPrefix(content, finalLabel))
+	if !strings.HasPrefix(afterLabel, "{") {
+		return content
+	}
+
+	return afterLabel
 }
 
 func protocolError(parseErr actionParseError) actionParseResult {
@@ -188,6 +203,7 @@ func isInvalidJSONStringEscapeError(err error) bool {
 }
 
 func parseActionObject(raw map[string]any) (action, *actionParseError) {
+	raw = normalizeTextToolCallObject(raw)
 	actionTypeValue, parseErr := parseActionType(raw)
 	if parseErr != nil {
 		return action{}, parseErr
@@ -208,10 +224,35 @@ func parseActionObject(raw map[string]any) (action, *actionParseError) {
 	}
 }
 
+func normalizeTextToolCallObject(raw map[string]any) map[string]any {
+	if _, hasType := raw["type"]; hasType {
+		return raw
+	}
+
+	if toolName := providerStyleToolCallName(raw); toolName != "" {
+		return normalizedToolCallRaw(raw, toolName)
+	}
+	if toolName := fallbackToolCallNameWithoutType(raw); toolName != "" {
+		return normalizedToolCallRaw(raw, toolName)
+	}
+
+	return raw
+}
+
+func normalizedToolCallRaw(raw map[string]any, toolName string) map[string]any {
+	normalized := map[string]any{
+		"type":               string(actionTypeToolCall),
+		"tool":               toolName,
+		actionFieldArguments: raw[actionFieldArguments],
+	}
+
+	return normalized
+}
+
 func parseActionType(raw map[string]any) (actionType, *actionParseError) {
 	value, ok := raw["type"]
 	if !ok {
-		return "", missingTypeActionParseError(raw)
+		return "", missingTypeActionParseError()
 	}
 
 	typeValue, ok := value.(string)
@@ -227,24 +268,7 @@ func parseActionType(raw map[string]any) (actionType, *actionParseError) {
 	return actionType(typeValue), nil
 }
 
-func missingTypeActionParseError(raw map[string]any) *actionParseError {
-	if toolName := providerStyleToolCallName(raw); toolName != "" {
-		return newActionParseError(
-			actionParseCodeMissingType,
-			`action.type is required; {"name":...,"arguments":...} is a provider-style tool call object, but it was returned as assistant text so AgentPool could not execute it`,
-			`If you intended to call a tool through the JSON fallback protocol, return exactly `+toolCallRetryExample(toolName)+` using the same arguments. Do not return a final answer until the tool has actually executed and you have received the tool result.`,
-			nil,
-		)
-	}
-	if toolName := fallbackToolCallNameWithoutType(raw); toolName != "" {
-		return newActionParseError(
-			actionParseCodeMissingType,
-			`action.type is required; the response looked like a tool call but omitted "type":"tool_call"`,
-			`If you intended to call a tool, return exactly `+toolCallRetryExample(toolName)+` using the same arguments. Do not return a final answer until the tool has actually executed and you have received the tool result.`,
-			nil,
-		)
-	}
-
+func missingTypeActionParseError() *actionParseError {
 	return newActionParseError(
 		actionParseCodeMissingType,
 		"action.type is required",
@@ -254,6 +278,9 @@ func missingTypeActionParseError(raw map[string]any) *actionParseError {
 }
 
 func providerStyleToolCallName(raw map[string]any) string {
+	if !rawHasOnlyFields(raw, "name", actionFieldArguments) {
+		return ""
+	}
 	toolName, ok := raw["name"].(string)
 	if !ok || strings.TrimSpace(toolName) == "" {
 		return ""
@@ -271,11 +298,10 @@ func providerStyleToolCallName(raw map[string]any) string {
 	return strings.TrimSpace(toolName)
 }
 
-func toolCallRetryExample(toolName string) string {
-	return `{"type":"tool_call","tool":` + strconv.Quote(toolName) + `,"arguments":{...}}`
-}
-
 func fallbackToolCallNameWithoutType(raw map[string]any) string {
+	if !rawHasOnlyFields(raw, "tool", actionFieldArguments) {
+		return ""
+	}
 	toolName, ok := raw["tool"].(string)
 	if !ok || strings.TrimSpace(toolName) == "" {
 		return ""
@@ -285,6 +311,20 @@ func fallbackToolCallNameWithoutType(raw map[string]any) string {
 	}
 
 	return strings.TrimSpace(toolName)
+}
+
+func rawHasOnlyFields(raw map[string]any, fields ...string) bool {
+	if len(raw) != len(fields) {
+		return false
+	}
+
+	for _, field := range fields {
+		if _, ok := raw[field]; !ok {
+			return false
+		}
+	}
+
+	return true
 }
 
 func parseFinalAction(raw map[string]any) (action, *actionParseError) {

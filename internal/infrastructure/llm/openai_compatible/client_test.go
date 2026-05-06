@@ -82,6 +82,13 @@ func TestClientGenerateSendsChatCompletionRequest(t *testing.T) {
 	if received["stream"] != false {
 		t.Fatalf("stream = %v, want false", received["stream"])
 	}
+	if received["temperature"] != float64(0) {
+		t.Fatalf("temperature = %v, want 0", received["temperature"])
+	}
+	responseFormat, ok := received["response_format"].(map[string]any)
+	if !ok || responseFormat["type"] != "json_object" {
+		t.Fatalf("response_format = %#v, want json_object", received["response_format"])
+	}
 	messages, ok := received["messages"].([]any)
 	if !ok || len(messages) != 3 {
 		t.Fatalf("messages = %#v, want system, user, and system correction messages", received["messages"])

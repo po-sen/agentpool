@@ -13,7 +13,8 @@ func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 	builder.WriteString("AgentPool is running one task.\n\n")
 	builder.WriteString("Output protocol:\n")
 	builder.WriteString("- Return exactly one JSON object, no markdown fences.\n")
-	builder.WriteString("- Final: {\"type\":\"final\",\"summary\":\"...\"}; summary is the complete user-facing answer, not a completion note.\n")
+	builder.WriteString("- For final answers, return {\"type\":\"final\",\"summary\":\"...\"}; summary is the complete user-facing answer, not a completion note.\n")
+	builder.WriteString("- Do not prepend labels such as Final: before the JSON object.\n")
 	builder.WriteString("- When the model API provides native/function tools, use the native tool call instead of writing a JSON tool_call message.\n")
 	builder.WriteString("- If native tool calls are unavailable and a tool is needed, use: {\"type\":\"tool_call\",\"tool\":\"<tool_name>\",\"arguments\":{\"key\":\"value\"}}\n")
 	builder.WriteString("- Preserve the user's requested language in final.summary.\n")
@@ -25,6 +26,8 @@ func buildSystemPrompt(tools []outbound.ToolDefinition) string {
 	if toolIsDefined(tools, "sandbox_exec") {
 		builder.WriteString("- If sandbox_exec is available and the task has an exact or verifiable answer, call sandbox_exec before final. Do not guess exact answers when sandbox_exec can verify them.\n")
 		builder.WriteString("- Use sandbox_exec for arithmetic, counts, searches, file content inspection, data transforms, tests, builds, linters, and code behavior checks.\n")
+		builder.WriteString("- The sandbox_exec command must compute or inspect the answer; do not use it to echo an unverified guess.\n")
+		builder.WriteString("- After a tool result, return final JSON based on that result or call another available tool if needed.\n")
 	}
 	builder.WriteString("- For subjective discussion, architecture advice, brainstorming, or simple conversation, return a final JSON action directly when no command is needed.\n")
 	builder.WriteString("- If a needed tool is unavailable, answer with what can be known and say what could not be verified.\n\n")
