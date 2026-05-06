@@ -84,6 +84,16 @@ func TestParseRunNoWait(t *testing.T) {
 	}
 }
 
+func TestParseRunDefaultsToNoWaitTimeout(t *testing.T) {
+	got, err := Parse([]string{commandRunName, "--prompt", "queue"})
+	if err != nil {
+		t.Fatalf("parse run command: %v", err)
+	}
+	if got.Run.Timeout != 0 {
+		t.Fatalf("timeout = %s, want no wait timeout", got.Run.Timeout)
+	}
+}
+
 func TestParseRunWatch(t *testing.T) {
 	got, err := Parse([]string{commandRunName, "--prompt", "inspect", "--watch"})
 	if err != nil {

@@ -40,7 +40,7 @@ const (
 
 	defaultCLIAddr      = "http://localhost:8080"
 	defaultPollInterval = 500 * time.Millisecond
-	defaultRunTimeout   = 2 * time.Minute
+	defaultRunTimeout   = 0
 
 	flagHelpAgentPoolHTTPAPIAddr = "AgentPool HTTP API address"
 )
@@ -191,7 +191,7 @@ func parseRunCommand(args []string) (Command, error) {
 	flags.BoolVar(&command.Run.Wait, flagWait, true, "wait for terminal run status")
 	flags.BoolVar(&noWait, flagNoWait, false, "submit and return without polling")
 	flags.BoolVar(&command.Run.Watch, flagWatch, false, "print a live run timeline while polling")
-	flags.DurationVar(&command.Run.Timeout, flagTimeout, defaultRunTimeout, "maximum wait duration")
+	flags.DurationVar(&command.Run.Timeout, flagTimeout, defaultRunTimeout, "maximum wait duration; 0 disables the limit")
 	flags.DurationVar(&command.Run.PollInterval, flagPollInterval, defaultPollInterval, "poll interval")
 	addClientFlags(flags, &command)
 
@@ -330,7 +330,7 @@ func addClientFlags(flags *flag.FlagSet, command *Command) {
 func addWatchClientFlags(flags *flag.FlagSet, command *Command) {
 	flags.StringVar(&command.Addr, flagAddr, command.Addr, flagHelpAgentPoolHTTPAPIAddr)
 	flags.BoolVar(&command.Output.Debug, flagDebug, false, "include debug diagnostics")
-	flags.DurationVar(&command.Run.Timeout, flagTimeout, command.Run.Timeout, "maximum watch duration")
+	flags.DurationVar(&command.Run.Timeout, flagTimeout, command.Run.Timeout, "maximum watch duration; 0 disables the limit")
 	flags.DurationVar(&command.Run.PollInterval, flagPollInterval, command.Run.PollInterval, "poll interval")
 }
 

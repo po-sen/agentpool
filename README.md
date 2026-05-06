@@ -238,6 +238,8 @@ go run ./cmd/agentpool artifact run_2f7b7f3b8ec0f65d6e079d6f4bd4e8c1 report.md
 - `agentpool artifacts`: lists captured `/workspace` artifacts for one run.
 - `agentpool artifact`: prints one captured artifact body.
 
+`run` and `watch` wait without a CLI-side time limit by default. Use `--timeout <duration>` when you want the CLI to stop waiting after a fixed duration; `--timeout 0` disables the limit.
+
 `server` and `worker` are separate process modes intended for future persistent infrastructure implementations. With the current in-memory repository and queue, separate processes do not share state.
 
 The local testing CLI is an HTTP client. Start `dev` in one terminal so the server and worker share in-memory state:

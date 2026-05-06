@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 )
 
 // Execute runs an HTTP client command.
@@ -48,7 +49,7 @@ func executeRun(ctx context.Context, client *Client, command Command, stdout io.
 	}
 	response := created
 	if command.Run.Wait {
-		waitCtx, cancel := context.WithTimeout(ctx, command.Run.Timeout)
+		waitCtx, cancel := waitContext(ctx, command.Run.Timeout)
 		defer cancel()
 		if command.Run.Watch {
 			response, err = watchRun(waitCtx, client, created.ID, &created, command.Run.PollInterval, stdout, command.Output)
@@ -70,11 +71,19 @@ func executeWatch(ctx context.Context, client *Client, command Command, stdout i
 	if command.Output.JSON {
 		return ErrUsage
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, command.Run.Timeout)
+	waitCtx, cancel := waitContext(ctx, command.Run.Timeout)
 	defer cancel()
 	_, err := watchRun(waitCtx, client, command.RunID, nil, command.Run.PollInterval, stdout, command.Output)
 
 	return err
+}
+
+func waitContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+
+	return context.WithTimeout(ctx, timeout)
 }
 
 func executeGet(ctx context.Context, client *Client, command Command, stdout io.Writer) error {

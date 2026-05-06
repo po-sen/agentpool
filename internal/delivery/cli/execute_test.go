@@ -52,6 +52,47 @@ func TestExecuteRunSubmitsPollsAndPrintsResult(t *testing.T) {
 	}
 }
 
+func TestExecuteRunWaitsWhenTimeoutIsZero(t *testing.T) {
+	getCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodPost && request.URL.Path == apiRunsPath:
+			writeRunTestResponse(writer, http.StatusCreated, RunResponse{ID: "run_no_timeout", Status: "queued"})
+		case request.Method == http.MethodGet && request.URL.Path == apiRunsPath+"/run_no_timeout":
+			getCount++
+			response := RunResponse{ID: "run_no_timeout", Status: "running"}
+			if getCount == 2 {
+				response = RunResponse{
+					ID:     "run_no_timeout",
+					Status: statusCompleted,
+					Result: &RunResultResponse{Summary: "done"},
+				}
+			}
+			writeRunTestResponse(writer, http.StatusOK, response)
+		default:
+			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	var output bytes.Buffer
+	err := Execute(context.Background(), Command{
+		Kind: CommandRun,
+		Addr: server.URL,
+		Run: RunOptions{
+			Prompt:       "do work",
+			Wait:         true,
+			PollInterval: time.Millisecond,
+		},
+	}, &output)
+	if err != nil {
+		t.Fatalf("execute run: %v", err)
+	}
+	if !strings.Contains(output.String(), "Result:\ndone") {
+		t.Fatalf("output missing completed result: %s", output.String())
+	}
+}
+
 func TestExecuteRunWatchPrintsTimeline(t *testing.T) {
 	getCount := 0
 	startedAt := time.Date(2026, 5, 6, 10, 0, 0, 0, time.UTC)
