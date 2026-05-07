@@ -20,9 +20,30 @@ func TestBuildToolObservationFormatsError(t *testing.T) {
 	got := buildToolObservation("workspace", nil, outbound.ToolResult{Content: "path is not available", IsError: true})
 	for _, want := range []string{
 		"Tool error for workspace:",
-		"This may be partial or expected",
-		"try a different approach before final.",
+		"This failed attempt is an observation, not a final answer.",
+		"Do not repeat the same tool call",
+		"keep iterating with changed arguments or a different method until a tool call succeeds.",
+		"Strategy directive:",
 		"path is not available",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("observation = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestBuildToolObservationIncludesStrategyDirectiveForInlineSyntaxError(t *testing.T) {
+	got := buildToolObservation("sandbox_exec", map[string]string{
+		"command": `python3 -c "if True: print(42); else: print(0)"`,
+	}, outbound.ToolResult{
+		Content: "exit_code: 1\nstderr:\nSyntaxError: invalid syntax\n",
+		IsError: true,
+	})
+
+	for _, want := range []string{
+		"Previous approach: inline command failed with a syntax error.",
+		"create a multi-line script file under /workspace",
+		"SyntaxError: invalid syntax",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("observation = %q, want substring %q", got, want)

@@ -77,6 +77,68 @@ func handlePlaceholderToolCall(
 	return RunResult{}, false, nil
 }
 
+func handlePrematureFinalAfterToolError(
+	session *runSession,
+	turn modelTurnContext,
+) (RunResult, bool, error) {
+	correctionMessage := buildPrematureFinalAfterToolErrorCorrectionMessage(prematureFinalAfterToolErrorCorrectionRequest{
+		AvailableTools: session.availableToolNames,
+	})
+	session.recordTurn(TurnRecord{
+		Index:             turn.index,
+		Status:            run.AgentTurnStatusProtocolError,
+		ActionType:        run.AgentTurnActionTypeFinal,
+		Message:           "model returned final immediately after tool error",
+		RequestMessages:   turn.requestMessages,
+		RawResponse:       turn.content,
+		ResponseFormat:    turn.responseFormat,
+		ProtocolErrorCode: "premature_final_after_tool_error",
+		CorrectionMessage: correctionMessage,
+		ResponsePreview:   previewModelResponse(turn.content),
+		StartedAt:         turn.startedAt,
+		EndedAt:           turn.endedAt,
+	})
+	session.turns = append(session.turns,
+		assistantAttemptTurn(turn.content),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
+	)
+
+	return RunResult{}, false, nil
+}
+
+func handleRepeatedToolCall(
+	session *runSession,
+	turn modelTurnContext,
+	toolName string,
+	arguments map[string]string,
+) (RunResult, bool, error) {
+	correctionMessage := buildRepeatedToolCallCorrectionMessage(repeatedToolCallCorrectionRequest{
+		Tool:           toolName,
+		Arguments:      arguments,
+		AvailableTools: session.availableToolNames,
+	})
+	session.recordTurn(TurnRecord{
+		Index:             turn.index,
+		Status:            run.AgentTurnStatusInvalidToolCall,
+		ActionType:        run.AgentTurnActionTypeToolCall,
+		ToolName:          toolName,
+		Message:           "tool call repeats a previous invocation",
+		RequestMessages:   turn.requestMessages,
+		RawResponse:       turn.content,
+		ResponseFormat:    turn.responseFormat,
+		CorrectionMessage: correctionMessage,
+		ResponsePreview:   previewModelResponse(turn.content),
+		StartedAt:         turn.startedAt,
+		EndedAt:           turn.endedAt,
+	})
+	session.turns = append(session.turns,
+		assistantAttemptTurn(turn.content),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
+	)
+
+	return RunResult{}, false, nil
+}
+
 func uploadedFilePaths(task run.TaskSpec) []string {
 	if len(task.Attachments) == 0 {
 		return nil
@@ -110,6 +172,7 @@ func (r *Runner) handleToolCall(ctx context.Context, session *runSession, conten
 		return RunResult{}, false, nil
 	}
 	modelCall := modelCalls[0]
+	session.recordToolCallSignature(modelCall.Name, modelCall.Arguments)
 	session.turns = append(session.turns, assistantToolCallTurn("", []outbound.ModelToolCall{modelCall}))
 
 	startedAt := r.clock()
@@ -161,6 +224,12 @@ func (r *Runner) handleNativeToolCalls(
 		if placeholders := placeholderArgumentValues(call.Arguments); len(placeholders) > 0 {
 			return handlePlaceholderNativeToolCall(session, turn, call, placeholders)
 		}
+		if session.toolCallWasUsed(call.Name, call.Arguments) {
+			return handleRepeatedToolCall(session, turn, call.Name, call.Arguments)
+		}
+	}
+	if repeatedCall, ok := repeatedToolCall(normalized); ok {
+		return handleRepeatedToolCall(session, turn, repeatedCall.Name, repeatedCall.Arguments)
 	}
 
 	session.recordTurn(TurnRecord{
@@ -180,6 +249,7 @@ func (r *Runner) handleNativeToolCalls(
 
 	resultParts := make([]outbound.ModelPart, 0, len(normalized))
 	for _, call := range normalized {
+		session.recordToolCallSignature(call.Name, call.Arguments)
 		startedAt := r.clock()
 		result, err := r.tools.RunTool(ctx, outbound.ToolCall{
 			RunID:     session.request.RunID,
@@ -206,6 +276,19 @@ func (r *Runner) handleNativeToolCalls(
 	session.turns = append(session.turns, toolResultTurn(resultParts))
 
 	return RunResult{}, false, nil
+}
+
+func repeatedToolCall(calls []outbound.ModelToolCall) (outbound.ModelToolCall, bool) {
+	seen := make(map[string]outbound.ModelToolCall, len(calls))
+	for _, call := range calls {
+		signature := toolCallSignature(call.Name, call.Arguments)
+		if repeated, ok := seen[signature]; ok {
+			return repeated, true
+		}
+		seen[signature] = call
+	}
+
+	return outbound.ModelToolCall{}, false
 }
 
 func handleUnavailableNativeToolCall(

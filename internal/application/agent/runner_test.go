@@ -422,11 +422,13 @@ func TestRunnerCallsProviderStyleToolCallTextAndReturnsFinalSummary(t *testing.T
 	})
 }
 
-func TestRunnerRecordsSandboxExecErrorAndAllowsFinal(t *testing.T) {
+func TestRunnerRejectsPrematureFinalAfterToolErrorAndContinues(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
 			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"bad math"}}`},
 			{Content: `{"type":"final","summary":"The sandbox command failed, so I could not confirm the exact answer."}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"python3 -c 'print([7, 9])'"}}`},
+			{Content: `{"type":"final","summary":"x = 7 或 x = 9"}`},
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
@@ -434,6 +436,7 @@ func TestRunnerRecordsSandboxExecErrorAndAllowsFinal(t *testing.T) {
 	})
 	tools.resultQueue = []outbound.ToolResult{
 		{Content: "exit_code: 2\nstderr:\n/bin/sh: arithmetic syntax error\n", IsError: true},
+		{Content: "exit_code: 0\nstdout:\n[7, 9]\n"},
 	}
 	runner := NewRunner(model, tools)
 
@@ -451,20 +454,23 @@ func TestRunnerRecordsSandboxExecErrorAndAllowsFinal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	if result.Summary != "The sandbox command failed, so I could not confirm the exact answer." {
-		t.Fatalf("summary = %q, want model final after tool error", result.Summary)
+	if result.Summary != "x = 7 或 x = 9" {
+		t.Fatalf("summary = %q, want model final after recovery attempt", result.Summary)
 	}
-	if result.ToolCallCount != 1 {
-		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
+	if result.ToolCallCount != 2 {
+		t.Fatalf("ToolCallCount = %d, want 2", result.ToolCallCount)
 	}
-	if len(result.ToolCalls) != 1 {
-		t.Fatalf("len(ToolCalls) = %d, want 1", len(result.ToolCalls))
+	if len(result.ToolCalls) != 2 {
+		t.Fatalf("len(ToolCalls) = %d, want 2", len(result.ToolCalls))
 	}
 	if !result.ToolCalls[0].IsError {
 		t.Fatal("first sandbox_exec IsError = false, want true")
 	}
-	if len(tools.calls) != 1 {
-		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	if result.ToolCalls[1].IsError {
+		t.Fatal("second sandbox_exec IsError = true, want false")
+	}
+	if len(tools.calls) != 2 {
+		t.Fatalf("len(tool calls) = %d, want 2", len(tools.calls))
 	}
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
 		index:      1,
@@ -473,23 +479,42 @@ func TestRunnerRecordsSandboxExecErrorAndAllowsFinal(t *testing.T) {
 		toolName:   "sandbox_exec",
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
-		index:      2,
+		index:              2,
+		status:             run.AgentTurnStatusProtocolError,
+		actionType:         run.AgentTurnActionTypeFinal,
+		message:            "model returned final immediately after tool error",
+		protocolErrorCode:  "premature_final_after_tool_error",
+		correctionContains: "Tool recovery required:",
+	})
+	assertTurn(t, result.AgentTurns, 2, wantTurn{
+		index:      3,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+	})
+	assertTurn(t, result.AgentTurns, 3, wantTurn{
+		index:      4,
 		status:     run.AgentTurnStatusFinal,
 		actionType: run.AgentTurnActionTypeFinal,
 	})
-	if len(model.requests) != 2 {
-		t.Fatalf("len(model requests) = %d, want 2", len(model.requests))
+	if len(model.requests) != 4 {
+		t.Fatalf("len(model requests) = %d, want 4", len(model.requests))
 	}
 	messages := requestMessages(model.requests[1])
 	assertMessage(t, messages[len(messages)-1], "tool", "Tool error for sandbox_exec:")
+	recoveryMessages := requestMessages(model.requests[2])
+	assertMessage(t, recoveryMessages[len(recoveryMessages)-1], "user", "Tool recovery required:")
+	assertMessage(t, recoveryMessages[len(recoveryMessages)-1], "user", "Keep iterating with available tools until a tool call succeeds")
 }
 
-func TestRunnerAllowsRepeatedToolCallsWithoutSemanticPolicy(t *testing.T) {
+func TestRunnerRejectsRepeatedToolCallAndContinues(t *testing.T) {
 	command := `python3 -c 'print(6 * 7)'`
+	changedCommand := `python3 -c 'print(40 + 2)'`
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
 			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(command, `"`, `\"`) + `"}}`},
 			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(command, `"`, `\"`) + `"}}`},
+			{Content: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(changedCommand, `"`, `\"`) + `"}}`},
 			{Content: `{"type":"final","summary":"42"}`},
 		},
 	}
@@ -520,20 +545,100 @@ func TestRunnerAllowsRepeatedToolCallsWithoutSemanticPolicy(t *testing.T) {
 		t.Fatalf("summary = %q, want final based on first tool result", result.Summary)
 	}
 	if len(tools.calls) != 2 {
-		t.Fatalf("len(tool calls) = %d, want both repeated commands dispatched", len(tools.calls))
+		t.Fatalf("len(tool calls) = %d, want repeated command blocked and changed command dispatched", len(tools.calls))
+	}
+	if tools.calls[0].Arguments["command"] != command {
+		t.Fatalf("first command = %q, want original command", tools.calls[0].Arguments["command"])
+	}
+	if tools.calls[1].Arguments["command"] != changedCommand {
+		t.Fatalf("second command = %q, want changed command", tools.calls[1].Arguments["command"])
 	}
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
 		index:      2,
+		status:     run.AgentTurnStatusInvalidToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+		message:    "tool call repeats a previous invocation",
+	})
+	assertTurn(t, result.AgentTurns, 2, wantTurn{
+		index:      3,
 		status:     run.AgentTurnStatusToolCall,
 		actionType: run.AgentTurnActionTypeToolCall,
 		toolName:   "sandbox_exec",
 		message:    "model requested tool call",
 	})
-	assertTurn(t, result.AgentTurns, 2, wantTurn{
-		index:      3,
+	assertTurn(t, result.AgentTurns, 3, wantTurn{
+		index:      4,
 		status:     run.AgentTurnStatusFinal,
 		actionType: run.AgentTurnActionTypeFinal,
 	})
+	if len(model.requests) != 4 {
+		t.Fatalf("len(model requests) = %d, want 4", len(model.requests))
+	}
+	retryMessages := requestMessages(model.requests[2])
+	assertMessage(t, retryMessages[len(retryMessages)-1], "user", "An identical tool call already ran and cannot be retried")
+	assertMessage(t, retryMessages[len(retryMessages)-1], "user", "Required strategy change:")
+	assertMessage(t, retryMessages[len(retryMessages)-1], "user", "replace the repeated inline command")
+	assertMessage(t, retryMessages[len(retryMessages)-1], "user", "create a script or pipeline under /workspace")
+}
+
+func TestRunnerKeepsCorrectingRepeatedRejectedToolCallUntilMaxTurns(t *testing.T) {
+	command := `python3 -c 'print(6 * 7)'`
+	toolCall := `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"` + strings.ReplaceAll(command, `"`, `\"`) + `"}}`
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{Content: toolCall},
+			{Content: toolCall},
+			{Content: toolCall},
+		},
+	}
+	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
+		{Name: "sandbox_exec", Description: "Runs commands in a general-purpose sandbox from /workspace."},
+	})
+	tools.resultQueue = []outbound.ToolResult{
+		{Content: "exit_code: 0\nstdout:\n42\n"},
+	}
+	runner := NewRunner(model, tools, WithMaxTurns(3))
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "verify answer"},
+		Context: outbound.ToolContext{
+			Workspace: testToolWorkspaceWithFiles(),
+			Sandbox: outbound.Sandbox{
+				ID:               "sandbox_test",
+				SupportsCommands: true,
+			},
+		},
+	})
+	assertAgentErrorCode(t, err, ErrorCodeAgentMaxTurns)
+	if len(tools.calls) != 1 {
+		t.Fatalf("len(tool calls) = %d, want only first call dispatched", len(tools.calls))
+	}
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusInvalidToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+		message:    "tool call repeats a previous invocation",
+	})
+	assertTurn(t, result.AgentTurns, 2, wantTurn{
+		index:      3,
+		status:     run.AgentTurnStatusInvalidToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "sandbox_exec",
+		message:    "tool call repeats a previous invocation",
+	})
+	assertTurn(t, result.AgentTurns, 3, wantTurn{
+		index:   4,
+		status:  run.AgentTurnStatusMaxTurns,
+		message: "agent reached max turns",
+	})
+	if len(model.requests) != 3 {
+		t.Fatalf("len(model requests) = %d, want max-turns after third request", len(model.requests))
+	}
+	messages := requestMessages(model.requests[2])
+	assertMessage(t, messages[len(messages)-1], "user", "repeated identical calls will keep being rejected without running")
 }
 
 func TestRunnerReturnsModelFinalWithoutLanguageSpecificRewrite(t *testing.T) {
@@ -643,6 +748,65 @@ func TestRunnerCallsNativeToolAndReturnsFinalSummary(t *testing.T) {
 	}
 }
 
+func TestRunnerRejectsRepeatedNativeToolCallAndContinues(t *testing.T) {
+	model := &recordingModelClient{
+		responses: []outbound.ModelResponse{
+			{
+				ToolCalls: []outbound.ModelToolCall{
+					{ID: "call_echo_1", Name: "echo", Arguments: map[string]string{"text": "hello"}},
+				},
+			},
+			{
+				ToolCalls: []outbound.ModelToolCall{
+					{ID: "call_echo_2", Name: "echo", Arguments: map[string]string{"text": "hello"}},
+				},
+			},
+			{
+				ToolCalls: []outbound.ModelToolCall{
+					{ID: "call_echo_3", Name: "echo", Arguments: map[string]string{"text": "changed"}},
+				},
+			},
+			{Content: `{"type":"final","summary":"done"}`},
+		},
+	}
+	tools := newFakeToolRunner()
+	tools.resultQueue = []outbound.ToolResult{
+		{Content: "hello"},
+		{Content: "changed"},
+	}
+	runner := NewRunner(model, tools)
+
+	result, err := runner.Run(context.Background(), RunRequest{
+		RunID: "run_test",
+		Task:  run.TaskSpec{Prompt: "echo text"},
+	})
+	if err != nil {
+		t.Fatalf("run agent: %v", err)
+	}
+	if result.Summary != "done" {
+		t.Fatalf("summary = %q, want done", result.Summary)
+	}
+	if len(tools.calls) != 2 {
+		t.Fatalf("len(tool calls) = %d, want repeated native call blocked", len(tools.calls))
+	}
+	if tools.calls[0].Arguments["text"] != "hello" || tools.calls[1].Arguments["text"] != "changed" {
+		t.Fatalf("tool calls = %#v, want original then changed call", tools.calls)
+	}
+	assertTurn(t, result.AgentTurns, 1, wantTurn{
+		index:      2,
+		status:     run.AgentTurnStatusInvalidToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "echo",
+		message:    "tool call repeats a previous invocation",
+	})
+	assertTurn(t, result.AgentTurns, 2, wantTurn{
+		index:      3,
+		status:     run.AgentTurnStatusToolCall,
+		actionType: run.AgentTurnActionTypeToolCall,
+		toolName:   "echo",
+	})
+}
+
 func TestRunnerRejectsUnavailableToolBeforeToolRunner(t *testing.T) {
 	model := &recordingModelClient{
 		responses: []outbound.ModelResponse{
@@ -696,13 +860,16 @@ func TestRunnerRecordsExistingToolResultError(t *testing.T) {
 		responses: []outbound.ModelResponse{
 			{Content: `{"type":"tool_call","tool":"workspace","arguments":{"operation":"list","path":"missing.md"}}`},
 			{Content: `{"type":"final","summary":"handled tool error"}`},
+			{Content: `{"type":"tool_call","tool":"workspace","arguments":{"operation":"list","path":"."}}`},
+			{Content: `{"type":"final","summary":"handled tool error after successful retry"}`},
 		},
 	}
 	tools := newFakeToolRunnerWithTools([]outbound.ToolDefinition{
 		{Name: "workspace", Description: "Manages authorized input sources and staged files for the mutable /workspace."},
 	})
-	tools.results = map[string]outbound.ToolResult{
-		"workspace": {Content: "path is not available", IsError: true},
+	tools.resultQueue = []outbound.ToolResult{
+		{Content: "path is not available", IsError: true},
+		{Content: "files:\nREADME.md\n"},
 	}
 	runner := NewRunner(model, tools)
 
@@ -713,11 +880,11 @@ func TestRunnerRecordsExistingToolResultError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run agent: %v", err)
 	}
-	if result.ToolCallCount != 1 {
-		t.Fatalf("ToolCallCount = %d, want 1", result.ToolCallCount)
+	if result.ToolCallCount != 2 {
+		t.Fatalf("ToolCallCount = %d, want 2", result.ToolCallCount)
 	}
-	if len(result.ToolCalls) != 1 {
-		t.Fatalf("len(ToolCalls) = %d, want 1", len(result.ToolCalls))
+	if len(result.ToolCalls) != 2 {
+		t.Fatalf("len(ToolCalls) = %d, want 2", len(result.ToolCalls))
 	}
 	if result.ToolCalls[0].Name != "workspace" {
 		t.Fatalf("tool record name = %q, want workspace", result.ToolCalls[0].Name)
@@ -728,13 +895,16 @@ func TestRunnerRecordsExistingToolResultError(t *testing.T) {
 	if !result.ToolCalls[0].IsError {
 		t.Fatal("tool record IsError = false, want true")
 	}
-	if len(tools.calls) != 1 {
-		t.Fatalf("len(tool calls) = %d, want 1", len(tools.calls))
+	if len(tools.calls) != 2 {
+		t.Fatalf("len(tool calls) = %d, want 2", len(tools.calls))
 	}
 	lastMessages := requestMessages(model.requests[1])
 	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "Tool error for workspace:")
-	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "try a different approach before final")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "Do not repeat the same tool call")
+	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "keep iterating with changed arguments or a different method")
 	assertMessage(t, lastMessages[len(lastMessages)-1], "tool", "path is not available")
+	recoveryMessages := requestMessages(model.requests[2])
+	assertMessage(t, recoveryMessages[len(recoveryMessages)-1], "user", "Tool recovery required:")
 }
 
 func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {

@@ -88,20 +88,22 @@ type TurnMessageRecord struct {
 }
 
 type runSession struct {
-	request            RunRequest
-	systemPrompt       string
-	availableTools     map[string]outbound.ToolDefinition
-	toolDefinitions    []outbound.ToolDefinition
-	availableToolNames []string
-	turns              []outbound.ModelTurn
-	turnIndex          int
-	toolCallCount      int
-	toolCalls          []ToolCallRecord
-	turnRecords        []TurnRecord
-	currentTurn        *TurnRecord
-	progressObserver   ProgressObserver
-	progressErr        error
-	ctx                context.Context
+	request                  RunRequest
+	systemPrompt             string
+	availableTools           map[string]outbound.ToolDefinition
+	toolDefinitions          []outbound.ToolDefinition
+	availableToolNames       []string
+	turns                    []outbound.ModelTurn
+	turnIndex                int
+	toolCallCount            int
+	toolCalls                []ToolCallRecord
+	toolCallSignatures       map[string]struct{}
+	turnRecords              []TurnRecord
+	currentTurn              *TurnRecord
+	progressObserver         ProgressObserver
+	progressErr              error
+	ctx                      context.Context
+	pendingToolErrorRecovery bool
 }
 
 type modelTurnContext struct {
@@ -348,6 +350,9 @@ func (r *Runner) handleAction(
 
 			return session.partialResult(), false, newAgentError(ErrorCodeFinalSummaryInvalid, "", err)
 		}
+		if session.shouldRejectFinalAfterToolError() {
+			return handlePrematureFinalAfterToolError(session, turn)
+		}
 		session.recordTurn(TurnRecord{
 			Index:           turn.index,
 			Status:          run.AgentTurnStatusFinal,
@@ -368,6 +373,9 @@ func (r *Runner) handleAction(
 		}
 		if placeholders := placeholderArgumentValues(parsed.Arguments); len(placeholders) > 0 {
 			return handlePlaceholderToolCall(session, turn, parsed, placeholders)
+		}
+		if session.toolCallWasUsed(parsed.Tool, parsed.Arguments) {
+			return handleRepeatedToolCall(session, turn, parsed.Tool, parsed.Arguments)
 		}
 
 		session.recordTurn(TurnRecord{

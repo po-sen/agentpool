@@ -560,6 +560,12 @@ Run attachments become authorized input sources first. They are not automaticall
 
 When `sandbox_exec` is available, exact or verifiable tasks should be checked through sandbox execution instead of guessed. That includes exact arithmetic, counting or searching files, transforming data, and running small scripts, tests, builds, or linters. Subjective discussion, design advice, brainstorming, and simple conversation can return a final JSON action directly when no command is needed.
 
+Agents can create their own task-specific helpers inside `/workspace`. For example, when a ready-made command is missing or too narrow, the model should write a small script, pipeline, or program in the disposable workspace and run it through `sandbox_exec`, using only available sandbox capabilities.
+
+If a tool result is an error, AgentPool treats it as an observation rather than an answer. The agent loop rejects `final` after a failed tool result and keeps asking for another tool call until a later tool result succeeds or the max-turn limit is reached. Error observations include generic strategy directives, such as switching from a brittle inline command to a script file, inspecting available capabilities, or choosing another installed command/library.
+
+To prevent stalled loops, AgentPool will not execute the exact same tool name and arguments twice in one run. Repeated calls are rejected with correction feedback so the model must use the prior observation, change arguments, or try a materially different method.
+
 AgentPool now advertises available tools through provider-native function/tool schemas when the configured provider supports them. The model should use the native tool mechanism first, because that preserves the provider's tool-call id and lets AgentPool return the result in the provider's expected tool-result channel.
 
 The JSON tool-call action remains as a compatibility fallback when native tool calls are unavailable:

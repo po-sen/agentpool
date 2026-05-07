@@ -118,3 +118,73 @@ func TestBuildPlaceholderToolArgumentCorrectionMessageUsesWorkspaceOnlyWhenAvail
 		t.Fatalf("message does not point to available file-source tool:\n%s", message)
 	}
 }
+
+func TestBuildPrematureFinalAfterToolErrorCorrectionMessage(t *testing.T) {
+	message := buildPrematureFinalAfterToolErrorCorrectionMessage(prematureFinalAfterToolErrorCorrectionRequest{
+		AvailableTools: []string{"workspace", "sandbox_exec"},
+	})
+
+	for _, want := range []string{
+		"Tool recovery required:",
+		"The previous tool result failed.",
+		"Do not return final after a failed tool result.",
+		"Keep iterating with available tools until a tool call succeeds.",
+		"Do not repeat the same tool call",
+		"inspect available capabilities",
+		"create a small script or pipeline",
+		"Available tools: workspace, sandbox_exec",
+		"Return a tool_call.",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
+func TestBuildRepeatedToolCallCorrectionMessage(t *testing.T) {
+	message := buildRepeatedToolCallCorrectionMessage(repeatedToolCallCorrectionRequest{
+		Tool: "sandbox_exec",
+		Arguments: map[string]string{
+			"command": "python3 -c 'if True: print(42)'",
+		},
+		AvailableTools: []string{"workspace", "sandbox_exec"},
+	})
+
+	for _, want := range []string{
+		"Tool call error:",
+		"An identical tool call already ran and cannot be retried.",
+		`Blocked tool: "sandbox_exec"`,
+		`Blocked arguments: command="python3 -c 'if True: print(42)'"`,
+		"Required strategy change:",
+		"replace the repeated inline command",
+		"materially changed arguments",
+		"inspect available files or capabilities",
+		"read existing output artifacts",
+		"fix syntax or quoting with a changed command",
+		"create a script or pipeline under /workspace",
+		"use another installed command or library",
+		"Do not reissue the same tool name and arguments; repeated identical calls will keep being rejected without running.",
+		"Available tools: workspace, sandbox_exec",
+		"Return a different tool_call",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message does not contain %q:\n%s", want, message)
+		}
+	}
+}
+
+func TestBuildRepeatedToolCallCorrectionMessageTruncatesLongArguments(t *testing.T) {
+	message := buildRepeatedToolCallCorrectionMessage(repeatedToolCallCorrectionRequest{
+		Tool: "sandbox_exec",
+		Arguments: map[string]string{
+			"command": strings.Repeat("x", 512),
+		},
+	})
+
+	if !strings.Contains(message, "[truncated]") {
+		t.Fatalf("message does not truncate long arguments:\n%s", message)
+	}
+	if len(message) > 1200 {
+		t.Fatalf("len(message) = %d, want bounded correction:\n%s", len(message), message)
+	}
+}

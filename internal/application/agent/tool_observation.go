@@ -7,14 +7,18 @@ import (
 )
 
 const maxToolObservationLength = 8 << 10
-const toolErrorRetryGuidance = "This may be partial or expected; if the task remains possible, try a different approach before final.\n"
+const toolErrorRetryGuidance = "This failed attempt is an observation, not a final answer. Do not repeat the same tool call; keep iterating with changed arguments or a different method until a tool call succeeds.\n"
 
-func buildToolObservation(tool string, _ map[string]string, result outbound.ToolResult) string {
+func buildToolObservation(tool string, arguments map[string]string, result outbound.ToolResult) string {
 	content := result.Content
 	if result.IsError {
 		prefix := fmt.Sprintf("Tool error for %s:\n", tool)
+		strategyDirective := buildToolErrorStrategyDirective(tool, arguments, result)
+		if strategyDirective != "" {
+			strategyDirective += "\n"
+		}
 
-		return prefix + toolErrorRetryGuidance + truncateToolObservationContent(prefix+toolErrorRetryGuidance, content)
+		return prefix + toolErrorRetryGuidance + strategyDirective + truncateToolObservationContent(prefix+toolErrorRetryGuidance+strategyDirective, content)
 	}
 
 	prefix := fmt.Sprintf("Tool result for %s:\n", tool)
