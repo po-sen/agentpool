@@ -75,6 +75,45 @@ func TestWriteRunTimelineUpdateIncludesTurnAndToolDetails(t *testing.T) {
 	}
 }
 
+func TestWriteRunTimelineUpdateShowsInvalidToolCorrection(t *testing.T) {
+	now := time.Date(2026, 5, 6, 10, 0, 0, 0, time.UTC)
+	response := RunResponse{
+		ID:        "run_invalid",
+		Status:    statusFailed,
+		UpdatedAt: now,
+		AgentTurns: []AgentTurnResponse{
+			{
+				Index:             1,
+				Status:            "invalid_tool_call",
+				ActionType:        "tool_call",
+				ToolName:          "sandbox_exec",
+				Message:           "tool call arguments contain placeholder values",
+				RawResponse:       `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -m <file_path>"}}`,
+				CorrectionMessage: "Tool call error:\nThe previous tool call used placeholder argument values: command=<file_path>.",
+				StartedAt:         now,
+				EndedAt:           now,
+			},
+		},
+	}
+
+	var output bytes.Buffer
+	if err := writeRunTimelineUpdate(&output, response, OutputOptions{}, newTimelineState()); err != nil {
+		t.Fatalf("write timeline: %v", err)
+	}
+
+	for _, want := range []string{
+		"invalid_tool_call",
+		"message:\n    tool call arguments contain placeholder values",
+		"request:\n    command: wc -m <file_path>",
+		"response:\n    Tool call error:",
+		"placeholder argument values: command=<file_path>",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("timeline missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
 func TestWriteRunTimelineUpdateKeepsSubsecondEventOrder(t *testing.T) {
 	base := time.Date(2026, 5, 6, 10, 0, 0, 0, time.UTC)
 	response := RunResponse{

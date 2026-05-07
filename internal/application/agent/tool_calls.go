@@ -15,28 +15,27 @@ func handleUnavailableToolCall(
 	parsed action,
 ) (RunResult, bool, error) {
 	message := "tool is not available: " + parsed.Tool
+	correctionMessage := buildUnavailableToolCorrectionMessage(unavailableToolCorrectionRequest{
+		RequestedTool:  parsed.Tool,
+		AvailableTools: session.availableToolNames,
+	})
 	session.recordTurn(TurnRecord{
-		Index:           turn.index,
-		Status:          run.AgentTurnStatusInvalidToolCall,
-		ActionType:      run.AgentTurnActionTypeToolCall,
-		ToolName:        parsed.Tool,
-		Message:         message,
-		RequestMessages: turn.requestMessages,
-		RawResponse:     turn.content,
-		ResponseFormat:  turn.responseFormat,
-		ResponsePreview: previewModelResponse(turn.content),
-		StartedAt:       turn.startedAt,
-		EndedAt:         turn.endedAt,
+		Index:             turn.index,
+		Status:            run.AgentTurnStatusInvalidToolCall,
+		ActionType:        run.AgentTurnActionTypeToolCall,
+		ToolName:          parsed.Tool,
+		Message:           message,
+		RequestMessages:   turn.requestMessages,
+		RawResponse:       turn.content,
+		ResponseFormat:    turn.responseFormat,
+		CorrectionMessage: correctionMessage,
+		ResponsePreview:   previewModelResponse(turn.content),
+		StartedAt:         turn.startedAt,
+		EndedAt:           turn.endedAt,
 	})
 	session.turns = append(session.turns,
 		assistantAttemptTurn(turn.content),
-		runtimeTurn(
-			outbound.ModelPartKindToolCorrection,
-			buildUnavailableToolCorrectionMessage(unavailableToolCorrectionRequest{
-				RequestedTool:  parsed.Tool,
-				AvailableTools: session.availableToolNames,
-			}),
-		),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
 	)
 
 	return RunResult{}, false, nil
@@ -49,29 +48,28 @@ func handlePlaceholderToolCall(
 	placeholders []string,
 ) (RunResult, bool, error) {
 	message := "tool call arguments contain placeholder values"
+	correctionMessage := buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
+		Placeholders:    placeholders,
+		AvailableTools:  session.availableToolNames,
+		UploadedFileIDs: uploadedFilePaths(session.request.Task),
+	})
 	session.recordTurn(TurnRecord{
-		Index:           turn.index,
-		Status:          run.AgentTurnStatusInvalidToolCall,
-		ActionType:      run.AgentTurnActionTypeToolCall,
-		ToolName:        parsed.Tool,
-		Message:         message,
-		RequestMessages: turn.requestMessages,
-		RawResponse:     turn.content,
-		ResponseFormat:  turn.responseFormat,
-		ResponsePreview: previewModelResponse(turn.content),
-		StartedAt:       turn.startedAt,
-		EndedAt:         turn.endedAt,
+		Index:             turn.index,
+		Status:            run.AgentTurnStatusInvalidToolCall,
+		ActionType:        run.AgentTurnActionTypeToolCall,
+		ToolName:          parsed.Tool,
+		Message:           message,
+		RequestMessages:   turn.requestMessages,
+		RawResponse:       turn.content,
+		ResponseFormat:    turn.responseFormat,
+		CorrectionMessage: correctionMessage,
+		ResponsePreview:   previewModelResponse(turn.content),
+		StartedAt:         turn.startedAt,
+		EndedAt:           turn.endedAt,
 	})
 	session.turns = append(session.turns,
 		assistantAttemptTurn(turn.content),
-		runtimeTurn(
-			outbound.ModelPartKindToolCorrection,
-			buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
-				Placeholders:    placeholders,
-				AvailableTools:  session.availableToolNames,
-				UploadedFileIDs: uploadedFilePaths(session.request.Task),
-			}),
-		),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
 	)
 
 	return RunResult{}, false, nil
@@ -297,28 +295,27 @@ func handleUnavailableNativeToolCall(
 	call outbound.ModelToolCall,
 ) (RunResult, bool, error) {
 	message := "tool is not available: " + call.Name
+	correctionMessage := buildUnavailableToolCorrectionMessage(unavailableToolCorrectionRequest{
+		RequestedTool:  call.Name,
+		AvailableTools: session.availableToolNames,
+	})
 	session.recordTurn(TurnRecord{
-		Index:           turn.index,
-		Status:          run.AgentTurnStatusInvalidToolCall,
-		ActionType:      run.AgentTurnActionTypeToolCall,
-		ToolName:        call.Name,
-		Message:         message,
-		RequestMessages: turn.requestMessages,
-		RawResponse:     turn.content,
-		ResponseFormat:  turn.responseFormat,
-		ResponsePreview: previewModelResponse(turn.content),
-		StartedAt:       turn.startedAt,
-		EndedAt:         turn.endedAt,
+		Index:             turn.index,
+		Status:            run.AgentTurnStatusInvalidToolCall,
+		ActionType:        run.AgentTurnActionTypeToolCall,
+		ToolName:          call.Name,
+		Message:           message,
+		RequestMessages:   turn.requestMessages,
+		RawResponse:       turn.content,
+		ResponseFormat:    turn.responseFormat,
+		CorrectionMessage: correctionMessage,
+		ResponsePreview:   previewModelResponse(turn.content),
+		StartedAt:         turn.startedAt,
+		EndedAt:           turn.endedAt,
 	})
 	session.turns = append(session.turns,
 		assistantAttemptTurn(turn.content),
-		runtimeTurn(
-			outbound.ModelPartKindToolCorrection,
-			buildUnavailableToolCorrectionMessage(unavailableToolCorrectionRequest{
-				RequestedTool:  call.Name,
-				AvailableTools: session.availableToolNames,
-			}),
-		),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
 	)
 
 	return RunResult{}, false, nil
@@ -331,29 +328,28 @@ func handlePlaceholderNativeToolCall(
 	placeholders []string,
 ) (RunResult, bool, error) {
 	message := "tool call arguments contain placeholder values"
+	correctionMessage := buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
+		Placeholders:    placeholders,
+		AvailableTools:  session.availableToolNames,
+		UploadedFileIDs: uploadedFilePaths(session.request.Task),
+	})
 	session.recordTurn(TurnRecord{
-		Index:           turn.index,
-		Status:          run.AgentTurnStatusInvalidToolCall,
-		ActionType:      run.AgentTurnActionTypeToolCall,
-		ToolName:        call.Name,
-		Message:         message,
-		RequestMessages: turn.requestMessages,
-		RawResponse:     turn.content,
-		ResponseFormat:  turn.responseFormat,
-		ResponsePreview: previewModelResponse(turn.content),
-		StartedAt:       turn.startedAt,
-		EndedAt:         turn.endedAt,
+		Index:             turn.index,
+		Status:            run.AgentTurnStatusInvalidToolCall,
+		ActionType:        run.AgentTurnActionTypeToolCall,
+		ToolName:          call.Name,
+		Message:           message,
+		RequestMessages:   turn.requestMessages,
+		RawResponse:       turn.content,
+		ResponseFormat:    turn.responseFormat,
+		CorrectionMessage: correctionMessage,
+		ResponsePreview:   previewModelResponse(turn.content),
+		StartedAt:         turn.startedAt,
+		EndedAt:           turn.endedAt,
 	})
 	session.turns = append(session.turns,
 		assistantAttemptTurn(turn.content),
-		runtimeTurn(
-			outbound.ModelPartKindToolCorrection,
-			buildPlaceholderToolArgumentCorrectionMessage(placeholderToolArgumentCorrectionRequest{
-				Placeholders:    placeholders,
-				AvailableTools:  session.availableToolNames,
-				UploadedFileIDs: uploadedFilePaths(session.request.Task),
-			}),
-		),
+		runtimeTurn(outbound.ModelPartKindToolCorrection, correctionMessage),
 	)
 
 	return RunResult{}, false, nil

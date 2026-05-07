@@ -501,6 +501,10 @@ func agentTurnAction(turn AgentTurnResponse) string {
 }
 
 func agentTurnResponse(turn AgentTurnResponse) string {
+	if turn.Status == "invalid_tool_call" && turn.CorrectionMessage != "" {
+		return turn.CorrectionMessage
+	}
+
 	content := firstNonEmpty(turn.RawResponse, turn.ResponsePreview)
 	if content == "" {
 		return ""

@@ -837,12 +837,13 @@ func TestRunnerRejectsUnavailableToolBeforeToolRunner(t *testing.T) {
 		t.Fatalf("len(tool calls) = %d, want 0", len(tools.calls))
 	}
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
-		index:           1,
-		status:          run.AgentTurnStatusInvalidToolCall,
-		actionType:      run.AgentTurnActionTypeToolCall,
-		toolName:        "sh_script",
-		message:         "tool is not available: sh_script",
-		responsePreview: `{"type":"tool_call","tool":"sh_script","arguments":{"script":"echo hi"}}`,
+		index:              1,
+		status:             run.AgentTurnStatusInvalidToolCall,
+		actionType:         run.AgentTurnActionTypeToolCall,
+		toolName:           "sh_script",
+		message:            "tool is not available: sh_script",
+		correctionContains: `The tool "sh_script" is not available.`,
+		responsePreview:    `{"type":"tool_call","tool":"sh_script","arguments":{"script":"echo hi"}}`,
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
 		index:      2,
@@ -956,12 +957,13 @@ func TestRunnerRejectsPlaceholderToolArgumentsAndContinues(t *testing.T) {
 		t.Fatalf("sandbox_exec command = %q, want corrected file path", tools.calls[0].Arguments["command"])
 	}
 	assertTurn(t, result.AgentTurns, 0, wantTurn{
-		index:           1,
-		status:          run.AgentTurnStatusInvalidToolCall,
-		actionType:      run.AgentTurnActionTypeToolCall,
-		toolName:        "sandbox_exec",
-		message:         "tool call arguments contain placeholder values",
-		responsePreview: `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -m <file_path>"}}`,
+		index:              1,
+		status:             run.AgentTurnStatusInvalidToolCall,
+		actionType:         run.AgentTurnActionTypeToolCall,
+		toolName:           "sandbox_exec",
+		message:            "tool call arguments contain placeholder values",
+		correctionContains: "placeholder argument values: command=<file_path>",
+		responsePreview:    `{"type":"tool_call","tool":"sandbox_exec","arguments":{"command":"wc -m <file_path>"}}`,
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
 		index:      2,
@@ -1384,10 +1386,11 @@ func TestRunnerReturnsMaxTurnsForRepeatedUnavailableToolCalls(t *testing.T) {
 		toolName:   "sh_script",
 	})
 	assertTurn(t, result.AgentTurns, 1, wantTurn{
-		index:      2,
-		status:     run.AgentTurnStatusInvalidToolCall,
-		actionType: run.AgentTurnActionTypeToolCall,
-		toolName:   "sh_script",
+		index:              2,
+		status:             run.AgentTurnStatusInvalidToolCall,
+		actionType:         run.AgentTurnActionTypeToolCall,
+		toolName:           "sh_script",
+		correctionContains: `The tool "sh_script" is not available.`,
 	})
 	assertTurn(t, result.AgentTurns, 2, wantTurn{
 		index:  3,
